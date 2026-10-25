@@ -1108,4 +1108,58 @@ void FlatSplitterPanel::s_on_size_change()
     }
 }
 
+FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::find_panel_by_custom_title(std::string_view title) const
+{
+    const auto iter = std::ranges::find_if(m_panels, [title](const Panel::Ptr& panel) {
+        return panel->m_use_custom_title
+            && std::string_view(panel->m_custom_title.get_ptr(), panel->m_custom_title.get_length()) == title;
+    });
+
+    return iter != m_panels.end() ? *iter : nullptr;
+}
+
+bool FlatSplitterPanel::s_toggle_titled_panels(std::string_view main_title, std::string_view bar_title)
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+        const auto main_panel = splitter->find_panel_by_custom_title(main_title);
+        const auto bar_panel = splitter->find_panel_by_custom_title(bar_title);
+
+        if (!main_panel || !bar_panel)
+            continue;
+
+        if (!main_panel->m_hidden) {
+            // 展開：鎖定和隱藏的面板都不分剩餘空間（get_panels_sizes），所以 bar 要先解鎖才撐得滿
+            bar_panel->m_size_before_expand = bar_panel->m_size;
+            bar_panel->m_locked = false;
+            main_panel->set_hidden(true);
+        } else {
+            // 收合：直接改 m_locked，不走右鍵選單的 Lock（那條路會先 save_sizes()，把展開後的高度存成 bar 的尺寸）
+            if (bar_panel->m_size_before_expand) {
+                bar_panel->m_size = *bar_panel->m_size_before_expand;
+                bar_panel->m_size_before_expand.reset();
+            }
+            bar_panel->m_locked = true;
+            main_panel->set_hidden(false);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+bool FlatSplitterPanel::s_is_titled_panel_hidden(std::string_view main_title, std::string_view bar_title)
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+        const auto main_panel = splitter->find_panel_by_custom_title(main_title);
+
+        if (main_panel && splitter->find_panel_by_custom_title(bar_title))
+            return main_panel->m_hidden;
+    }
+
+    return false;
+}
+
 } // namespace cui::panels::splitter

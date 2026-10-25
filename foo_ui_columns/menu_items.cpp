@@ -8,6 +8,7 @@
 #include "filter_search_bar.h"
 #include "system_appearance_manager.h"
 #include "tab_main_window.h"
+#include "splitter.h"
 
 namespace cui::main_menu {
 
@@ -152,6 +153,21 @@ const MainMenuCommand live_editing{toggle_live_editing_id, "Live editing",
     },
     [] { return g_layout_window.get_layout_editing_active(); }};
 
+// 自編版新增：ESLyric 播放列用 mm://View/Layout/切換播放頁 展開／收合播放頁
+// 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板；找不到時什麼都不做
+constexpr std::string_view now_playing_main_title = "主內容";
+constexpr std::string_view now_playing_bar_title = "播放列";
+
+const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, "切換播放頁",
+    "隱藏或顯示自訂標題為「主內容」的面板，讓同一層自訂標題為「播放列」的面板撐滿或縮回。",
+    [] {
+        panels::splitter::FlatSplitterPanel::s_toggle_titled_panels(now_playing_main_title, now_playing_bar_title);
+    },
+    [] {
+        return panels::splitter::FlatSplitterPanel::s_is_titled_panel_hidden(
+            now_playing_main_title, now_playing_bar_title);
+    }};
+
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},
     .name = "Focus Filter search",
@@ -290,7 +306,7 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
     mainmenu_commands::sort_priority_base + 3, show_status_bar, show_status_pane, show_toolbars);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
-    groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing);
+    groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);

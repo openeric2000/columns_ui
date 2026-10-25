@@ -82,6 +82,11 @@ public:
 
     static void s_on_size_change();
 
+    // 自編版新增（View/Layout/切換播放頁）：在現有的分割面板裡，找同一層自訂標題分別為 main_title、bar_title 的兩個面板，
+    // 隱藏／顯示 main_title 那個，並暫時解除／恢復 bar_title 那個的鎖定，讓它撐滿或縮回，不重建任何面板
+    static bool s_toggle_titled_panels(std::string_view main_title, std::string_view bar_title);
+    static bool s_is_titled_panel_hidden(std::string_view main_title, std::string_view bar_title);
+
 private:
     struct SizeLimit {
         int min_height{};
@@ -147,6 +152,8 @@ private:
         pfc::string8 m_custom_title;
 
         uih::IntegerAndDpi<uint32_t> m_size{150};
+        // 切換播放頁展開時記下原本高度，收合時寫回（只存在記憶體，不寫進設定）
+        std::optional<uih::IntegerAndDpi<uint32_t>> m_size_before_expand;
 
         uie::splitter_item_full_v2_t* create_splitter_item(bool b_set_ptr = true);
 
@@ -198,6 +205,7 @@ private:
 
     std::vector<Panel::Ptr>::iterator find_panel_by_container_wnd(HWND wnd);
     std::vector<Panel::Ptr>::iterator find_panel_by_panel_wnd(HWND wnd);
+    Panel::Ptr find_panel_by_custom_title(std::string_view title) const;
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
