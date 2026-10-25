@@ -34,6 +34,11 @@ void FlatSplitterPanel::Panel::on_size(int cx, int cy)
     RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE);
 }
 
+bool FlatSplitterPanel::Panel::has_custom_title(std::string_view title) const
+{
+    return m_use_custom_title && std::string_view(m_custom_title.get_ptr(), m_custom_title.get_length()) == title;
+}
+
 void FlatSplitterPanel::Panel::on_size()
 {
     RECT rc;

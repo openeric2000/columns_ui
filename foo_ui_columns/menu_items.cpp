@@ -154,9 +154,9 @@ const MainMenuCommand live_editing{toggle_live_editing_id, "Live editing",
     [] { return g_layout_window.get_layout_editing_active(); }};
 
 // 自編版新增：ESLyric 播放列用 mm://View/Layout/切換播放頁 展開／收合播放頁
-// 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板；找不到時什麼都不做
-constexpr std::string_view now_playing_main_title = "主內容";
-constexpr std::string_view now_playing_bar_title = "播放列";
+// 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板（標題常數在 splitter.h）；找不到時什麼都不做
+using panels::splitter::now_playing_bar_title;
+using panels::splitter::now_playing_main_title;
 
 const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, "切換播放頁",
     "隱藏或顯示自訂標題為「主內容」的面板，讓同一層自訂標題為「播放列」的面板撐滿或縮回。",

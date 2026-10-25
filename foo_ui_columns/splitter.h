@@ -5,6 +5,11 @@ namespace cui::panels::splitter {
 
 constexpr auto max_panel_dimension = 0x7fff;
 
+// 自編版新增（View/Layout/切換播放頁）：主內容與播放列兩個面板的自訂標題
+// 播放列面板的子視窗（ESLyric）另外會掛 s_now_playing_bar_subclass_proc
+inline constexpr std::string_view now_playing_main_title = "主內容";
+inline constexpr std::string_view now_playing_bar_title = "播放列";
+
 enum Orientation {
     horizontal,
     vertical,
@@ -155,6 +160,8 @@ private:
         // 切換播放頁展開時記下原本高度，收合時寫回（只存在記憶體，不寫進設定）
         std::optional<uih::IntegerAndDpi<uint32_t>> m_size_before_expand;
 
+        bool has_custom_title(std::string_view title) const;
+
         uie::splitter_item_full_v2_t* create_splitter_item(bool b_set_ptr = true);
 
         void set_from_splitter_item(const uie::splitter_item_t* p_source);
@@ -223,6 +230,12 @@ private:
     static wil::unique_hfont g_font_menu_vertical;
     static unsigned g_count;
     static pfc::ptr_list_t<FlatSplitterPanel> g_instances;
+
+    // 自編版新增（切換播放頁）：上次切換的時間（GetTickCount64），給播放列的雙擊處理判斷第一下有沒有觸發切換
+    static ULONGLONG s_last_titled_panels_toggle_tick;
+
+    static LRESULT CALLBACK s_now_playing_bar_subclass_proc(
+        HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data);
 
 public:
     FlatSplitterPanel() = default;

@@ -8,6 +8,13 @@ ui_extension::window_host_factory<FlatSplitterPanel::FlatSplitterPanelHost> g_sp
 unsigned FlatSplitterPanel::g_count = 0;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_horizontal;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_vertical;
+ULONGLONG FlatSplitterPanel::s_last_titled_panels_toggle_tick = 0;
+
+namespace {
+
+constexpr UINT_PTR now_playing_bar_subclass_id = 1;
+
+} // namespace
 
 void FlatSplitterPanel::insert_panel(size_t index, const uie::splitter_item_t* p_item)
 {
@@ -139,6 +146,10 @@ void FlatSplitterPanel::refresh_children()
                     panel->m_wnd = wnd_host;
                     panel->m_wnd_child = wnd_panel;
                     panel->m_child = p_ext;
+
+                    // 自編版新增：Layout 按 Apply 會重建面板，所以在建立子視窗這裡掛，不在切換命令裡掛
+                    if (panel->has_custom_title(now_playing_bar_title))
+                        SetWindowSubclass(wnd_panel, s_now_playing_bar_subclass_proc, now_playing_bar_subclass_id, 0);
 
                     panel->m_size_limits.min_height = mmi.ptMinTrackSize.y;
                     panel->m_size_limits.min_width = mmi.ptMinTrackSize.x;
@@ -954,6 +965,9 @@ void FlatSplitterPanel::FlatSplitterPanelHost::relinquish_ownership(HWND wnd)
     if (GetAncestor(wnd, GA_PARENT) == panel->m_wnd)
         console::warning("window left by ui extension");
 
+    // 自編版新增：視窗移到別的地方就不再是這裡的播放列（沒掛過時什麼都不做）
+    RemoveWindowSubclass(wnd, s_now_playing_bar_subclass_proc, now_playing_bar_subclass_id);
+
     panel->m_wnd_child = nullptr;
     panel->m_wnd = nullptr;
     panel->m_child.release();
@@ -1110,10 +1124,8 @@ void FlatSplitterPanel::s_on_size_change()
 
 FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::find_panel_by_custom_title(std::string_view title) const
 {
-    const auto iter = std::ranges::find_if(m_panels, [title](const Panel::Ptr& panel) {
-        return panel->m_use_custom_title
-            && std::string_view(panel->m_custom_title.get_ptr(), panel->m_custom_title.get_length()) == title;
-    });
+    const auto iter
+        = std::ranges::find_if(m_panels, [title](const Panel::Ptr& panel) { return panel->has_custom_title(title); });
 
     return iter != m_panels.end() ? *iter : nullptr;
 }
@@ -1127,6 +1139,8 @@ bool FlatSplitterPanel::s_toggle_titled_panels(std::string_view main_title, std:
 
         if (!main_panel || !bar_panel)
             continue;
+
+        s_last_titled_panels_toggle_tick = GetTickCount64();
 
         if (!main_panel->m_hidden) {
             // 展開：鎖定和隱藏的面板都不分剩餘空間（get_panels_sizes），所以 bar 要先解鎖才撐得滿
@@ -1160,6 +1174,38 @@ bool FlatSplitterPanel::s_is_titled_panel_hidden(std::string_view main_title, st
     }
 
     return false;
+}
+
+LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
+    HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
+{
+    // ref_data 為 1：剛吞掉一個雙擊，接著那個放開也要吞掉
+    switch (msg) {
+    case WM_LBUTTONDBLCLK:
+        // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它。
+        // 第一下剛觸發切換播放頁：第二下整個吞掉，不然會再切一次；
+        // 否則當成一般的按下，連點下一首這類按鈕照常作用
+        if (GetTickCount64() - s_last_titled_panels_toggle_tick <= GetDoubleClickTime()) {
+            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 1);
+            return 0;
+        }
+        return DefSubclassProc(wnd, WM_LBUTTONDOWN, wp, lp);
+    case WM_LBUTTONDOWN:
+        // 上一個放開沒送到這裡（例如按著拖出去）
+        if (ref_data)
+            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 0);
+        break;
+    case WM_LBUTTONUP:
+        if (ref_data) {
+            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 0);
+            return 0;
+        }
+        break;
+    case WM_NCDESTROY:
+        RemoveWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id);
+        break;
+    }
+    return DefSubclassProc(wnd, msg, wp, lp);
 }
 
 } // namespace cui::panels::splitter
