@@ -155,18 +155,64 @@ const MainMenuCommand live_editing{toggle_live_editing_id, "Live editing",
 
 // 自編版新增：ESLyric 播放列用 mm://View/Layout/切換播放頁 展開／收合播放頁
 // 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板（標題常數在 splitter.h）；找不到時什麼都不做
-using panels::splitter::now_playing_bar_title;
-using panels::splitter::now_playing_main_title;
+using panels::splitter::FlatSplitterPanel;
 
 const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, "切換播放頁",
-    "隱藏或顯示自訂標題為「主內容」的面板，讓同一層自訂標題為「播放列」的面板撐滿或縮回。",
+    "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放時不展開。",
     [] {
-        panels::splitter::FlatSplitterPanel::s_toggle_titled_panels(now_playing_main_title, now_playing_bar_title);
+        // 沒在播放（停止）時不展開；暫停算播放中。收合一律可以
+        if (!FlatSplitterPanel::s_is_now_playing_expanded() && !playback_control::get()->is_playing())
+            return;
+
+        FlatSplitterPanel::s_toggle_now_playing();
     },
-    [] {
-        return panels::splitter::FlatSplitterPanel::s_is_titled_panel_hidden(
-            now_playing_main_title, now_playing_bar_title);
-    }};
+    [] { return FlatSplitterPanel::s_is_now_playing_expanded(); }};
+
+// 自編版新增：播放停止（按停止、清單播完）時，展開中的播放頁自動收回；換曲與結束 fb2k 不處理
+class NowPlayingViewPlayCallback : public play_callback_static {
+public:
+    unsigned get_flags() override { return flag_on_playback_stop; }
+
+    void on_playback_stop(play_control::t_stop_reason reason) override
+    {
+        if (reason == play_control::stop_reason_starting_another || reason == play_control::stop_reason_shutting_down)
+            return;
+
+        if (FlatSplitterPanel::s_is_now_playing_expanded())
+            FlatSplitterPanel::s_toggle_now_playing();
+    }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    void on_playback_new_track(metadb_handle_ptr track) override {}
+    void on_playback_seek(double time) override {}
+    void on_playback_pause(bool state) override {}
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_playback_time(double time) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<NowPlayingViewPlayCallback> now_playing_view_play_callback;
+
+// 自編版新增：標題格式欄位 %cui_now_playing_expanded%，播放頁展開時為 1、收合時不存在，給 ESLyric 佈局切換 ⌃／⌄
+// 標題格式可能在別的執行緒算，所以讀 atomic，不碰分割面板本身
+class NowPlayingViewFieldProvider : public metadb_display_field_provider {
+public:
+    t_uint32 get_field_count() override { return 1; }
+    void get_field_name(t_uint32 index, pfc::string_base& out) override { out = "cui_now_playing_expanded"; }
+
+    bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
+    {
+        if (!FlatSplitterPanel::s_now_playing_expanded_for_fields)
+            return false;
+
+        out->write(titleformat_inputtypes::meta, "1");
+        return true;
+    }
+};
+
+service_factory_single_t<NowPlayingViewFieldProvider> now_playing_view_field_provider;
 
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},

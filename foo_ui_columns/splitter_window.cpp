@@ -8,7 +8,8 @@ ui_extension::window_host_factory<FlatSplitterPanel::FlatSplitterPanelHost> g_sp
 unsigned FlatSplitterPanel::g_count = 0;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_horizontal;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_vertical;
-ULONGLONG FlatSplitterPanel::s_last_titled_panels_toggle_tick = 0;
+ULONGLONG FlatSplitterPanel::s_last_now_playing_toggle_tick = 0;
+std::atomic<bool> FlatSplitterPanel::s_now_playing_expanded_for_fields{false};
 
 namespace {
 
@@ -185,6 +186,9 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
     pfc::list_t<unsigned> sizes;
     get_panels_sizes(width, height, sizes);
     const auto count = m_panels.size();
+    // 自編版新增：播放列的容器另外處理，見 s_toggle_now_playing
+    const auto now_playing_bar = get_now_playing_bar_panel();
+    RECT now_playing_bar_rect{};
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_INVALIDATE);
 
@@ -200,13 +204,28 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
                 unsigned cx = get_orientation() == horizontal ? size - get_panel_divider_size(n) : width;
                 unsigned cy = get_orientation() == horizontal ? height : size - get_panel_divider_size(n);
 
-                dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_BOTTOM, x, y, cx, cy, 0);
+                if (m_panels[n] == now_playing_bar) {
+                    // 排版算給播放列的位置留著當收合時的視窗區域；容器本身撐滿整個分割面板、疊在最上層
+                    now_playing_bar_rect = {static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + cx),
+                        static_cast<LONG>(y + cy)};
+                    dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_TOP, 0, 0, width, height, 0);
+                } else {
+                    dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_BOTTOM, x, y, cx, cy, 0);
+                }
 
                 size_cumulative += size;
             }
         }
         EndDeferWindowPos(dwp);
     }
+
+    if (now_playing_bar && now_playing_bar->m_wnd) {
+        // 收合：只露出排版給播放列的位置；展開：不設區域，整塊蓋住主內容（區域物件交給系統管理）
+        SetWindowRgn(now_playing_bar->m_wnd,
+            m_now_playing_expanded ? nullptr : CreateRectRgnIndirect(&now_playing_bar_rect), TRUE);
+        s_now_playing_expanded_for_fields = m_now_playing_expanded;
+    }
+
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
 }
 
@@ -1130,47 +1149,40 @@ FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::find_panel_by_custom_title(std:
     return iter != m_panels.end() ? *iter : nullptr;
 }
 
-bool FlatSplitterPanel::s_toggle_titled_panels(std::string_view main_title, std::string_view bar_title)
+FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::get_now_playing_bar_panel() const
+{
+    if (get_orientation() != vertical || !find_panel_by_custom_title(now_playing_main_title))
+        return nullptr;
+
+    return find_panel_by_custom_title(now_playing_bar_title);
+}
+
+bool FlatSplitterPanel::s_toggle_now_playing()
 {
     for (size_t index = 0; index < g_instances.get_count(); index++) {
         const auto splitter = g_instances[index];
-        const auto main_panel = splitter->find_panel_by_custom_title(main_title);
-        const auto bar_panel = splitter->find_panel_by_custom_title(bar_title);
 
-        if (!main_panel || !bar_panel)
+        if (!splitter->get_now_playing_bar_panel())
             continue;
 
-        s_last_titled_panels_toggle_tick = GetTickCount64();
-
-        if (!main_panel->m_hidden) {
-            // 展開：鎖定和隱藏的面板都不分剩餘空間（get_panels_sizes），所以 bar 要先解鎖才撐得滿
-            bar_panel->m_size_before_expand = bar_panel->m_size;
-            bar_panel->m_locked = false;
-            main_panel->set_hidden(true);
-        } else {
-            // 收合：直接改 m_locked，不走右鍵選單的 Lock（那條路會先 save_sizes()，把展開後的高度存成 bar 的尺寸）
-            if (bar_panel->m_size_before_expand) {
-                bar_panel->m_size = *bar_panel->m_size_before_expand;
-                bar_panel->m_size_before_expand.reset();
-            }
-            bar_panel->m_locked = true;
-            main_panel->set_hidden(false);
-        }
-
+        s_last_now_playing_toggle_tick = GetTickCount64();
+        splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
+        splitter->on_size_changed();
+        // 收合時露出來的主內容馬上重畫，不等訊息迴圈
+        RedrawWindow(splitter->get_wnd(), nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
         return true;
     }
 
     return false;
 }
 
-bool FlatSplitterPanel::s_is_titled_panel_hidden(std::string_view main_title, std::string_view bar_title)
+bool FlatSplitterPanel::s_is_now_playing_expanded()
 {
     for (size_t index = 0; index < g_instances.get_count(); index++) {
         const auto splitter = g_instances[index];
-        const auto main_panel = splitter->find_panel_by_custom_title(main_title);
 
-        if (main_panel && splitter->find_panel_by_custom_title(bar_title))
-            return main_panel->m_hidden;
+        if (splitter->get_now_playing_bar_panel())
+            return splitter->m_now_playing_expanded;
     }
 
     return false;
@@ -1185,7 +1197,7 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它。
         // 第一下剛觸發切換播放頁：第二下整個吞掉，不然會再切一次；
         // 否則當成一般的按下，連點下一首這類按鈕照常作用
-        if (GetTickCount64() - s_last_titled_panels_toggle_tick <= GetDoubleClickTime()) {
+        if (GetTickCount64() - s_last_now_playing_toggle_tick <= GetDoubleClickTime()) {
             SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 1);
             return 0;
         }

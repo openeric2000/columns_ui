@@ -87,10 +87,14 @@ public:
 
     static void s_on_size_change();
 
-    // 自編版新增（View/Layout/切換播放頁）：在現有的分割面板裡，找同一層自訂標題分別為 main_title、bar_title 的兩個面板，
-    // 隱藏／顯示 main_title 那個，並暫時解除／恢復 bar_title 那個的鎖定，讓它撐滿或縮回，不重建任何面板
-    static bool s_toggle_titled_panels(std::string_view main_title, std::string_view bar_title);
-    static bool s_is_titled_panel_hidden(std::string_view main_title, std::string_view bar_title);
+    // 自編版新增（View/Layout/切換播放頁）：直向分割面板裡同一層有自訂標題「主內容」「播放列」兩個面板時，
+    // 播放列的容器一直撐滿整個分割面板、疊在最上層，收合時用視窗區域只露出排版給它的位置，展開時拿掉區域整塊蓋住主內容。
+    // 切換時沒有任何視窗移動或改變大小（改大小時 ESLyric 會先貼一格舊畫面、主內容要重新排版，都會閃）。
+    // 展開狀態只存在記憶體，重開一律收合
+    static bool s_toggle_now_playing();
+    static bool s_is_now_playing_expanded();
+    // 給標題格式欄位用（可能在別的執行緒讀），跟 m_now_playing_expanded 同步
+    static std::atomic<bool> s_now_playing_expanded_for_fields;
 
 private:
     struct SizeLimit {
@@ -157,8 +161,6 @@ private:
         pfc::string8 m_custom_title;
 
         uih::IntegerAndDpi<uint32_t> m_size{150};
-        // 切換播放頁展開時記下原本高度，收合時寫回（只存在記憶體，不寫進設定）
-        std::optional<uih::IntegerAndDpi<uint32_t>> m_size_before_expand;
 
         bool has_custom_title(std::string_view title) const;
 
@@ -213,12 +215,15 @@ private:
     std::vector<Panel::Ptr>::iterator find_panel_by_container_wnd(HWND wnd);
     std::vector<Panel::Ptr>::iterator find_panel_by_panel_wnd(HWND wnd);
     Panel::Ptr find_panel_by_custom_title(std::string_view title) const;
+    // 直向且同一層有主內容與播放列兩個面板時傳回播放列，否則 nullptr
+    Panel::Ptr get_now_playing_bar_panel() const;
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
     HWND m_wnd{nullptr};
 
     bool m_refresh_children_in_progress{};
+    bool m_now_playing_expanded{};
     int m_last_position{};
     size_t m_panel_dragging{};
     bool m_panel_dragging_valid{false};
@@ -232,7 +237,7 @@ private:
     static pfc::ptr_list_t<FlatSplitterPanel> g_instances;
 
     // 自編版新增（切換播放頁）：上次切換的時間（GetTickCount64），給播放列的雙擊處理判斷第一下有沒有觸發切換
-    static ULONGLONG s_last_titled_panels_toggle_tick;
+    static ULONGLONG s_last_now_playing_toggle_tick;
 
     static LRESULT CALLBACK s_now_playing_bar_subclass_proc(
         HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data);
