@@ -743,7 +743,15 @@ bool FlatSplitterPanel::is_point_ours(
 
 int FlatSplitterPanel::get_panel_divider_size(size_t index) const
 {
-    return index + 1 < m_panels.size() ? settings::custom_splitter_divider_width : 0;
+    if (index + 1 >= m_panels.size())
+        return 0;
+
+    // 自編版新增：播放列上下不留分隔線。播放列高度鎖定、不用拖曳，分隔線只會在進度條上方、播放列下方各多一條灰帶
+    const auto now_playing_bar = get_now_playing_bar_panel();
+    if (now_playing_bar && (m_panels[index] == now_playing_bar || m_panels[index + 1] == now_playing_bar))
+        return 0;
+
+    return settings::custom_splitter_divider_width;
 }
 
 bool FlatSplitterPanel::set_config_item(
