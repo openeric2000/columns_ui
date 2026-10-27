@@ -201,31 +201,121 @@ play_callback_static_factory_t<NowPlayingViewPlayCallback> now_playing_view_play
 fbh::ConfigUint32 now_playing_style(
     GUID{0xdd906dca, 0x9b49, 0x492c, {0x8b, 0xb2, 0x43, 0xb9, 0xef, 0xe4, 0xf1, 0x8f}}, 1);
 
-void set_now_playing_style(uint32_t style)
+// 對正在播放的曲目送一次 dispatch_refresh，讓 ESLyric 重算標題格式與 visibility
+void refresh_now_playing_track()
 {
-    now_playing_style = style;
-    FlatSplitterPanel::s_refresh_now_playing();
-
     metadb_handle_ptr track;
     if (playback_control::get()->get_now_playing(track))
         metadb_io::get()->dispatch_refresh(track);
 }
 
+void set_now_playing_style(uint32_t style)
+{
+    now_playing_style = style;
+    FlatSplitterPanel::s_refresh_now_playing();
+    refresh_now_playing_track();
+}
+
+// 自編版新增：暫停時凍結進度條用的位置與曲長（毫秒），沒在暫停時位置為 -1
+// Output 用 ASIO+DSD 時，暫停中 fb2k 回報的位置會每 0.2 秒往前爬又退回（2026-10-27 量測），ESLyric 的 seekbar 跟著抖，
+// 所以按下暫停時記下當下的值，ESLyric 佈局暫停時改顯示讀這兩個值的 progressbar；暫停中跳轉改記跳轉目標
+// 標題格式可能在別的執行緒算，所以存 atomic；欄位以位置判斷有沒有值，曲長只在位置有值時讀，所以先寫曲長再寫位置
+std::atomic<int64_t> paused_position_ms{-1};
+std::atomic<int64_t> paused_length_ms{-1};
+
+void clear_paused_position()
+{
+    if (paused_position_ms.exchange(-1) >= 0)
+        refresh_now_playing_track();
+}
+
+void set_paused_position(double position)
+{
+    const double length = playback_control::get()->playback_get_length();
+
+    // 長度不明（網路串流等）沒有進度可凍結
+    if (length <= 0) {
+        clear_paused_position();
+        return;
+    }
+
+    paused_length_ms = std::llround(length * 1000);
+    paused_position_ms = std::llround(std::clamp(position, 0.0, length) * 1000);
+    refresh_now_playing_track();
+}
+
+class PausedPositionPlayCallback : public play_callback_static {
+public:
+    unsigned get_flags() override
+    {
+        return flag_on_playback_new_track | flag_on_playback_seek | flag_on_playback_pause | flag_on_playback_stop;
+    }
+
+    // 換曲時通常已在播放；開 fb2k 時恢復成暫停的情況，換曲當下就是暫停
+    void on_playback_new_track(metadb_handle_ptr track) override
+    {
+        const auto api = playback_control::get();
+        if (api->is_paused())
+            set_paused_position(api->playback_get_position());
+        else
+            clear_paused_position();
+    }
+
+    void on_playback_seek(double time) override
+    {
+        if (playback_control::get()->is_paused())
+            set_paused_position(time);
+        else
+            clear_paused_position();
+    }
+
+    void on_playback_pause(bool state) override
+    {
+        if (state)
+            set_paused_position(playback_control::get()->playback_get_position());
+        else
+            clear_paused_position();
+    }
+
+    void on_playback_stop(play_control::t_stop_reason reason) override { clear_paused_position(); }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_playback_time(double time) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<PausedPositionPlayCallback> paused_position_play_callback;
+
 // 自編版新增：標題格式欄位 %cui_now_playing_expanded%，播放頁展開時為 1、收合時不存在，給 ESLyric 佈局切換 ⌃／⌄
 // 以及 %cui_now_playing_style%（展開頁樣式 1～3）
+// 以及 %cui_paused_position_ms%／%cui_paused_length_ms%（暫停時的位置與曲長，毫秒；沒在暫停時不存在）
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 2; }
+    t_uint32 get_field_count() override { return 4; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
-        out = index == 0 ? "cui_now_playing_expanded" : "cui_now_playing_style";
+        constexpr const char* names[]{
+            "cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms", "cui_paused_length_ms"};
+        out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            return true;
+        }
+
+        if (index >= 2) {
+            const auto position = paused_position_ms.load();
+            if (position < 0)
+                return false;
+
+            out->write(titleformat_inputtypes::meta, pfc::format_int(index == 2 ? position : paused_length_ms.load()));
             return true;
         }
 
