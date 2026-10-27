@@ -214,6 +214,27 @@ public:
 
 service_factory_single_t<NowPlayingViewFieldProvider> now_playing_view_field_provider;
 
+// 自編版新增：ESLyric 展開頁的大封面用 mm://View/Layout/顯示封面大圖 開 foobar2000 picture viewer
+// 雙擊播放列會被轉成第二次按下（見 splitter_window.cpp 的 s_now_playing_bar_subclass_proc），
+// 所以雙擊間隔內的第二次呼叫直接略過，不會開出兩個視窗
+const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, "顯示封面大圖",
+    "在 foobar2000 picture viewer 開啟正在播放曲目的封面。",
+    [] {
+        static ULONGLONG last_tick{};
+        const auto now = GetTickCount64();
+        if (now - last_tick <= GetDoubleClickTime())
+            return;
+        last_tick = now;
+
+        metadb_handle_ptr track;
+        if (!playback_control::get()->get_now_playing(track))
+            return;
+
+        if (fb2k::imageViewer::ptr api; fb2k::imageViewer::tryGet(api))
+            api->load_and_show(core_api::get_main_window(), pfc::list_single_ref_t<metadb_handle_ptr>(track),
+                album_art_ids::cover_front);
+    }};
+
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},
     .name = "Focus Filter search",
@@ -352,7 +373,8 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
     mainmenu_commands::sort_priority_base + 3, show_status_bar, show_status_pane, show_toolbars);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
-    groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view);
+    groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
+    show_now_playing_cover);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);
