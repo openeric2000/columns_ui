@@ -198,7 +198,6 @@ play_callback_static_factory_t<NowPlayingViewPlayCallback> now_playing_view_play
 // 自編版新增：展開頁樣式，1 置中（預設）、2 靠左＋VU 表、3 靠左＋資訊卡，ESLyric 佈局用 %cui_now_playing_style% 切換
 // ESLyric 的 visibility 不會隨時重算，所以切換後對正在播放的曲目送一次 dispatch_refresh，讓佈局重新套用
 // 樣式 2 的 VU 表是另一個面板，由分割面板排版時疊上去，所以切換後也要重新排版
-constexpr uint32_t now_playing_style_count = 3;
 fbh::ConfigUint32 now_playing_style(
     GUID{0xdd906dca, 0x9b49, 0x492c, {0x8b, 0xb2, 0x43, 0xb9, 0xef, 0xe4, 0xf1, 0x8f}}, 1);
 
@@ -265,18 +264,19 @@ const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, 
     "展開頁的封面與歌詞整組置中。", [] { set_now_playing_style(1); }, {},
     [] { return now_playing_style.get() == 1; }};
 
+// 2026-10-27 使用者覺得樣式 2 還不對，先藏起來：選單項目要按住 Shift 才出現，也不放進切換循環
 const MainMenuCommand now_playing_style_spectrum{now_playing_style_spectrum_id, "展開頁：靠左＋VU 表",
     "展開頁的封面靠左，右邊顯示 VU 表（版面裡自訂標題「展開頁右側」的面板）。", [] { set_now_playing_style(2); }, {},
-    [] { return now_playing_style.get() == 2; }};
+    [] { return now_playing_style.get() == 2; }, true};
 
 const MainMenuCommand now_playing_style_info{now_playing_style_info_id, "展開頁：靠左＋資訊卡",
     "展開頁的封面靠左，右邊顯示曲目資訊。", [] { set_now_playing_style(3); }, {},
     [] { return now_playing_style.get() == 3; }};
 
-// ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，依序換到下一種
+// ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，在置中與靠左＋資訊卡之間切換（樣式 2 暫時不放進來）
 const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, "切換展開頁樣式",
-    "依序切換展開頁樣式：置中、靠左＋VU 表、靠左＋資訊卡。",
-    [] { set_now_playing_style(now_playing_style.get() % now_playing_style_count + 1); }};
+    "在展開頁樣式「置中」與「靠左＋資訊卡」之間切換。",
+    [] { set_now_playing_style(now_playing_style.get() == 1 ? 3 : 1); }};
 
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},
