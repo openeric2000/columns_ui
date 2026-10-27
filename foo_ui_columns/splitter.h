@@ -9,6 +9,9 @@ constexpr auto max_panel_dimension = 0x7fff;
 // 播放列面板的子視窗（ESLyric）另外會掛 s_now_playing_bar_subclass_proc
 inline constexpr std::string_view now_playing_main_title = "主內容";
 inline constexpr std::string_view now_playing_bar_title = "播放列";
+// 自編版新增：播放列高度固定為 ESLyric 佈局 main.xml 播放列（bar）的高度 138 DIP，改了那邊要跟著改
+// 版面裡存的高度會跟著存檔時的 DPI 換算而有誤差（219 實測少約 5px），播放列頂端的進度條就會被切掉
+inline constexpr int now_playing_bar_height = 138;
 // 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
 inline constexpr std::string_view now_playing_side_title = "展開頁右側";
 

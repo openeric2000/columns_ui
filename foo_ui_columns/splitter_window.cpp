@@ -337,13 +337,22 @@ void FlatSplitterPanel::get_panels_sizes(
 
     int available_size = get_orientation() == horizontal ? client_width : client_height;
     int available_parts{};
+    const auto now_playing_bar = get_now_playing_bar_panel();
 
     for (auto&& [index, panel, size_info] :
         ranges::views::zip(ranges::views::iota(size_t{}, count), m_panels, size_infos)) {
         const auto panel_divider_size = get_panel_divider_size(index);
 
-        const auto size
-            = std::min(max_panel_dimension, panel->m_hidden ? 0 : static_cast<int>(panel->m_size.get_scaled_value()));
+        const auto size = [&] {
+            if (panel->m_hidden)
+                return 0;
+
+            // 自編版新增：播放列高度固定，跟 ESLyric 佈局一致（見 now_playing_bar_height）
+            if (panel == now_playing_bar && get_orientation() == vertical)
+                return uih::scale_dpi_value(now_playing_bar_height);
+
+            return std::min(max_panel_dimension, static_cast<int>(panel->m_size.get_scaled_value()));
+        }();
 
         available_size -= size + panel_divider_size;
         size_info.size = size + panel_divider_size;
