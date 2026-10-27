@@ -9,6 +9,8 @@ constexpr auto max_panel_dimension = 0x7fff;
 // 播放列面板的子視窗（ESLyric）另外會掛 s_now_playing_bar_subclass_proc
 inline constexpr std::string_view now_playing_main_title = "主內容";
 inline constexpr std::string_view now_playing_bar_title = "播放列";
+// 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
+inline constexpr std::string_view now_playing_side_title = "展開頁右側";
 
 enum Orientation {
     horizontal,
@@ -93,6 +95,8 @@ public:
     // 展開狀態只存在記憶體，重開一律收合
     static bool s_toggle_now_playing();
     static bool s_is_now_playing_expanded();
+    // 展開頁樣式改變時重新排版，讓「展開頁右側」面板跟著顯示或隱藏
+    static void s_refresh_now_playing();
     // 給標題格式欄位用（可能在別的執行緒讀），跟 m_now_playing_expanded 同步
     static std::atomic<bool> s_now_playing_expanded_for_fields;
 
@@ -217,6 +221,8 @@ private:
     Panel::Ptr find_panel_by_custom_title(std::string_view title) const;
     // 直向且同一層有主內容與播放列兩個面板時傳回播放列，否則 nullptr
     Panel::Ptr get_now_playing_bar_panel() const;
+    // 有播放列時，同一層自訂標題「展開頁右側」的面板，否則 nullptr
+    Panel::Ptr get_now_playing_side_panel() const;
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;

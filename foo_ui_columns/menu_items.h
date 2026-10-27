@@ -39,4 +39,7 @@ void on_lock_window_size_changed();
 
 } // namespace commands
 
+// 自編版新增：目前的展開頁樣式（1 置中、2 靠左＋VU 表、3 靠左＋資訊卡）
+uint32_t get_now_playing_style();
+
 } // namespace cui::main_menu

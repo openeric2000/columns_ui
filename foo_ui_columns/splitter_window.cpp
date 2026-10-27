@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "splitter.h"
+#include "menu_items.h"
 
 namespace cui::panels::splitter {
 
@@ -168,12 +169,17 @@ void FlatSplitterPanel::refresh_children()
     on_size_changed();
 
     if (IsWindowVisible(get_wnd())) {
+        // 自編版新增：展開頁右側的容器只由 on_size_changed 決定顯示與否，這裡不強制顯示
+        const auto now_playing_side = get_now_playing_side_panel();
+
         for (auto&& panel : created_panels) {
             if (!panel->m_wnd_child)
                 continue;
 
             ShowWindow(panel->m_wnd_child, SW_SHOWNORMAL);
-            ShowWindow(panel->m_wnd, SW_SHOWNORMAL);
+
+            if (panel != now_playing_side)
+                ShowWindow(panel->m_wnd, SW_SHOWNORMAL);
         }
 
         get_host()->on_size_limit_change(get_wnd(), uie::size_limit_all);
@@ -186,8 +192,9 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
     pfc::list_t<unsigned> sizes;
     get_panels_sizes(width, height, sizes);
     const auto count = m_panels.size();
-    // 自編版新增：播放列的容器另外處理，見 s_toggle_now_playing
+    // 自編版新增：播放列的容器另外處理，見 s_toggle_now_playing；展開頁右側（VU 表）排完播放列後再疊上去
     const auto now_playing_bar = get_now_playing_bar_panel();
+    const auto now_playing_side = get_now_playing_side_panel();
     RECT now_playing_bar_rect{};
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_INVALIDATE);
@@ -209,6 +216,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
                     now_playing_bar_rect = {static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + cx),
                         static_cast<LONG>(y + cy)};
                     dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_TOP, 0, 0, width, height, 0);
+                } else if (m_panels[n] == now_playing_side) {
+                    // 位置在下面另外設定
                 } else {
                     dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_BOTTOM, x, y, cx, cy, 0);
                 }
@@ -224,6 +233,24 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         SetWindowRgn(now_playing_bar->m_wnd,
             m_now_playing_expanded ? nullptr : CreateRectRgnIndirect(&now_playing_bar_rect), TRUE);
         s_now_playing_expanded_for_fields = m_now_playing_expanded;
+    }
+
+    if (now_playing_side && now_playing_side->m_wnd) {
+        // 展開且樣式 2 時疊在播放列（ESLyric）上，對齊 main.xml 樣式 2 的右側面板：
+        // 寬 640、離右邊 100，在展開區（扣掉播放列高度）垂直置中；高度照 VU 表外觀 Modern antonyb 的比例 830×199
+        // main.xml 的右側面板寬度、右留白改了，這裡要跟著改
+        if (m_now_playing_expanded && main_menu::get_now_playing_style() == 2) {
+            const int stage_height = gsl::narrow<int>(height) - (now_playing_bar_rect.bottom - now_playing_bar_rect.top);
+            const int side_width = uih::scale_dpi_value(640);
+            const int side_height = MulDiv(side_width, 199, 830);
+            const int x = gsl::narrow<int>(width) - uih::scale_dpi_value(100) - side_width;
+            const int y = std::max(0, (stage_height - side_height) / 2);
+            SetWindowPos(
+                now_playing_side->m_wnd, HWND_TOP, x, y, side_width, side_height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+        } else {
+            SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
+                SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
     }
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
@@ -1155,6 +1182,24 @@ FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::get_now_playing_bar_panel() con
         return nullptr;
 
     return find_panel_by_custom_title(now_playing_bar_title);
+}
+
+FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::get_now_playing_side_panel() const
+{
+    if (!get_now_playing_bar_panel())
+        return nullptr;
+
+    return find_panel_by_custom_title(now_playing_side_title);
+}
+
+void FlatSplitterPanel::s_refresh_now_playing()
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+
+        if (splitter->get_now_playing_side_panel())
+            splitter->on_size_changed();
+    }
 }
 
 bool FlatSplitterPanel::s_toggle_now_playing()
