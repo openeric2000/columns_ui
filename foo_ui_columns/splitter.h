@@ -237,11 +237,13 @@ private:
     void on_now_playing_animation_frame();
     // 動畫目前這一刻的播放列視窗區域
     RECT get_now_playing_animation_rect(unsigned width, unsigned height) const;
-    // 自編版新增（展開頁動畫）：從完全展開開始收合時，改用截圖疊圖（見 start_now_playing_animation）
-    bool start_now_playing_snapshot_collapse();
-    void on_now_playing_snapshot_frame();
-    // 截圖視窗目前露出部分的上緣（截圖視窗座標）
-    int get_now_playing_snapshot_top() const;
+    // 自編版新增（展開頁動畫 B 款）：展開頁截圖整頁從播放列後面滑上來／滑下去（見 start_now_playing_animation）
+    bool start_now_playing_slide();
+    void on_now_playing_slide_frame();
+    // 截圖視窗目前往下偏移多少：0＝蓋住整個展開頁，展開頁高度＝整個收到播放列後面
+    int get_now_playing_slide_offset() const;
+    // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
+    void finish_now_playing_slide();
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
@@ -257,10 +259,13 @@ private:
     // 每格重畫時間的移動平均（毫秒），決定每格等幾次螢幕更新；同一次動畫裡只往上調。還沒畫第一格時是空的
     std::optional<double> m_now_playing_animation_paint_average;
     int m_now_playing_animation_refreshes_per_frame{1};
-    // 收合用的截圖視窗（蓋在展開頁原位、顯示收合前一刻的畫面）與它的動畫開始時間、高度
+    // B 款：截圖視窗（展開時固定蓋住展開頁、收合時跟著往下移），
+    // 以及這一段滑動的開始時間、展開頁在螢幕上的位置、起點偏移與方向
     HWND m_now_playing_snapshot_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
-    int m_now_playing_snapshot_height{};
+    RECT m_now_playing_slide_rect{};
+    int m_now_playing_slide_from{};
+    bool m_now_playing_slide_expanding{};
     int m_last_position{};
     size_t m_panel_dragging{};
     bool m_panel_dragging_valid{false};

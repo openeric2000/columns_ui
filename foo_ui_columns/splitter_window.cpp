@@ -42,11 +42,29 @@ double cubic_bezier(double x1, double y1, double x2, double y2, double x)
     return sample(y1, y2, t);
 }
 
-// 自編版新增（展開頁動畫）：收合時蓋在展開頁原位的截圖視窗
+// 自編版新增（展開頁動畫）：蓋在展開頁原位的截圖視窗
 // 收合時每一格都要重畫露出來的主內容（2026-10-28 實測每格 3～8ms，240Hz 一格只有 4.17ms，會掉格），
-// 所以收合一開始先截下展開頁、用這個視窗蓋在原位，底下一次收合、主內容一次畫好，
-// 動畫只改這個視窗的區域，交給 Windows 合成，程式不用重畫任何東西
+// 所以一開始先截圖、用這個視窗蓋在原位，底下一次切換、一次畫好，
+// 動畫只移動這個視窗，交給 Windows 合成，程式幾乎不用重畫
+// B 款（試做）：展開頁截圖整頁從播放列後面滑上來／滑下去
+// - 收合：視窗跟著往下移、高度跟著縮（下緣固定在播放列上緣），內容不用重畫
+// - 展開：視窗固定蓋住整個展開頁，每格自己重畫（偏移上方畫主內容截圖、下方畫往下移的展開頁截圖）。
+//   不用移動＋放大視窗：視窗變大時新長出來那條要晚一格才顯示，下緣會在播放列上方露出一條縫（2026-10-28 錄影）
 constexpr wchar_t now_playing_snapshot_class_name[] = L"columns_ui_now_playing_snapshot";
+
+struct NowPlayingSnapshot {
+    wil::unique_hbitmap stage;
+    // 偏移上方要顯示的主內容截圖；收合時沒有（上方露出真的主內容）
+    wil::unique_hbitmap main;
+    // 展開頁在螢幕上的位置、展開頁截圖目前往下偏移多少
+    RECT stage_rect{};
+    int offset{};
+};
+
+NowPlayingSnapshot* get_now_playing_snapshot(HWND wnd)
+{
+    return reinterpret_cast<NowPlayingSnapshot*>(GetWindowLongPtr(wnd, GWLP_USERDATA));
+}
 
 LRESULT CALLBACK now_playing_snapshot_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -61,29 +79,79 @@ LRESULT CALLBACK now_playing_snapshot_wndproc(HWND wnd, UINT msg, WPARAM wp, LPA
     case WM_PAINT: {
         PAINTSTRUCT ps{};
         const auto paint_dc = wil::BeginPaint(wnd, &ps);
-        const auto bitmap = reinterpret_cast<HBITMAP>(GetWindowLongPtr(wnd, GWLP_USERDATA));
+        const auto snapshot = get_now_playing_snapshot(wnd);
+        if (!snapshot)
+            return 0;
+
+        // 視窗上緣在展開頁裡的位置（收合時視窗跟著往下移；展開時是 0），以及展開頁截圖從視窗第幾列開始
+        RECT window_rect{};
+        GetWindowRect(wnd, &window_rect);
+        const int window_top = window_rect.top - snapshot->stage_rect.top;
+        const int stage_top = snapshot->offset - window_top;
+        const auto width = wil::rect_width(ps.rcPaint);
         const wil::unique_hdc memory_dc(CreateCompatibleDC(paint_dc.get()));
-        const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap);
-        BitBlt(paint_dc.get(), ps.rcPaint.left, ps.rcPaint.top, wil::rect_width(ps.rcPaint),
-            wil::rect_height(ps.rcPaint), memory_dc.get(), ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+
+        if (snapshot->main && ps.rcPaint.top < stage_top) {
+            const auto bottom = std::min(static_cast<int>(ps.rcPaint.bottom), stage_top);
+            const auto _select_bitmap = wil::SelectObject(memory_dc.get(), snapshot->main.get());
+            BitBlt(paint_dc.get(), ps.rcPaint.left, ps.rcPaint.top, width, bottom - ps.rcPaint.top, memory_dc.get(),
+                ps.rcPaint.left, ps.rcPaint.top + window_top, SRCCOPY);
+        }
+
+        const auto top = std::max(static_cast<int>(ps.rcPaint.top), stage_top);
+        if (snapshot->stage && top < ps.rcPaint.bottom) {
+            const auto _select_bitmap = wil::SelectObject(memory_dc.get(), snapshot->stage.get());
+            BitBlt(paint_dc.get(), ps.rcPaint.left, top, width, ps.rcPaint.bottom - top, memory_dc.get(),
+                ps.rcPaint.left, top - stage_top, SRCCOPY);
+        }
         return 0;
     }
     case WM_NCDESTROY:
-        DeleteObject(reinterpret_cast<HBITMAP>(GetWindowLongPtr(wnd, GWLP_USERDATA)));
+        delete get_now_playing_snapshot(wnd);
+        SetWindowLongPtr(wnd, GWLP_USERDATA, 0);
         break;
     }
     return DefWindowProc(wnd, msg, wp, lp);
 }
 
-// 截下主視窗 owner 在螢幕 screen_rect 的內容，在原位開一個不搶焦點的視窗顯示
-HWND create_now_playing_snapshot(HWND owner, const RECT& screen_rect)
+// 截下主視窗 owner 在螢幕 screen_rect 的內容
+// 用 PrintWindow 請 Windows 畫出整個主視窗（不含蓋在上面的截圖視窗），再裁出要的那塊。
+// 不能直接從 ESLyric 視窗 BitBlt：那只讀得到 GDI 畫的內容，ESLyric 的封面、歌詞和 WebView2 都不在裡面，
+// 會截到被蓋住的播放清單（2026-10-28 錄影實測）；PrintWindow 整個主視窗約 17～22ms
+wil::unique_hbitmap capture_now_playing_area(HWND owner, const RECT& screen_rect)
 {
     const auto width = wil::rect_width(screen_rect);
     const auto height = wil::rect_height(screen_rect);
 
     if (width <= 0 || height <= 0)
-        return nullptr;
+        return {};
 
+    RECT window_rect{};
+    GetWindowRect(owner, &window_rect);
+
+    const auto screen_dc = wil::GetDC(nullptr);
+    const wil::unique_hdc window_dc(CreateCompatibleDC(screen_dc.get()));
+    const wil::unique_hbitmap window_bitmap(
+        CreateCompatibleBitmap(screen_dc.get(), wil::rect_width(window_rect), wil::rect_height(window_rect)));
+    if (!window_bitmap)
+        return {};
+    const auto _select_window_bitmap = wil::SelectObject(window_dc.get(), window_bitmap.get());
+    if (!PrintWindow(owner, window_dc.get(), PW_RENDERFULLCONTENT))
+        return {};
+
+    const wil::unique_hdc memory_dc(CreateCompatibleDC(screen_dc.get()));
+    wil::unique_hbitmap bitmap(CreateCompatibleBitmap(screen_dc.get(), width, height));
+    if (!bitmap)
+        return {};
+    const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap.get());
+    BitBlt(memory_dc.get(), 0, 0, width, height, window_dc.get(), screen_rect.left - window_rect.left,
+        screen_rect.top - window_rect.top, SRCCOPY);
+    return bitmap;
+}
+
+// 在螢幕 window_rect 開一個不搶焦點、不擋滑鼠的視窗顯示截圖
+HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot> snapshot, const RECT& window_rect)
+{
     static const auto class_registered = [] {
         WNDCLASSEX wc{};
         wc.cbSize = sizeof(wc);
@@ -97,42 +165,14 @@ HWND create_now_playing_snapshot(HWND owner, const RECT& screen_rect)
     if (!class_registered)
         return nullptr;
 
-    // 截圖：用 PrintWindow 請 Windows 畫出整個主視窗，再裁出要的那塊
-    // 不能直接從 ESLyric 視窗 BitBlt：那只讀得到 GDI 畫的內容，ESLyric 的封面、歌詞和 WebView2 都不在裡面，
-    // 會截到被蓋住的播放清單（2026-10-28 錄影實測）；PrintWindow 整個主視窗約 17～22ms
-    RECT window_rect{};
-    GetWindowRect(owner, &window_rect);
-
-    HBITMAP bitmap{};
-    {
-        const auto screen_dc = wil::GetDC(nullptr);
-        const wil::unique_hdc window_dc(CreateCompatibleDC(screen_dc.get()));
-        const wil::unique_hbitmap window_bitmap(
-            CreateCompatibleBitmap(screen_dc.get(), wil::rect_width(window_rect), wil::rect_height(window_rect)));
-        if (!window_bitmap)
-            return nullptr;
-        const auto _select_window_bitmap = wil::SelectObject(window_dc.get(), window_bitmap.get());
-        if (!PrintWindow(owner, window_dc.get(), PW_RENDERFULLCONTENT))
-            return nullptr;
-
-        const wil::unique_hdc memory_dc(CreateCompatibleDC(screen_dc.get()));
-        bitmap = CreateCompatibleBitmap(screen_dc.get(), width, height);
-        if (!bitmap)
-            return nullptr;
-        const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap);
-        BitBlt(memory_dc.get(), 0, 0, width, height, window_dc.get(), screen_rect.left - window_rect.left,
-            screen_rect.top - window_rect.top, SRCCOPY);
-    }
-
     const auto wnd = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, now_playing_snapshot_class_name, L"",
-        WS_POPUP, screen_rect.left, screen_rect.top, width, height, owner, nullptr, core_api::get_my_instance(), nullptr);
+        WS_POPUP, window_rect.left, window_rect.top, wil::rect_width(window_rect), wil::rect_height(window_rect), owner,
+        nullptr, core_api::get_my_instance(), nullptr);
 
-    if (!wnd) {
-        DeleteObject(bitmap);
+    if (!wnd)
         return nullptr;
-    }
 
-    SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(bitmap));
+    SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(snapshot.release()));
 
     // 關掉 Windows 開視窗時的淡入動畫，要一出現就跟原本的畫面一模一樣
     BOOL disable_transitions = TRUE;
@@ -1381,24 +1421,49 @@ void FlatSplitterPanel::start_now_playing_animation()
         return;
     }
 
+    // B 款滑動進行中又切換：從截圖目前的位置往回滑（每格的訊息還在跑，不用再送）
+    if (m_now_playing_snapshot_wnd) {
+        const auto offset = get_now_playing_slide_offset();
+        const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+        const auto& rect = m_now_playing_slide_rect;
+        snapshot->offset = offset;
+
+        if (!m_now_playing_expanded && snapshot->main) {
+            // 展開到一半改收合：底下已經是真的展開頁，先收起來、主內容畫好，
+            // 截圖視窗改成只顯示展開頁、跟著往下移（上方露出真的主內容）
+            on_size_changed();
+            RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+            snapshot->main.reset();
+            SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top + offset, wil::rect_width(rect),
+                wil::rect_height(rect) - offset, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+            UpdateWindow(m_now_playing_snapshot_wnd);
+        } else if (m_now_playing_expanded && !snapshot->main) {
+            // 收合到一半改展開：截目前的主內容（底下還是收合的）當偏移上方的底，截圖視窗改成固定蓋住整個展開頁
+            // 截不到就維持跟著移動（下緣可能露出一條縫）
+            if (auto main = capture_now_playing_area(GetAncestor(m_wnd, GA_ROOT), rect)) {
+                snapshot->main = std::move(main);
+                SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top, wil::rect_width(rect),
+                    wil::rect_height(rect), SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
+                UpdateWindow(m_now_playing_snapshot_wnd);
+            }
+        }
+
+        m_now_playing_slide_from = offset;
+        m_now_playing_slide_expanding = m_now_playing_expanded;
+        m_now_playing_snapshot_start = std::chrono::steady_clock::now();
+        return;
+    }
+
     // 從目前看得到的區域開始；動畫進行中再切換時，就從當下的位置倒回去
     // 沒設區域（展開中）時 GetWindowRgnBox 傳回 ERROR，起點是整個視窗
     RECT from{};
-    const auto is_fully_expanded = GetWindowRgnBox(now_playing_bar->m_wnd, &from) == ERROR;
-    if (is_fully_expanded)
+    if (GetWindowRgnBox(now_playing_bar->m_wnd, &from) == ERROR)
         GetClientRect(now_playing_bar->m_wnd, &from);
 
-    // 截圖收合進行中又要展開：從截圖目前露出的位置接著用區域動畫展開，排好區域後再拿掉截圖
-    const auto snapshot_wnd = std::exchange(m_now_playing_snapshot_wnd, nullptr);
-    if (snapshot_wnd) {
-        GetClientRect(now_playing_bar->m_wnd, &from);
-        from.top = get_now_playing_snapshot_top();
-    }
+    const auto was_animating = m_now_playing_animating;
 
-    const auto was_animating = m_now_playing_animating || snapshot_wnd;
-
-    // 從完全展開開始收合：改用截圖疊圖，每一格都不用重畫主內容
-    if (!was_animating && is_fully_expanded && !m_now_playing_expanded && start_now_playing_snapshot_collapse())
+    // B 款：展開頁截圖整頁滑上來／滑下去，每一格都不用重畫；截不到圖（例如視窗縮小中）才用區域動畫
+    if (!was_animating && start_now_playing_slide())
         return;
 
     m_now_playing_animation_from = from;
@@ -1415,77 +1480,136 @@ void FlatSplitterPanel::start_now_playing_animation()
 
     on_size_changed();
 
-    if (snapshot_wnd) {
-        RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
-        DestroyWindow(snapshot_wnd);
-    }
-
     // 動畫進行中再切換時，原本那一串訊息還在跑，不要再送一個（會變成每格跑兩次）
     if (!was_animating)
         PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 
-bool FlatSplitterPanel::start_now_playing_snapshot_collapse()
+bool FlatSplitterPanel::start_now_playing_slide()
 {
+    const auto owner = GetAncestor(m_wnd, GA_ROOT);
+
+    // 視窗縮小中 PrintWindow 只畫得出縮小後的空殼
+    if (IsIconic(owner))
+        return false;
+
     // 展開頁＝播放列視窗扣掉底部播放列那一段（播放列視窗跟分割面板一樣大、在 (0, 0)）
     RECT client_rect{};
     GetClientRect(m_wnd, &client_rect);
     RECT stage_rect{0, 0, client_rect.right, m_now_playing_bar_rect.top};
     MapWindowPoints(m_wnd, HWND_DESKTOP, reinterpret_cast<POINT*>(&stage_rect), 2);
+    const auto stage_height = wil::rect_height(stage_rect);
+    auto snapshot = std::make_unique<NowPlayingSnapshot>();
+    snapshot->stage_rect = stage_rect;
 
-    m_now_playing_snapshot_wnd = create_now_playing_snapshot(GetAncestor(m_wnd, GA_ROOT), stage_rect);
+    if (m_now_playing_expanded) {
+        // 展開：先截主內容蓋在原位（偏移＝展開頁高度，整頁都是主內容），底下偷偷展開、畫好，
+        // 再截展開頁（PrintWindow 不會畫到蓋著的截圖視窗），偏移往 0 減少＝從播放列後面往上滑
+        snapshot->main = capture_now_playing_area(owner, stage_rect);
+        snapshot->offset = stage_height;
+        if (!snapshot->main)
+            return false;
 
-    if (!m_now_playing_snapshot_wnd)
-        return false;
+        m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
+        if (!m_now_playing_snapshot_wnd)
+            return false;
 
-    m_now_playing_snapshot_height = m_now_playing_bar_rect.top;
+        [[maybe_unused]] const auto hr = DwmFlush();
+        on_size_changed();
+        RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 
-    // 截圖確定顯示到螢幕上，才把底下真的展開頁收起來、主內容一次畫好（都被截圖蓋著，看不到）
-    // 2026-10-28 實測：截圖＋顯示 33～40ms、主內容重畫 27～34ms，按下到開始動約 65～70ms
-    [[maybe_unused]] const auto hr = DwmFlush();
-    m_now_playing_animating = false;
-    on_size_changed();
-    RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage = capture_now_playing_area(owner, stage_rect);
+        if (!get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage) {
+            // 截不到展開頁：底下已經展開好了，直接拿掉蓋著的截圖
+            DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+            return true;
+        }
+        m_now_playing_slide_from = stage_height;
+    } else {
+        // 收合：截展開頁蓋在原位，底下一次收合、主內容畫好（都被截圖蓋著，看不到），截圖往下滑到播放列後面
+        snapshot->stage = capture_now_playing_area(owner, stage_rect);
+        if (!snapshot->stage)
+            return false;
 
+        m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
+        if (!m_now_playing_snapshot_wnd)
+            return false;
+
+        [[maybe_unused]] const auto hr = DwmFlush();
+        on_size_changed();
+        RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        m_now_playing_slide_from = 0;
+    }
+
+    m_now_playing_slide_rect = stage_rect;
+    m_now_playing_slide_expanding = m_now_playing_expanded;
     m_now_playing_snapshot_start = std::chrono::steady_clock::now();
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
     return true;
 }
 
-int FlatSplitterPanel::get_now_playing_snapshot_top() const
+int FlatSplitterPanel::get_now_playing_slide_offset() const
 {
     const auto elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - m_now_playing_snapshot_start)
                                 .count();
     const auto linear_progress = std::clamp(elapsed_ms / now_playing_animation_duration_ms, 0.0, 1.0);
-    // 曲線跟區域動畫的收合相同（ease-in-out sine）
-    return std::lround(m_now_playing_snapshot_height * cubic_bezier(0.37, 0.0, 0.63, 1.0, linear_progress));
+    // 曲線跟區域動畫相同：展開 ease-out sine、收合 ease-in-out sine
+    const auto progress = m_now_playing_slide_expanding ? cubic_bezier(0.61, 1.0, 0.88, 1.0, linear_progress)
+                                                        : cubic_bezier(0.37, 0.0, 0.63, 1.0, linear_progress);
+    const auto target = m_now_playing_slide_expanding ? 0 : wil::rect_height(m_now_playing_slide_rect);
+    return std::lround(m_now_playing_slide_from + (target - m_now_playing_slide_from) * progress);
 }
 
-void FlatSplitterPanel::on_now_playing_snapshot_frame()
+void FlatSplitterPanel::on_now_playing_slide_frame()
 {
     const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_snapshot_start;
 
     if (elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
-        DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+        finish_now_playing_slide();
         return;
     }
 
-    // 截圖視窗露出的部分上緣往下移；底下的主內容早就畫好了，只是被截圖蓋著
-    RECT client_rect{};
-    GetClientRect(m_now_playing_snapshot_wnd, &client_rect);
-    SetWindowRgn(m_now_playing_snapshot_wnd,
-        CreateRectRgn(0, get_now_playing_snapshot_top(), client_rect.right, client_rect.bottom), TRUE);
+    const auto offset = get_now_playing_slide_offset();
+    const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+    const auto& rect = m_now_playing_slide_rect;
+
+    if (snapshot->main) {
+        // 展開：視窗不動，從新的偏移往下整片重畫（展開頁截圖整片往上移了）
+        const RECT dirty{0, std::min(offset, snapshot->offset), wil::rect_width(rect), wil::rect_height(rect)};
+        snapshot->offset = offset;
+        InvalidateRect(m_now_playing_snapshot_wnd, &dirty, FALSE);
+    } else {
+        // 收合：視窗下緣固定在播放列上緣，往下移多少、高度就少多少，看起來像整頁滑回播放列後面；內容不用重畫
+        snapshot->offset = offset;
+        SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top + offset, wil::rect_width(rect),
+            wil::rect_height(rect) - offset, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+    }
     UpdateWindow(m_now_playing_snapshot_wnd);
 
     [[maybe_unused]] const auto hr = DwmFlush();
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 
+void FlatSplitterPanel::finish_now_playing_slide()
+{
+    // 滑上來的截圖已經整個蓋住展開頁：底下如果還是收合的（收合到一半又展開），先換成真的展開頁再拿掉截圖
+    const auto now_playing_bar = get_now_playing_bar_panel();
+    RECT region_box{};
+    if (m_now_playing_slide_expanding && now_playing_bar && now_playing_bar->m_wnd
+        && GetWindowRgnBox(now_playing_bar->m_wnd, &region_box) != ERROR) {
+        on_size_changed();
+        RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        [[maybe_unused]] const auto hr = DwmFlush();
+    }
+
+    DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+}
+
 void FlatSplitterPanel::on_now_playing_animation_frame()
 {
     if (m_now_playing_snapshot_wnd) {
-        on_now_playing_snapshot_frame();
+        on_now_playing_slide_frame();
         return;
     }
 
