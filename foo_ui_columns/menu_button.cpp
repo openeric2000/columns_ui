@@ -10,7 +10,8 @@
 // - 同時宣告工具列與面板兩種類型，可以放在頂端工具列區，也可以放進版面（例如專輯列表上方）
 // - Alt、Alt＋字母不用另外處理：拿掉 Menu 工具列後，主視窗本來就會改用 FallbackMenu
 // - 底色與圖示顏色跟 Playlist view 的配色一致（專輯列表、播放清單、底線式分頁同一套）
-// - 2026-10-28 同一列最右邊加「全部收合」：讓版面裡的 Album list 回到初始狀態（只展開最上層）
+// - 2026-10-28 同一列最右邊加文字按鈕「收合」：讓版面裡的 Album list 回到初始狀態（只展開最上層）
+//   原本用兩個箭頭對指的圖示，使用者回報小尺寸看起來像 X、看不出用途，改成直接寫字
 
 namespace cui::panels::menu_button {
 
@@ -19,24 +20,75 @@ namespace {
 // foo_uie_albumlist 的面板 GUID
 constexpr GUID album_list_panel_guid{0x606e9cdd, 0x45ee, 0x4c3b, {0x9f, 0xd5, 0x49, 0x38, 0x1c, 0xeb, 0xe8, 0xae}};
 
-// Segoe MDL2 Assets：漢堡圖示（GlobalNavigationButton）；全部收合用上下兩個細箭頭對指（ChevronDownMed 在上、ChevronUpMed 在下）
+// 「收合」的字型跟播放清單分頁同一個（Colours and fonts 的 Playlist tabs，playlist_tabs.cpp 的
+// g_guid_playlist_switcher_tabs_font；那邊是檔內常數，這裡照抄 GUID）
+constexpr GUID playlist_tabs_font_guid{0x942c36a4, 0x4e28, 0x4cea, {0x96, 0x44, 0xf2, 0x23, 0xc9, 0xa8, 0x38, 0xec}};
+
+// Segoe MDL2 Assets 的漢堡圖示（GlobalNavigationButton）
 constexpr wchar_t hamburger_glyph[] = L"\xE700";
-constexpr wchar_t collapse_top_glyph[] = L"\xE972";
-constexpr wchar_t collapse_bottom_glyph[] = L"\xE971";
-// 以下尺寸單位是 DIP：可點範圍是正方形，圖示置中；面板高度固定；兩顆按鈕各離左右邊 button_margin
+// 2026-10-28 使用者覺得只寫「收合」看不出要收合什麼，改「全部收合」（「收合清單」的「清單」容易被當成播放清單）
+constexpr wchar_t collapse_text[] = L"全部收合";
+// 以下尺寸單位是 DIP：☰ 的可點範圍是正方形、圖示置中；「收合」同高、寬度＝字寬＋左右留白；
+// 面板高度固定；兩顆按鈕各離左右邊 button_margin
 constexpr int panel_height = 48;
 constexpr int button_size = 40;
 constexpr int button_margin = 4;
 constexpr int glyph_font_size = 20;
-constexpr int chevron_font_size = 13;
-// 全部收合的兩個箭頭各往上、往下偏移多少
-constexpr int chevron_offset = 4;
+constexpr int text_button_padding = 12;
 
 enum class Button {
     none,
     menu,
     collapse,
 };
+
+// 把 item 和它後面的兄弟節點裡，展開中的都收合（子節點先收，重新展開時底下也是收合的）
+// Album list（reupen/album_list_panel）的節點展開狀態靠 TVN_ITEMEXPANDED 記錄、關閉時存起來，
+// 但程式送的 TVM_EXPAND 在節點展開過一次後就不會再發這個通知，所以收合後照它自己的格式補送一個；
+// 選取若在被收合的節點底下，會移到該節點，這種選取變更（TVC_UNKNOWN）Album list 不會送歌到播放清單
+void collapse_tree_items(HWND tree_wnd, HTREEITEM item)
+{
+    for (; item; item = TreeView_GetNextSibling(tree_wnd, item)) {
+        if (!(TreeView_GetItemState(tree_wnd, item, TVIS_EXPANDED) & TVIS_EXPANDED))
+            continue;
+
+        collapse_tree_items(tree_wnd, TreeView_GetChild(tree_wnd, item));
+        TreeView_Expand(tree_wnd, item, TVE_COLLAPSE);
+
+        NMTREEVIEW nmtv{};
+        nmtv.hdr.hwndFrom = tree_wnd;
+        nmtv.hdr.idFrom = gsl::narrow_cast<UINT_PTR>(GetDlgCtrlID(tree_wnd));
+        nmtv.hdr.code = TVN_ITEMEXPANDED;
+        nmtv.action = TVE_COLLAPSE;
+        nmtv.itemNew.mask = TVIF_HANDLE | TVIF_PARAM | TVIF_STATE;
+        nmtv.itemNew.hItem = item;
+        nmtv.itemNew.stateMask = TVIS_EXPANDED;
+        if (TreeView_GetItem(tree_wnd, &nmtv.itemNew))
+            SendMessage(GetParent(tree_wnd), WM_NOTIFY, nmtv.hdr.idFrom, reinterpret_cast<LPARAM>(&nmtv));
+    }
+}
+
+// 讓樹狀圖回到初始狀態：最上層以下全部收合、捲回最上面
+// 最上層只有一個節點時，當成 Album list 的根節點（設定裡開了 show root node），保持展開、只收合它底下
+void collapse_tree_view(HWND tree_wnd)
+{
+    const auto root = TreeView_GetRoot(tree_wnd);
+    if (!root)
+        return;
+
+    SetWindowRedraw(tree_wnd, FALSE);
+
+    if (TreeView_GetNextSibling(tree_wnd, root))
+        collapse_tree_items(tree_wnd, root);
+    else
+        collapse_tree_items(tree_wnd, TreeView_GetChild(tree_wnd, root));
+
+    SendMessage(tree_wnd, WM_VSCROLL, MAKEWPARAM(SB_TOP, 0), 0);
+    SendMessage(tree_wnd, WM_HSCROLL, MAKEWPARAM(SB_LEFT, 0), 0);
+
+    SetWindowRedraw(tree_wnd, TRUE);
+    RedrawWindow(tree_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME);
+}
 
 class MenuButton : public uie::container_uie_window_v3 {
 public:
@@ -68,10 +120,11 @@ private:
     std::unique_ptr<colours::dark_mode_notifier> m_dark_mode_notifier;
     std::shared_ptr<FallbackMenu> m_menu;
     wil::unique_hfont m_glyph_font;
-    wil::unique_hfont m_chevron_font;
+    wil::unique_hfont m_text_font;
+    int m_collapse_text_width{};
     HWND m_tooltip_wnd{};
     Button m_hot_button{Button::none};
-    // 全部收合：按下時記住，放開時還在同一顆上才執行
+    // 收合：按下就執行，按住期間顯示按下的底色
     Button m_pressed_button{Button::none};
     bool m_is_menu_open{};
     // 選單開著時點按鈕會關掉選單，這一下點擊之後還會送到按鈕上，要略過，不然選單又會馬上打開
@@ -89,7 +142,8 @@ RECT MenuButton::get_button_rect(Button button) const
 
     if (button == Button::collapse) {
         const auto right = client_rect.right - margin;
-        return {right - size, top, right, top + size};
+        const auto width = m_collapse_text_width + uih::scale_dpi_value(text_button_padding) * 2;
+        return {right - width, top, right, top + size};
     }
 
     return {margin, top, margin + size, top + size};
@@ -140,22 +194,17 @@ void MenuButton::paint(HDC dc) const
             FillRect(dc, &button_rect, hot_brush.get());
         }
 
-        SetTextColor(dc, is_pressed || is_hot ? text_colour : blend(0.86));
-
         if (button == Button::menu) {
+            SetTextColor(dc, is_pressed || is_hot ? text_colour : blend(0.86));
             const auto _select_font = wil::SelectObject(dc, m_glyph_font.get());
             DrawText(dc, hamburger_glyph, -1, &button_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
             continue;
         }
 
-        const auto _select_font = wil::SelectObject(dc, m_chevron_font.get());
-        const auto offset = uih::scale_dpi_value(chevron_offset);
-        auto top_rect = button_rect;
-        OffsetRect(&top_rect, 0, -offset);
-        auto bottom_rect = button_rect;
-        OffsetRect(&bottom_rect, 0, offset);
-        DrawText(dc, collapse_top_glyph, -1, &top_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        DrawText(dc, collapse_bottom_glyph, -1, &bottom_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        // 「收合」平常是灰字（跟未選的分頁同一個混色比例），滑過或按下變白
+        SetTextColor(dc, is_pressed || is_hot ? text_colour : blend(0.62));
+        const auto _select_font = wil::SelectObject(dc, m_text_font.get());
+        DrawText(dc, collapse_text, -1, &button_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 }
 
@@ -197,8 +246,14 @@ void MenuButton::collapse_album_list() const
     if (!album_list.is_valid())
         return;
 
-    // 跟手動收合的做法一樣：在 Album list 自己的右鍵選單裡，再選一次目前的檢視（View 裡打勾的那一項），整棵樹會重建成初始狀態
-    // 不比對選單文字（Album list 介面語言改了也能用）：找第一個「有打勾子項目」的子選單，執行打勾的那一項
+    // 直接收合樹狀圖的節點（2026-10-28 實測 4～9ms）。原本「再選一次目前的檢視」會整棵樹重建，曲庫大時要約 670ms
+    if (const auto tree_wnd = FindWindowEx(album_list->get_wnd(), nullptr, WC_TREEVIEW, nullptr)) {
+        collapse_tree_view(tree_wnd);
+        return;
+    }
+
+    // 找不到樹狀圖時的備案，跟手動收合的做法一樣：在 Album list 自己的右鍵選單裡，再選一次目前的檢視（View 裡打勾的那一項），
+    // 整棵樹會重建成初始狀態。不比對選單文字（Album list 介面語言改了也能用）：找第一個「有打勾子項目」的子選單，執行打勾的那一項
     const pfc::refcounted_object_ptr_t menu_hook = new uie::menu_hook_impl;
     album_list->get_menu_items(*menu_hook.get_ptr());
 
@@ -235,17 +290,15 @@ void MenuButton::create_tooltip()
 
     set_tooltip_theme();
 
-    // 兩顆按鈕各一個提示，範圍在 update_tooltip_rects 跟著按鈕位置更新
-    for (const auto& [button, text] : {std::pair{Button::menu, L"選單"}, std::pair{Button::collapse, L"全部收合"}}) {
-        TOOLINFO ti{};
-        ti.cbSize = TTTOOLINFO_V1_SIZE;
-        ti.uFlags = TTF_SUBCLASS;
-        ti.hwnd = get_wnd();
-        ti.uId = static_cast<UINT_PTR>(button);
-        ti.rect = get_button_rect(button);
-        ti.lpszText = const_cast<wchar_t*>(text);
-        SendMessage(m_tooltip_wnd, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&ti));
-    }
+    // 只有 ☰ 需要提示（「收合」本身就是字），範圍在 update_tooltip_rects 跟著按鈕位置更新
+    TOOLINFO ti{};
+    ti.cbSize = TTTOOLINFO_V1_SIZE;
+    ti.uFlags = TTF_SUBCLASS;
+    ti.hwnd = get_wnd();
+    ti.uId = static_cast<UINT_PTR>(Button::menu);
+    ti.rect = get_button_rect(Button::menu);
+    ti.lpszText = const_cast<wchar_t*>(L"選單");
+    SendMessage(m_tooltip_wnd, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&ti));
 }
 
 void MenuButton::update_tooltip_rects() const
@@ -253,14 +306,12 @@ void MenuButton::update_tooltip_rects() const
     if (!m_tooltip_wnd)
         return;
 
-    for (const auto button : {Button::menu, Button::collapse}) {
-        TOOLINFO ti{};
-        ti.cbSize = TTTOOLINFO_V1_SIZE;
-        ti.hwnd = get_wnd();
-        ti.uId = static_cast<UINT_PTR>(button);
-        ti.rect = get_button_rect(button);
-        SendMessage(m_tooltip_wnd, TTM_NEWTOOLRECT, 0, reinterpret_cast<LPARAM>(&ti));
-    }
+    TOOLINFO ti{};
+    ti.cbSize = TTTOOLINFO_V1_SIZE;
+    ti.hwnd = get_wnd();
+    ti.uId = static_cast<UINT_PTR>(Button::menu);
+    ti.rect = get_button_rect(Button::menu);
+    SendMessage(m_tooltip_wnd, TTM_NEWTOOLRECT, 0, reinterpret_cast<LPARAM>(&ti));
 }
 
 void MenuButton::set_tooltip_theme() const
@@ -281,8 +332,15 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         wcscpy_s(lf.lfFaceName, L"Segoe MDL2 Assets");
         lf.lfHeight = -uih::scale_dpi_value(glyph_font_size);
         m_glyph_font.reset(CreateFontIndirect(&lf));
-        lf.lfHeight = -uih::scale_dpi_value(chevron_font_size);
-        m_chevron_font.reset(CreateFontIndirect(&lf));
+
+        m_text_font.reset(fb2k::std_api_get<fonts::manager>()->get_font(playlist_tabs_font_guid));
+        {
+            const auto dc = wil::GetDC(wnd);
+            const auto _select_font = wil::SelectObject(dc.get(), m_text_font.get());
+            SIZE text_size{};
+            GetTextExtentPoint32(dc.get(), collapse_text, gsl::narrow<int>(wcslen(collapse_text)), &text_size);
+            m_collapse_text_width = text_size.cx;
+        }
 
         create_tooltip();
 
@@ -299,12 +357,13 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             m_tooltip_wnd = nullptr;
         }
         m_glyph_font.reset();
-        m_chevron_font.reset();
+        m_text_font.reset();
         m_buffered_paint_initialiser.reset();
         break;
     case WM_GETMINMAXINFO: {
         const auto mmi = reinterpret_cast<LPMINMAXINFO>(lp);
-        mmi->ptMinTrackSize.x = uih::scale_dpi_value(button_margin * 4 + button_size * 2);
+        mmi->ptMinTrackSize.x = uih::scale_dpi_value(button_margin * 4 + button_size + text_button_padding * 2)
+            + m_collapse_text_width;
         mmi->ptMinTrackSize.y = uih::scale_dpi_value(panel_height);
         mmi->ptMaxTrackSize.y = uih::scale_dpi_value(panel_height);
         return 0;
@@ -355,9 +414,11 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (button == Button::menu) {
             show_menu();
         } else if (button == Button::collapse) {
+            // 按下就執行（原本放開才執行，使用者覺得反應慢）；先把按下的底色畫出來再執行，Album list 重建時也看得到有按到
             m_pressed_button = button;
             SetCapture(wnd);
-            InvalidateRect(wnd, nullptr, FALSE);
+            RedrawWindow(wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+            collapse_album_list();
         }
         return 0;
     }
@@ -367,12 +428,9 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (m_pressed_button == Button::none)
             break;
 
-        const auto pressed_button = std::exchange(m_pressed_button, Button::none);
+        m_pressed_button = Button::none;
         ReleaseCapture();
         InvalidateRect(wnd, nullptr, FALSE);
-
-        if (pressed_button == Button::collapse && hit_test({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}) == Button::collapse)
-            collapse_album_list();
         return 0;
     }
     case WM_CAPTURECHANGED:
