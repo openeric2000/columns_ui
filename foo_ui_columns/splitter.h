@@ -15,8 +15,8 @@ inline constexpr int now_playing_bar_height = 138;
 // 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
 inline constexpr std::string_view now_playing_side_title = "展開頁右側";
 // 自編版新增（展開頁動畫）：展開時視窗區域的上緣從播放列往上推、收合時往下蓋回的時間長度
-// 數值跟 2026-10-28 示意頁 A 款的預設值相同（使用者看過選 A）
-inline constexpr int now_playing_animation_duration_ms = 280;
+// 2026-10-28 使用者在示意頁選 A 款；280ms 實測「不夠絲滑」，改 400ms 並換平緩的曲線（見 get_now_playing_animation_rect）
+inline constexpr int now_playing_animation_duration_ms = 400;
 inline constexpr UINT_PTR now_playing_animation_timer_id = 0x4e50;
 
 enum Orientation {

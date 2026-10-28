@@ -1314,6 +1314,12 @@ void FlatSplitterPanel::on_now_playing_animation_timer()
 
     // 新露出來的部分（展開時是展開頁，收合時是主內容）馬上畫，不等訊息迴圈
     RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+
+    // 等這一格真的顯示到螢幕上再處理下一格，每格間隔對齊螢幕更新，不會忽快忽慢
+    // （計時器本身約 15.6ms 才跳一次，跟螢幕更新不同步）
+    if (m_now_playing_animating) {
+        [[maybe_unused]] const auto hr = DwmFlush();
+    }
 }
 
 RECT FlatSplitterPanel::get_now_playing_animation_rect(unsigned width, unsigned height) const
@@ -1323,9 +1329,11 @@ RECT FlatSplitterPanel::get_now_playing_animation_rect(unsigned width, unsigned 
                                 .count();
     const auto linear_progress = std::clamp(elapsed_ms / now_playing_animation_duration_ms, 0.0, 1.0);
 
-    // 曲線跟示意頁相同：展開先快後慢（0.2, 0, 0, 1），收合先慢後快（0.3, 0, 0.8, 0.15）
-    const auto progress = m_now_playing_expanded ? cubic_bezier(0.2, 0.0, 0.0, 1.0, linear_progress)
-                                                 : cubic_bezier(0.3, 0.0, 0.8, 0.15, linear_progress);
+    // 展開 ease-out sine（一開始就動、慢慢停下），收合 ease-in-out sine（兩頭都慢）
+    // 原本的 (0.2, 0, 0, 1)／(0.3, 0, 0.8, 0.15) 中段太陡，展開區約 1046px 時最快一格移動 250px 以上，看起來跳；
+    // 換成這兩條、400ms 後最快一格約 70px（60Hz）
+    const auto progress = m_now_playing_expanded ? cubic_bezier(0.61, 1.0, 0.88, 1.0, linear_progress)
+                                                 : cubic_bezier(0.37, 0.0, 0.63, 1.0, linear_progress);
 
     const RECT target = m_now_playing_expanded
         ? RECT{0, 0, gsl::narrow<LONG>(width), gsl::narrow<LONG>(height)}
