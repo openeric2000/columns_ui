@@ -122,6 +122,7 @@
 #define IDD_PREFS_SETUP                 240
 #define IDD_PREFS_PVIEW_SEARCH          241
 #define IDD_LAYOUT_PROPERTIES           242
+#define IDD_THEME_FONT                  243
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -370,6 +371,8 @@
 #define IDC_INFOSECTIONS_STATIC         1240
 #define IDC_EXPORT_TYPE_STATIC          1241
 #define IDC_REMEMBER_WINDOW_POS         1242
+#define IDC_THEME_FONT_FAMILY           1243
+#define IDC_THEME_FONT_SIZE             1244
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -379,7 +382,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1243
+#define _APS_NEXT_CONTROL_VALUE         1245
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

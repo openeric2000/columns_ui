@@ -281,6 +281,7 @@
     <ClCompile Include="font_manager_v3.cpp" />
     <ClCompile Include="font_picker.cpp" />
     <ClCompile Include="format_code_generator.cpp" />
+    <ClCompile Include="theme_font.cpp" />
     <ClCompile Include="gdi.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="imaging.cpp" />
@@ -482,6 +483,7 @@
     <ClInclude Include="font_manager_data.h" />
     <ClInclude Include="font_picker.h" />
     <ClInclude Include="format_code_generator.h" />
+    <ClInclude Include="theme_font.h" />
     <ClInclude Include="gdi.h" />
     <ClInclude Include="get_msg_hook.h" />
     <ClInclude Include="icons.h" />

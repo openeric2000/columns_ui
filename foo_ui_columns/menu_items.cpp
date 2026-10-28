@@ -9,6 +9,7 @@
 #include "system_appearance_manager.h"
 #include "tab_main_window.h"
 #include "splitter.h"
+#include "theme_font.h"
 
 namespace cui::main_menu {
 
@@ -350,6 +351,11 @@ const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, "顯示�
                 album_art_ids::cover_front);
     }};
 
+// 自編版新增：選一個字型，一次換掉主題的 Columns UI 字型項目與兩個主題檔（見 theme_font.cpp）
+const MainMenuCommand theme_font{theme_font_id, "主題字型…",
+    "一次換掉清單、分頁、資料夾樹、播放列與專輯標頭的字型，並調整清單的整體大小。",
+    [] { theme_font::open_theme_font_dialog(core_api::get_main_window()); }};
+
 const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, "展開頁：置中",
     "展開頁的封面與歌詞整組置中。", [] { set_now_playing_style(1); }, {},
     [] { return now_playing_style.get() == 1; }};
@@ -508,7 +514,7 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
     show_now_playing_cover, now_playing_style_centered, now_playing_style_spectrum, now_playing_style_info,
-    cycle_now_playing_style);
+    cycle_now_playing_style, theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);

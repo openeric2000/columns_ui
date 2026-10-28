@@ -665,6 +665,9 @@
     <ClCompile Include="format_code_generator.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="theme_font.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1026,6 +1029,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="format_code_generator.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="theme_font.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="permutation_utils.h">
