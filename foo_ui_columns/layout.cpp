@@ -273,6 +273,41 @@ void LayoutWindow::show_menu_access_keys()
     return __show_menu_access_keys_recur(m_child);
 }
 
+namespace {
+
+uie::window_ptr find_window_by_guid_recur(const uie::window_ptr& p_wnd, const GUID& guid)
+{
+    if (!p_wnd.is_valid())
+        return {};
+
+    if (p_wnd->get_extension_guid() == guid)
+        return p_wnd;
+
+    service_ptr_t<uie::splitter_window> p_splitter_wnd;
+    if (!p_wnd->service_query_t(p_splitter_wnd))
+        return {};
+
+    const auto count = p_splitter_wnd->get_panel_count();
+    for (size_t n = 0; n < count; n++) {
+        uie::splitter_item_ptr temp;
+        p_splitter_wnd->get_panel(n, temp);
+        if (!temp.is_valid())
+            continue;
+
+        if (auto found = find_window_by_guid_recur(temp->get_window_ptr(), guid); found.is_valid())
+            return found;
+    }
+
+    return {};
+}
+
+} // namespace
+
+uie::window_ptr LayoutWindow::find_window_by_guid(const GUID& guid) const
+{
+    return find_window_by_guid_recur(m_child, guid);
+}
+
 void LayoutWindow::__show_menu_access_keys_recur(const uie::window_ptr& p_wnd)
 {
     service_ptr_t<uie::menu_window> p_menu_wnd;

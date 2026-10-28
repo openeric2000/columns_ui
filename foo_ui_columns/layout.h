@@ -75,6 +75,9 @@ public:
     bool has_child() const;
     uie::splitter_item_ptr get_child() const;
     void set_child(const uie::splitter_item_t* item);
+    // 自編版新增：在目前版面裡找第一個指定 GUID 的面板（執行中的那一個），找不到傳回空指標
+    // 主選單按鈕的「全部收合」用它找 Album list
+    uie::window_ptr find_window_by_guid(const GUID& guid) const;
 
     bool set_focus();
     void show_window();
