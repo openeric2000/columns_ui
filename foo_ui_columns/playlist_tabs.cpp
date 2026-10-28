@@ -3,10 +3,21 @@
 
 #include "dark_mode_spin.h"
 #include "dark_mode_tabs.h"
+#include "ng_playlist/ng_playlist.h"
 #include "playlist_manager_utils.h"
 #include "win32.h"
 
 namespace cui::panels::playlist_tabs {
+
+namespace {
+
+// 自編版新增：底線式分頁的底線顏色（主題紅，跟專輯標頭播放鍵、ESLyric 進度條同色）
+constexpr COLORREF underline_tab_accent_colour = RGB(247, 11, 11);
+// 自編版新增：底線式分頁的左右、上下留白（DIP）
+constexpr int underline_tab_padding_x = 14;
+constexpr int underline_tab_padding_y = 5;
+
+} // namespace
 
 cfg_guid cfg_default_playlist(
     GUID{0x68527c89, 0xb0f7, 0xf653, {0x00, 0x53, 0x8c, 0xeb, 0x47, 0xe7, 0xa3, 0xb3}}, guid_playlist_view_v2);
@@ -86,6 +97,7 @@ void PlaylistTabs::on_font_change()
     for (unsigned n = 0; n < count; n++) {
         HWND wnd = list_wnd[n]->wnd_tabs;
         if (wnd) {
+            list_wnd[n]->set_tab_padding();
             SendMessage(wnd, WM_SETFONT, (WPARAM)g_font, MAKELPARAM(1, 0));
             list_wnd[n]->on_size();
             list_wnd[n]->on_child_position_change();
@@ -192,6 +204,7 @@ bool PlaylistTabs::create_tabs()
 
         if (wnd_tabs) {
             SetWindowLongPtr(wnd_tabs, GWLP_USERDATA, (LPARAM)(this));
+            set_tab_padding();
 
             if (g_font) {
                 SendMessage(wnd_tabs, WM_SETFONT, (WPARAM)g_font, MAKELPARAM(0, 0));
@@ -258,9 +271,12 @@ LRESULT WINAPI PlaylistTabs::hook(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_ERASEBKGND:
         return FALSE;
     case WM_PAINT:
-        if (colours::is_dark_mode_active())
-            dark::handle_tab_control_paint(wnd);
-        else
+        if (colours::is_dark_mode_active()) {
+            // 自編版：改成底線式分頁，底色與文字色跟 Playlist view 的配色一致
+            colours::helper colour_helper(playlist_view::ColoursClient::id);
+            dark::handle_underline_tab_control_paint(wnd, colour_helper.get_colour(colours::colour_background),
+                colour_helper.get_colour(colours::colour_text), underline_tab_accent_colour);
+        } else
             uih::paint_subclassed_window_with_buffering(wnd, tabproc);
         return 0;
     case WM_PARENTNOTIFY:
@@ -456,6 +472,17 @@ void PlaylistTabs::set_up_down_window_theme() const
         dark::spin::remove_window(m_up_down_control_wnd);
 
     SetWindowTheme(m_up_down_control_wnd, is_dark ? L"DarkMode_Explorer" : nullptr, nullptr);
+}
+
+// 自編版新增：深色（底線式分頁）時加大分頁留白；淺色維持 Windows 預設
+// 留白要在下一次 WM_SETFONT 或新增分頁時才會重新排版；執行中切回淺色要重開才會恢復預設留白
+void PlaylistTabs::set_tab_padding() const
+{
+    if (!wnd_tabs || !colours::is_dark_mode_active())
+        return;
+
+    TabCtrl_SetPadding(
+        wnd_tabs, uih::scale_dpi_value(underline_tab_padding_x), uih::scale_dpi_value(underline_tab_padding_y));
 }
 
 void PlaylistTabs::refresh_child_data(abort_callback& aborter) const

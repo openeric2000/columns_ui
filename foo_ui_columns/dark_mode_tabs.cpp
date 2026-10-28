@@ -61,6 +61,17 @@ std::vector<Tab> get_tabs(HWND wnd)
     // clang-format on
 }
 
+// 自編版新增：兩色依比例混色（amount 為 0 時是 from，1 時是 to）
+COLORREF blend_colour(COLORREF from, COLORREF to, double amount)
+{
+    const auto mix = [amount](int from_value, int to_value) {
+        return gsl::narrow_cast<BYTE>(std::lround(from_value + (to_value - from_value) * amount));
+    };
+
+    return RGB(mix(GetRValue(from), GetRValue(to)), mix(GetGValue(from), GetGValue(to)),
+        mix(GetBValue(from), GetBValue(to)));
+}
+
 } // namespace
 
 void handle_tab_control_paint(HWND wnd)
@@ -147,6 +158,77 @@ void handle_tab_control_paint(HWND wnd)
 
         DrawTextEx(buffered_dc.get(), const_cast<wchar_t*>(item.text.data()), gsl::narrow<int>(item.text.length()),
             &text_rect, DT_CENTER | DT_HIDEPREFIX | DT_SINGLELINE | DT_VCENTER, nullptr);
+    }
+}
+
+void handle_underline_tab_control_paint(
+    HWND wnd, COLORREF background_colour, COLORREF text_colour, COLORREF accent_colour)
+{
+    const auto items = get_tabs(wnd);
+
+    // 未選的分頁：文字色往背景色混成灰字；滑過的混得少一點，看起來變亮
+    const auto inactive_text_colour = blend_colour(background_colour, text_colour, 0.62);
+    const auto hot_text_colour = blend_colour(background_colour, text_colour, 0.85);
+    const auto underline_height = uih::scale_dpi_value(3);
+    // 底線比文字左右各多出一點
+    const auto underline_overhang = uih::scale_dpi_value(4);
+
+    const wil::unique_hbrush background_brush(CreateSolidBrush(background_colour));
+    const wil::unique_hbrush accent_brush(CreateSolidBrush(accent_colour));
+
+    PAINTSTRUCT ps{};
+    const auto paint_dc = wil::BeginPaint(wnd, &ps);
+    const auto buffered_dc = uih::BufferedPaint(paint_dc.get(), ps.rcPaint);
+    const auto _select_font = wil::SelectObject(buffered_dc.get(), GetWindowFont(wnd));
+
+    SetBkMode(buffered_dc.get(), TRANSPARENT);
+
+    // 沒有方塊蓋住舊內容（例如滑過狀態改變時），所以每次都整塊重填背景
+    FillRect(buffered_dc.get(), &ps.rcPaint, background_brush.get());
+
+    RECT client_rect{};
+    GetClientRect(wnd, &client_rect);
+
+    if (const HWND spin_wnd = GetWindow(wnd, GW_CHILD); IsWindowVisible(spin_wnd)) {
+        RECT spin_rect{};
+        if (GetWindowRect(spin_wnd, &spin_rect)) {
+            MapWindowPoints(HWND_DESKTOP, wnd, reinterpret_cast<LPPOINT>(&spin_rect), 2);
+            ExcludeClipRect(buffered_dc.get(), spin_rect.left, 0, client_rect.right, client_rect.bottom);
+        }
+    }
+
+    for (auto&& item : items) {
+        RECT _intersect_rect{};
+        if (!IntersectRect(&_intersect_rect, &ps.rcPaint, &item.rc))
+            continue;
+
+        const auto item_text_colour = [&, &item = item] {
+            if (item.is_active)
+                return text_colour;
+
+            return item.is_hot ? hot_text_colour : inactive_text_colour;
+        }();
+
+        SetTextColor(buffered_dc.get(), item_text_colour);
+
+        // 文字在扣掉底線的範圍內垂直置中
+        RECT text_rect{item.rc.left, item.rc.top, item.rc.right, item.rc.bottom - underline_height};
+        DrawTextEx(buffered_dc.get(), const_cast<wchar_t*>(item.text.data()), gsl::narrow<int>(item.text.length()),
+            &text_rect, DT_CENTER | DT_HIDEPREFIX | DT_SINGLELINE | DT_VCENTER, nullptr);
+
+        if (!item.is_active)
+            continue;
+
+        RECT measure_rect{};
+        DrawTextEx(buffered_dc.get(), const_cast<wchar_t*>(item.text.data()), gsl::narrow<int>(item.text.length()),
+            &measure_rect, DT_CALCRECT | DT_HIDEPREFIX | DT_SINGLELINE, nullptr);
+
+        const auto centre = (item.rc.left + item.rc.right) / 2;
+        const auto half_width
+            = std::min(wil::rect_width(measure_rect) / 2 + underline_overhang, wil::rect_width(item.rc) / 2);
+        const RECT underline_rect{
+            centre - half_width, item.rc.bottom - underline_height, centre + half_width, item.rc.bottom};
+        FillRect(buffered_dc.get(), &underline_rect, accent_brush.get());
     }
 }
 

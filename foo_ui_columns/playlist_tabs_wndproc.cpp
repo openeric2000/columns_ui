@@ -53,6 +53,12 @@ LRESULT PlaylistTabs::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         m_dark_mode_notifier
             = std::make_unique<colours::dark_mode_notifier>([this, self = ptr{this}, wnd, wnd_tabs = wnd_tabs] {
                   set_up_down_window_theme();
+                  // 自編版新增：切到深色時套用底線式分頁的留白，重設字型讓分頁重新排版
+                  if (this->wnd_tabs) {
+                      set_tab_padding();
+                      SendMessage(this->wnd_tabs, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), MAKELPARAM(0, 0));
+                      on_size();
+                  }
                   RedrawWindow(wnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE);
                   RedrawWindow(wnd_tabs, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE);
               });

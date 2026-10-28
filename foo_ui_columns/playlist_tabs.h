@@ -164,6 +164,7 @@ private:
         return {L"{ABB72D0D-DBF0-4bba-8C68-3357EBE07A4D}", true, CS_DBLCLKS};
     }
     void set_up_down_window_theme() const;
+    void set_tab_padding() const;
 
     static HFONT g_font;
 
