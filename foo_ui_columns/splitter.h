@@ -14,6 +14,10 @@ inline constexpr std::string_view now_playing_bar_title = "播放列";
 inline constexpr int now_playing_bar_height = 138;
 // 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
 inline constexpr std::string_view now_playing_side_title = "展開頁右側";
+// 自編版新增（展開頁動畫）：展開時視窗區域的上緣從播放列往上推、收合時往下蓋回的時間長度
+// 數值跟 2026-10-28 示意頁 A 款的預設值相同（使用者看過選 A）
+inline constexpr int now_playing_animation_duration_ms = 280;
+inline constexpr UINT_PTR now_playing_animation_timer_id = 0x4e50;
 
 enum Orientation {
     horizontal,
@@ -226,6 +230,11 @@ private:
     Panel::Ptr get_now_playing_bar_panel() const;
     // 有播放列時，同一層自訂標題「展開頁右側」的面板，否則 nullptr
     Panel::Ptr get_now_playing_side_panel() const;
+    // 自編版新增（展開頁動畫）：從目前看得到的區域開始，往 m_now_playing_expanded 的最終區域移動
+    void start_now_playing_animation();
+    void on_now_playing_animation_timer();
+    // 動畫目前這一刻的播放列視窗區域
+    RECT get_now_playing_animation_rect(unsigned width, unsigned height) const;
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
@@ -233,6 +242,11 @@ private:
 
     bool m_refresh_children_in_progress{};
     bool m_now_playing_expanded{};
+    // 自編版新增（展開頁動畫）：收合時的視窗區域（排版給播放列的位置，on_size_changed 時更新）、動畫的起點與開始時間
+    RECT m_now_playing_bar_rect{};
+    bool m_now_playing_animating{};
+    RECT m_now_playing_animation_from{};
+    std::chrono::steady_clock::time_point m_now_playing_animation_start;
     int m_last_position{};
     size_t m_panel_dragging{};
     bool m_panel_dragging_valid{false};

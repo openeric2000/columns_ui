@@ -16,6 +16,32 @@ namespace {
 
 constexpr UINT_PTR now_playing_bar_subclass_id = 1;
 
+// 自編版新增（展開頁動畫）：跟 CSS 的 cubic-bezier(x1, y1, x2, y2) 相同，給時間比例 x 求進度
+double cubic_bezier(double x1, double y1, double x2, double y2, double x)
+{
+    // 起點 (0,0)、終點 (1,1) 的三次貝茲曲線，在參數 t 的值
+    const auto sample = [](double p1, double p2, double t) {
+        return ((1 + 3 * p1 - 3 * p2) * t + (3 * p2 - 6 * p1)) * t * t + 3 * p1 * t;
+    };
+
+    // x 隨 t 單調遞增，用二分法找出對應的 t
+    double low = 0;
+    double high = 1;
+    double t = x;
+    for (int iteration = 0; iteration < 32; ++iteration) {
+        const auto value = sample(x1, x2, t);
+        if (std::abs(value - x) < 1e-6)
+            break;
+        if (value < x)
+            low = t;
+        else
+            high = t;
+        t = (low + high) / 2;
+    }
+
+    return sample(y1, y2, t);
+}
+
 } // namespace
 
 void FlatSplitterPanel::insert_panel(size_t index, const uie::splitter_item_t* p_item)
@@ -215,6 +241,7 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
                     // 排版算給播放列的位置留著當收合時的視窗區域；容器本身撐滿整個分割面板、疊在最上層
                     now_playing_bar_rect = {static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + cx),
                         static_cast<LONG>(y + cy)};
+                    m_now_playing_bar_rect = now_playing_bar_rect;
                     dwp = DeferWindowPos(dwp, m_panels[n]->m_wnd, HWND_TOP, 0, 0, width, height, 0);
                 } else if (m_panels[n] == now_playing_side) {
                     // 位置在下面另外設定
@@ -230,8 +257,14 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
 
     if (now_playing_bar && now_playing_bar->m_wnd) {
         // 收合：只露出排版給播放列的位置；展開：不設區域，整塊蓋住主內容（區域物件交給系統管理）
-        SetWindowRgn(now_playing_bar->m_wnd,
-            m_now_playing_expanded ? nullptr : CreateRectRgnIndirect(&now_playing_bar_rect), TRUE);
+        // 自編版（展開頁動畫）：動畫進行中改用這一刻的區域，結束時由計時器再排一次
+        if (m_now_playing_animating) {
+            const auto animation_rect = get_now_playing_animation_rect(width, height);
+            SetWindowRgn(now_playing_bar->m_wnd, CreateRectRgnIndirect(&animation_rect), TRUE);
+        } else {
+            SetWindowRgn(now_playing_bar->m_wnd,
+                m_now_playing_expanded ? nullptr : CreateRectRgnIndirect(&now_playing_bar_rect), TRUE);
+        }
         s_now_playing_expanded_for_fields = m_now_playing_expanded;
     }
 
@@ -239,7 +272,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         // 展開且樣式 2 時疊在播放列（ESLyric）上，對齊 main.xml 樣式 2 的右側面板：
         // 寬 640、離右邊 100，在展開區（扣掉播放列高度）垂直置中；高度照 VU 表外觀 Modern antonyb 的比例 830×199
         // main.xml 的右側面板寬度、右留白改了，這裡要跟著改
-        if (m_now_playing_expanded && main_menu::get_now_playing_style() == 2) {
+        // 展開動畫進行中先不顯示，等展開頁整塊出來再疊上去
+        if (m_now_playing_expanded && !m_now_playing_animating && main_menu::get_now_playing_style() == 2) {
             const int stage_height = gsl::narrow<int>(height) - (now_playing_bar_rect.bottom - now_playing_bar_rect.top);
             const int side_width = uih::scale_dpi_value(640);
             const int side_height = MulDiv(side_width, 199, 830);
@@ -1229,13 +1263,79 @@ bool FlatSplitterPanel::s_toggle_now_playing()
 
         s_last_now_playing_toggle_tick = GetTickCount64();
         splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
-        splitter->on_size_changed();
-        // 收合時露出來的主內容馬上重畫，不等訊息迴圈
-        RedrawWindow(splitter->get_wnd(), nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+        // 自編版（展開頁動畫）：不再一次切換區域，改成由下往上揭開／由上往下蓋回
+        splitter->start_now_playing_animation();
         return true;
     }
 
     return false;
+}
+
+void FlatSplitterPanel::start_now_playing_animation()
+{
+    const auto now_playing_bar = get_now_playing_bar_panel();
+
+    if (!now_playing_bar || !now_playing_bar->m_wnd) {
+        on_size_changed();
+        return;
+    }
+
+    // 從目前看得到的區域開始；動畫進行中再切換時，就從當下的位置倒回去
+    // 沒設區域（展開中）時 GetWindowRgnBox 傳回 ERROR，起點是整個視窗
+    RECT from{};
+    if (GetWindowRgnBox(now_playing_bar->m_wnd, &from) == ERROR)
+        GetClientRect(now_playing_bar->m_wnd, &from);
+
+    m_now_playing_animation_from = from;
+    m_now_playing_animation_start = std::chrono::steady_clock::now();
+    m_now_playing_animating = true;
+
+    on_size_changed();
+    SetTimer(m_wnd, now_playing_animation_timer_id, USER_TIMER_MINIMUM, nullptr);
+}
+
+void FlatSplitterPanel::on_now_playing_animation_timer()
+{
+    const auto now_playing_bar = get_now_playing_bar_panel();
+    const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_animation_start;
+
+    if (!now_playing_bar || !now_playing_bar->m_wnd
+        || elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
+        KillTimer(m_wnd, now_playing_animation_timer_id);
+        m_now_playing_animating = false;
+        // 最終區域、展開頁右側面板
+        on_size_changed();
+    } else {
+        RECT client_rect{};
+        GetClientRect(m_wnd, &client_rect);
+        const auto animation_rect = get_now_playing_animation_rect(client_rect.right, client_rect.bottom);
+        SetWindowRgn(now_playing_bar->m_wnd, CreateRectRgnIndirect(&animation_rect), TRUE);
+    }
+
+    // 新露出來的部分（展開時是展開頁，收合時是主內容）馬上畫，不等訊息迴圈
+    RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
+RECT FlatSplitterPanel::get_now_playing_animation_rect(unsigned width, unsigned height) const
+{
+    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - m_now_playing_animation_start)
+                                .count();
+    const auto linear_progress = std::clamp(elapsed_ms / now_playing_animation_duration_ms, 0.0, 1.0);
+
+    // 曲線跟示意頁相同：展開先快後慢（0.2, 0, 0, 1），收合先慢後快（0.3, 0, 0.8, 0.15）
+    const auto progress = m_now_playing_expanded ? cubic_bezier(0.2, 0.0, 0.0, 1.0, linear_progress)
+                                                 : cubic_bezier(0.3, 0.0, 0.8, 0.15, linear_progress);
+
+    const RECT target = m_now_playing_expanded
+        ? RECT{0, 0, gsl::narrow<LONG>(width), gsl::narrow<LONG>(height)}
+        : m_now_playing_bar_rect;
+    const auto& from = m_now_playing_animation_from;
+    const auto interpolate
+        = [progress](LONG from_value, LONG to_value) { return std::lround(from_value + (to_value - from_value) * progress); };
+
+    return {interpolate(from.left, target.left), interpolate(from.top, target.top),
+        interpolate(from.right, target.right), interpolate(from.bottom, target.bottom)};
 }
 
 bool FlatSplitterPanel::s_is_now_playing_expanded()
