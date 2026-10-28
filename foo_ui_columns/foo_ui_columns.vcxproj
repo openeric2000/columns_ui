@@ -415,6 +415,7 @@
     <ClCompile Include="buttons.cpp" />
     <ClCompile Include="buttons_stock.cpp" />
     <ClCompile Include="menubar.cpp" />
+    <ClCompile Include="menu_button.cpp" />
     <ClCompile Include="order_dropdown.cpp" />
     <ClCompile Include="seekbar.cpp" />
     <ClCompile Include="vis_spectrum.cpp" />

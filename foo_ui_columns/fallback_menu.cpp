@@ -27,6 +27,11 @@ void FallbackMenu::show_for_accelerator(HWND wnd, wchar_t accelerator)
     });
 }
 
+void FallbackMenu::show_at(HWND wnd, POINT screen_point)
+{
+    show_internal(wnd, {}, screen_point);
+}
+
 bool FallbackMenu::on_menu_select(uint32_t id, uint32_t flags) const
 {
     if (!m_status_text_override.is_valid() || m_root_items.empty() || m_base_id_increment == 0)
@@ -96,7 +101,7 @@ void FallbackMenu::initialise()
     m_base_id_increment = UINT16_MAX / gsl::narrow<uint16_t>(m_root_items.size());
 }
 
-void FallbackMenu::show_internal(HWND wnd, std::optional<wchar_t> accelerator)
+void FallbackMenu::show_internal(HWND wnd, std::optional<wchar_t> accelerator, std::optional<POINT> screen_point)
 {
     initialise();
 
@@ -122,7 +127,10 @@ void FallbackMenu::show_internal(HWND wnd, std::optional<wchar_t> accelerator)
 
     menu_helpers::win32_auto_mnemonics(menu.get());
 
-    fb2k::inMainThread([accelerator, accelerator_menu, menu{menu.get()}] {
+    // 自編版：用滑鼠從主選單按鈕打開時（有指定座標）不自動選取第一項
+    const auto select_first_item = !screen_point.has_value();
+
+    fb2k::inMainThread([accelerator, accelerator_menu, menu{menu.get()}, select_first_item] {
         const auto menu_wnd = win32::find_window_for_menu(menu);
 
         if (!menu_wnd)
@@ -133,7 +141,7 @@ void FallbackMenu::show_internal(HWND wnd, std::optional<wchar_t> accelerator)
 
             if (const auto submenu_wnd = win32::find_window_for_menu(accelerator_menu))
                 PostMessage(submenu_wnd, WM_KEYDOWN, VK_DOWN, 0);
-        } else {
+        } else if (select_first_item) {
             PostMessage(menu_wnd, WM_KEYDOWN, VK_DOWN, 0);
         }
     });
@@ -143,7 +151,10 @@ void FallbackMenu::show_internal(HWND wnd, std::optional<wchar_t> accelerator)
     ui_control::get()->override_status_text_create(m_status_text_override);
 
     POINT pt{};
-    ClientToScreen(wnd, &pt);
+    if (screen_point)
+        pt = *screen_point;
+    else
+        ClientToScreen(wnd, &pt);
     const auto id = menu.run(wnd, pt, {.is_right_button = false});
 
     m_status_text_override.reset();

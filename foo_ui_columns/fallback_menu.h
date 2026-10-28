@@ -15,11 +15,14 @@ public:
 
     void show(HWND wnd);
     void show_for_accelerator(HWND wnd, wchar_t accelerator);
+    // 自編版新增：在指定的螢幕座標彈出（主選單按鈕用），不自動選取第一項
+    void show_at(HWND wnd, POINT screen_point);
     bool on_menu_select(uint32_t id, uint32_t flags) const;
 
 private:
     void initialise();
-    void show_internal(HWND wnd, std::optional<wchar_t> accelerator = {});
+    void show_internal(
+        HWND wnd, std::optional<wchar_t> accelerator = {}, std::optional<POINT> screen_point = {});
 
     bool m_initialised{};
     std::vector<FallbackMenuRootItem> m_root_items;

@@ -463,6 +463,9 @@
     <ClCompile Include="menubar.cpp">
       <Filter>Menu toolbar</Filter>
     </ClCompile>
+    <ClCompile Include="menu_button.cpp">
+      <Filter>Menu toolbar</Filter>
+    </ClCompile>
     <ClCompile Include="dsp_preset.cpp">
       <Filter>DSP preset toolbar</Filter>
     </ClCompile>
