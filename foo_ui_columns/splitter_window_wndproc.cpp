@@ -25,16 +25,14 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             [wnd] { RedrawWindow(wnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE); });
         refresh_children();
         break;
-    case WM_TIMER:
+    case msg_now_playing_animation_frame:
         // 自編版新增（展開頁動畫）
-        if (wp == now_playing_animation_timer_id) {
-            on_now_playing_animation_timer();
-            return 0;
-        }
-        break;
+        on_now_playing_animation_frame();
+        return 0;
     case WM_DESTROY:
-        KillTimer(wnd, now_playing_animation_timer_id);
         m_now_playing_animating = false;
+        if (m_now_playing_snapshot_wnd)
+            DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
         destroy_children();
         m_dark_mode_notifier.reset();
         if (!--g_count) {

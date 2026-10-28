@@ -42,6 +42,107 @@ double cubic_bezier(double x1, double y1, double x2, double y2, double x)
     return sample(y1, y2, t);
 }
 
+// 自編版新增（展開頁動畫）：收合時蓋在展開頁原位的截圖視窗
+// 收合時每一格都要重畫露出來的主內容（2026-10-28 實測每格 3～8ms，240Hz 一格只有 4.17ms，會掉格），
+// 所以收合一開始先截下展開頁、用這個視窗蓋在原位，底下一次收合、主內容一次畫好，
+// 動畫只改這個視窗的區域，交給 Windows 合成，程式不用重畫任何東西
+constexpr wchar_t now_playing_snapshot_class_name[] = L"columns_ui_now_playing_snapshot";
+
+LRESULT CALLBACK now_playing_snapshot_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_NCHITTEST:
+        // 不擋滑鼠，點到的是底下的主內容（同一個執行緒的視窗）
+        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_ERASEBKGND:
+        return TRUE;
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};
+        const auto paint_dc = wil::BeginPaint(wnd, &ps);
+        const auto bitmap = reinterpret_cast<HBITMAP>(GetWindowLongPtr(wnd, GWLP_USERDATA));
+        const wil::unique_hdc memory_dc(CreateCompatibleDC(paint_dc.get()));
+        const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap);
+        BitBlt(paint_dc.get(), ps.rcPaint.left, ps.rcPaint.top, wil::rect_width(ps.rcPaint),
+            wil::rect_height(ps.rcPaint), memory_dc.get(), ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
+        return 0;
+    }
+    case WM_NCDESTROY:
+        DeleteObject(reinterpret_cast<HBITMAP>(GetWindowLongPtr(wnd, GWLP_USERDATA)));
+        break;
+    }
+    return DefWindowProc(wnd, msg, wp, lp);
+}
+
+// 截下主視窗 owner 在螢幕 screen_rect 的內容，在原位開一個不搶焦點的視窗顯示
+HWND create_now_playing_snapshot(HWND owner, const RECT& screen_rect)
+{
+    const auto width = wil::rect_width(screen_rect);
+    const auto height = wil::rect_height(screen_rect);
+
+    if (width <= 0 || height <= 0)
+        return nullptr;
+
+    static const auto class_registered = [] {
+        WNDCLASSEX wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = now_playing_snapshot_wndproc;
+        wc.hInstance = core_api::get_my_instance();
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.lpszClassName = now_playing_snapshot_class_name;
+        return RegisterClassEx(&wc) != 0;
+    }();
+
+    if (!class_registered)
+        return nullptr;
+
+    // 截圖：用 PrintWindow 請 Windows 畫出整個主視窗，再裁出要的那塊
+    // 不能直接從 ESLyric 視窗 BitBlt：那只讀得到 GDI 畫的內容，ESLyric 的封面、歌詞和 WebView2 都不在裡面，
+    // 會截到被蓋住的播放清單（2026-10-28 錄影實測）；PrintWindow 整個主視窗約 17～22ms
+    RECT window_rect{};
+    GetWindowRect(owner, &window_rect);
+
+    HBITMAP bitmap{};
+    {
+        const auto screen_dc = wil::GetDC(nullptr);
+        const wil::unique_hdc window_dc(CreateCompatibleDC(screen_dc.get()));
+        const wil::unique_hbitmap window_bitmap(
+            CreateCompatibleBitmap(screen_dc.get(), wil::rect_width(window_rect), wil::rect_height(window_rect)));
+        if (!window_bitmap)
+            return nullptr;
+        const auto _select_window_bitmap = wil::SelectObject(window_dc.get(), window_bitmap.get());
+        if (!PrintWindow(owner, window_dc.get(), PW_RENDERFULLCONTENT))
+            return nullptr;
+
+        const wil::unique_hdc memory_dc(CreateCompatibleDC(screen_dc.get()));
+        bitmap = CreateCompatibleBitmap(screen_dc.get(), width, height);
+        if (!bitmap)
+            return nullptr;
+        const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap);
+        BitBlt(memory_dc.get(), 0, 0, width, height, window_dc.get(), screen_rect.left - window_rect.left,
+            screen_rect.top - window_rect.top, SRCCOPY);
+    }
+
+    const auto wnd = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, now_playing_snapshot_class_name, L"",
+        WS_POPUP, screen_rect.left, screen_rect.top, width, height, owner, nullptr, core_api::get_my_instance(), nullptr);
+
+    if (!wnd) {
+        DeleteObject(bitmap);
+        return nullptr;
+    }
+
+    SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(bitmap));
+
+    // 關掉 Windows 開視窗時的淡入動畫，要一出現就跟原本的畫面一模一樣
+    BOOL disable_transitions = TRUE;
+    DwmSetWindowAttribute(wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
+
+    ShowWindow(wnd, SW_SHOWNOACTIVATE);
+    UpdateWindow(wnd);
+    return wnd;
+}
+
 } // namespace
 
 void FlatSplitterPanel::insert_panel(size_t index, const uie::splitter_item_t* p_item)
@@ -1283,43 +1384,184 @@ void FlatSplitterPanel::start_now_playing_animation()
     // 從目前看得到的區域開始；動畫進行中再切換時，就從當下的位置倒回去
     // 沒設區域（展開中）時 GetWindowRgnBox 傳回 ERROR，起點是整個視窗
     RECT from{};
-    if (GetWindowRgnBox(now_playing_bar->m_wnd, &from) == ERROR)
+    const auto is_fully_expanded = GetWindowRgnBox(now_playing_bar->m_wnd, &from) == ERROR;
+    if (is_fully_expanded)
         GetClientRect(now_playing_bar->m_wnd, &from);
+
+    // 截圖收合進行中又要展開：從截圖目前露出的位置接著用區域動畫展開，排好區域後再拿掉截圖
+    const auto snapshot_wnd = std::exchange(m_now_playing_snapshot_wnd, nullptr);
+    if (snapshot_wnd) {
+        GetClientRect(now_playing_bar->m_wnd, &from);
+        from.top = get_now_playing_snapshot_top();
+    }
+
+    const auto was_animating = m_now_playing_animating || snapshot_wnd;
+
+    // 從完全展開開始收合：改用截圖疊圖，每一格都不用重畫主內容
+    if (!was_animating && is_fully_expanded && !m_now_playing_expanded && start_now_playing_snapshot_collapse())
+        return;
 
     m_now_playing_animation_from = from;
     m_now_playing_animation_start = std::chrono::steady_clock::now();
+
+    // 區域動畫原本沒在跑：重畫時間的平均從第一格重新算
+    if (!m_now_playing_animating)
+        m_now_playing_animation_paint_average.reset();
+
     m_now_playing_animating = true;
 
+    // 換方向就重新估計每格要等幾次螢幕更新（展開、收合的重畫成本差很多）
+    m_now_playing_animation_refreshes_per_frame = 1;
+
     on_size_changed();
-    SetTimer(m_wnd, now_playing_animation_timer_id, USER_TIMER_MINIMUM, nullptr);
+
+    if (snapshot_wnd) {
+        RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+        DestroyWindow(snapshot_wnd);
+    }
+
+    // 動畫進行中再切換時，原本那一串訊息還在跑，不要再送一個（會變成每格跑兩次）
+    if (!was_animating)
+        PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 
-void FlatSplitterPanel::on_now_playing_animation_timer()
+bool FlatSplitterPanel::start_now_playing_snapshot_collapse()
 {
+    // 展開頁＝播放列視窗扣掉底部播放列那一段（播放列視窗跟分割面板一樣大、在 (0, 0)）
+    RECT client_rect{};
+    GetClientRect(m_wnd, &client_rect);
+    RECT stage_rect{0, 0, client_rect.right, m_now_playing_bar_rect.top};
+    MapWindowPoints(m_wnd, HWND_DESKTOP, reinterpret_cast<POINT*>(&stage_rect), 2);
+
+    m_now_playing_snapshot_wnd = create_now_playing_snapshot(GetAncestor(m_wnd, GA_ROOT), stage_rect);
+
+    if (!m_now_playing_snapshot_wnd)
+        return false;
+
+    m_now_playing_snapshot_height = m_now_playing_bar_rect.top;
+
+    // 截圖確定顯示到螢幕上，才把底下真的展開頁收起來、主內容一次畫好（都被截圖蓋著，看不到）
+    // 2026-10-28 實測：截圖＋顯示 33～40ms、主內容重畫 27～34ms，按下到開始動約 65～70ms
+    [[maybe_unused]] const auto hr = DwmFlush();
+    m_now_playing_animating = false;
+    on_size_changed();
+    RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+
+    m_now_playing_snapshot_start = std::chrono::steady_clock::now();
+    PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+    return true;
+}
+
+int FlatSplitterPanel::get_now_playing_snapshot_top() const
+{
+    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - m_now_playing_snapshot_start)
+                                .count();
+    const auto linear_progress = std::clamp(elapsed_ms / now_playing_animation_duration_ms, 0.0, 1.0);
+    // 曲線跟區域動畫的收合相同（ease-in-out sine）
+    return std::lround(m_now_playing_snapshot_height * cubic_bezier(0.37, 0.0, 0.63, 1.0, linear_progress));
+}
+
+void FlatSplitterPanel::on_now_playing_snapshot_frame()
+{
+    const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_snapshot_start;
+
+    if (elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
+        DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+        return;
+    }
+
+    // 截圖視窗露出的部分上緣往下移；底下的主內容早就畫好了，只是被截圖蓋著
+    RECT client_rect{};
+    GetClientRect(m_now_playing_snapshot_wnd, &client_rect);
+    SetWindowRgn(m_now_playing_snapshot_wnd,
+        CreateRectRgn(0, get_now_playing_snapshot_top(), client_rect.right, client_rect.bottom), TRUE);
+    UpdateWindow(m_now_playing_snapshot_wnd);
+
+    [[maybe_unused]] const auto hr = DwmFlush();
+    PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+}
+
+void FlatSplitterPanel::on_now_playing_animation_frame()
+{
+    if (m_now_playing_snapshot_wnd) {
+        on_now_playing_snapshot_frame();
+        return;
+    }
+
+    if (!m_now_playing_animating)
+        return;
+
+    using clock = std::chrono::steady_clock;
+    const auto to_ms = [](clock::duration duration) { return std::chrono::duration<double, std::milli>(duration).count(); };
+
+    // 螢幕已經更新了幾次、每次間隔幾毫秒（拿不到時當作 60Hz，每格只等一次）
+    const auto get_refresh_info = []() -> std::pair<uint64_t, double> {
+        DWM_TIMING_INFO info{};
+        info.cbSize = sizeof(info);
+        LARGE_INTEGER frequency{};
+        if (FAILED(DwmGetCompositionTimingInfo(nullptr, &info)) || !QueryPerformanceFrequency(&frequency))
+            return {0, 1000.0 / 60};
+        return {info.cRefresh, static_cast<double>(info.qpcRefreshPeriod) * 1000.0 / frequency.QuadPart};
+    };
+
+    const auto frame_start = clock::now();
+    const auto [refresh_at_start, refresh_period_ms] = get_refresh_info();
     const auto now_playing_bar = get_now_playing_bar_panel();
-    const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_animation_start;
+    const auto elapsed = frame_start - m_now_playing_animation_start;
 
     if (!now_playing_bar || !now_playing_bar->m_wnd
         || elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
-        KillTimer(m_wnd, now_playing_animation_timer_id);
         m_now_playing_animating = false;
         // 最終區域、展開頁右側面板
         on_size_changed();
+        RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
     } else {
         RECT client_rect{};
         GetClientRect(m_wnd, &client_rect);
         const auto animation_rect = get_now_playing_animation_rect(client_rect.right, client_rect.bottom);
-        SetWindowRgn(now_playing_bar->m_wnd, CreateRectRgnIndirect(&animation_rect), TRUE);
+
+        RECT previous_rect{};
+        if (GetWindowRgnBox(now_playing_bar->m_wnd, &previous_rect) == ERROR)
+            previous_rect = client_rect;
+
+        // 只重畫新露出來的那一條（展開時是展開頁，收合時是主內容）：
+        // 換區域時不讓系統整個重畫播放列，再自己把上下兩個區域之間那條設成要重畫，馬上畫
+        SetWindowRgn(now_playing_bar->m_wnd, CreateRectRgnIndirect(&animation_rect), FALSE);
+        RECT changed_rect{};
+        UnionRect(&changed_rect, &previous_rect, &animation_rect);
+        if (previous_rect.left == animation_rect.left && previous_rect.right == animation_rect.right
+            && previous_rect.bottom == animation_rect.bottom) {
+            changed_rect.top = std::min(previous_rect.top, animation_rect.top);
+            changed_rect.bottom = std::max(previous_rect.top, animation_rect.top);
+        }
+        RedrawWindow(m_wnd, &changed_rect, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
 
-    // 新露出來的部分（展開時是展開頁，收合時是主內容）馬上畫，不等訊息迴圈
-    RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+    if (!m_now_playing_animating)
+        return;
 
-    // 等這一格真的顯示到螢幕上再處理下一格，每格間隔對齊螢幕更新，不會忽快忽慢
-    // （計時器本身約 15.6ms 才跳一次，跟螢幕更新不同步）
-    if (m_now_playing_animating) {
+    const auto paint_ms = to_ms(clock::now() - frame_start);
+
+    // 每格固定等幾次螢幕更新，讓每格間隔一致，不會一格快一格慢：
+    // 用「比較慢的那幾格」估計（2026-10-28 實測收合時慢的 10% 約是平均的 1.6 倍：平均 3ms、慢的到 4.8～8ms，
+    // 240Hz 一次只有 4.17ms），收合就固定每格等兩次＝穩定 120 格；展開每格約 0.5ms，維持每次更新都畫（240 格）。
+    // 同一次動畫裡只往上調、不往下調，避免在一次、兩次之間來回跳
+    m_now_playing_animation_paint_average = m_now_playing_animation_paint_average
+        ? *m_now_playing_animation_paint_average * 0.8 + paint_ms * 0.2
+        : paint_ms;
+    const auto expected_slow_paint_ms = *m_now_playing_animation_paint_average * 1.6 + 0.5;
+    m_now_playing_animation_refreshes_per_frame = std::max(m_now_playing_animation_refreshes_per_frame,
+        std::clamp(static_cast<int>(std::ceil(expected_slow_paint_ms / refresh_period_ms)), 1, 4));
+    const auto refreshes_per_frame = m_now_playing_animation_refreshes_per_frame;
+
+    for (int wait = 0; wait < refreshes_per_frame; ++wait) {
         [[maybe_unused]] const auto hr = DwmFlush();
+        if (refresh_at_start && get_refresh_info().first >= refresh_at_start + refreshes_per_frame)
+            break;
     }
+
+    PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 
 RECT FlatSplitterPanel::get_now_playing_animation_rect(unsigned width, unsigned height) const

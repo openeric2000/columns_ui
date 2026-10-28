@@ -17,7 +17,9 @@ inline constexpr std::string_view now_playing_side_title = "展開頁右側";
 // 自編版新增（展開頁動畫）：展開時視窗區域的上緣從播放列往上推、收合時往下蓋回的時間長度
 // 2026-10-28 使用者在示意頁選 A 款；280ms 實測「不夠絲滑」，改 400ms 並換平緩的曲線（見 get_now_playing_animation_rect）
 inline constexpr int now_playing_animation_duration_ms = 400;
-inline constexpr UINT_PTR now_playing_animation_timer_id = 0x4e50;
+// 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
+// （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
+inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
 
 enum Orientation {
     horizontal,
@@ -232,9 +234,14 @@ private:
     Panel::Ptr get_now_playing_side_panel() const;
     // 自編版新增（展開頁動畫）：從目前看得到的區域開始，往 m_now_playing_expanded 的最終區域移動
     void start_now_playing_animation();
-    void on_now_playing_animation_timer();
+    void on_now_playing_animation_frame();
     // 動畫目前這一刻的播放列視窗區域
     RECT get_now_playing_animation_rect(unsigned width, unsigned height) const;
+    // 自編版新增（展開頁動畫）：從完全展開開始收合時，改用截圖疊圖（見 start_now_playing_animation）
+    bool start_now_playing_snapshot_collapse();
+    void on_now_playing_snapshot_frame();
+    // 截圖視窗目前露出部分的上緣（截圖視窗座標）
+    int get_now_playing_snapshot_top() const;
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
@@ -247,6 +254,13 @@ private:
     bool m_now_playing_animating{};
     RECT m_now_playing_animation_from{};
     std::chrono::steady_clock::time_point m_now_playing_animation_start;
+    // 每格重畫時間的移動平均（毫秒），決定每格等幾次螢幕更新；同一次動畫裡只往上調。還沒畫第一格時是空的
+    std::optional<double> m_now_playing_animation_paint_average;
+    int m_now_playing_animation_refreshes_per_frame{1};
+    // 收合用的截圖視窗（蓋在展開頁原位、顯示收合前一刻的畫面）與它的動畫開始時間、高度
+    HWND m_now_playing_snapshot_wnd{};
+    std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
+    int m_now_playing_snapshot_height{};
     int m_last_position{};
     size_t m_panel_dragging{};
     bool m_panel_dragging_valid{false};
