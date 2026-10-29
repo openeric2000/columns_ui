@@ -808,19 +808,19 @@ BEGIN
     PUSHBUTTON      "Close",IDCANCEL,136,206,50,14
 END
 
-IDD_THEME_FONT DIALOGEX 0, 0, 240, 158
+IDD_THEME_FONT DIALOGEX 0, 0, 240, 167
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "主題字型"
 FONT 9, "Microsoft JhengHei UI", 400, 0, 0x0
 BEGIN
-    LTEXT           "選一個字型，一次換掉清單、分頁、資料夾樹、播放列、展開頁與上方專輯標頭的字型。粗細固定用一般粗細。",-1,7,7,226,20
-    LTEXT           "字型",-1,7,32,40,9
-    COMBOBOX        IDC_THEME_FONT_FAMILY,7,43,226,200,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "整體大小（清單、分頁與資料夾樹一起放大縮小；播放列與標頭固定不變）",-1,7,63,226,9
-    COMBOBOX        IDC_THEME_FONT_SIZE,7,74,110,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "歌詞字型不在這裡，請在歌詞上按右鍵 → 面板參數選項 另外設定。",-1,7,98,226,20
-    DEFPUSHBUTTON   "確定",IDOK,129,137,50,14
-    PUSHBUTTON      "取消",IDCANCEL,183,137,50,14
+    LTEXT           "選一個字型，一次換掉清單、分頁、資料夾樹、播放列、展開頁與上方專輯標頭的字型。粗細固定用一般粗細。",IDC_THEME_FONT_INTRO,7,7,226,27
+    LTEXT           "字型",IDC_THEME_FONT_FAMILY_LABEL,7,38,100,9
+    COMBOBOX        IDC_THEME_FONT_FAMILY,7,49,226,200,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "整體大小（清單、分頁與資料夾樹一起放大縮小；播放列與標頭固定不變）",IDC_THEME_FONT_SIZE_LABEL,7,69,226,18
+    COMBOBOX        IDC_THEME_FONT_SIZE,7,89,110,100,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "歌詞字型不在這裡，請在歌詞上按右鍵 → 面板參數選項 另外設定。",IDC_THEME_FONT_LYRICS_NOTE,7,113,226,27
+    DEFPUSHBUTTON   "確定",IDOK,129,146,50,14
+    PUSHBUTTON      "取消",IDCANCEL,183,146,50,14
 END
 
 IDD_PREFS_SETUP DIALOGEX 0, 0, 327, 272

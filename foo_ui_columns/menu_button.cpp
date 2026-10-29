@@ -2,6 +2,7 @@
 
 #include "fallback_menu.h"
 #include "layout.h"
+#include "nocturne_text.h"
 #include "ng_playlist/ng_playlist.h"
 
 // 自編版新增：主選單按鈕（☰）
@@ -26,8 +27,8 @@ constexpr GUID playlist_tabs_font_guid{0x942c36a4, 0x4e28, 0x4cea, {0x96, 0x44, 
 
 // Segoe MDL2 Assets 的漢堡圖示（GlobalNavigationButton）
 constexpr wchar_t hamburger_glyph[] = L"\xE700";
-// 2026-10-28 使用者覺得只寫「收合」看不出要收合什麼，改「全部收合」（「收合清單」的「清單」容易被當成播放清單）
-constexpr wchar_t collapse_text[] = L"全部收合";
+// 按鈕文字「全部收合」（中英兩套在 nocturne_text.h）
+using nocturne_text::collapse_text;
 // 以下尺寸單位是 DIP：☰ 的可點範圍是正方形、圖示置中；「收合」同高、寬度＝字寬＋左右留白；
 // 面板高度固定；兩顆按鈕各離左右邊 button_margin
 constexpr int panel_height = 48;
@@ -95,7 +96,7 @@ public:
     static constexpr GUID extension_guid{0xf12d4a25, 0x36c8, 0x47b3, {0x86, 0x11, 0x5c, 0x70, 0xc2, 0xab, 0xa1, 0xc8}};
 
     const GUID& get_extension_guid() const override { return extension_guid; }
-    void get_name(pfc::string_base& out) const override { out = "主選單按鈕"; }
+    void get_name(pfc::string_base& out) const override { out = nocturne_text::menu_button_panel_name; }
     void get_category(pfc::string_base& out) const override { out = "Toolbars"; }
     unsigned get_type() const override { return uie::type_toolbar | uie::type_panel; }
 
@@ -297,7 +298,7 @@ void MenuButton::create_tooltip()
     ti.hwnd = get_wnd();
     ti.uId = static_cast<UINT_PTR>(Button::menu);
     ti.rect = get_button_rect(Button::menu);
-    ti.lpszText = const_cast<wchar_t*>(L"選單");
+    ti.lpszText = const_cast<wchar_t*>(nocturne_text::menu_tooltip);
     SendMessage(m_tooltip_wnd, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>(&ti));
 }
 

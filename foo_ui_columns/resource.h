@@ -373,6 +373,10 @@
 #define IDC_REMEMBER_WINDOW_POS         1242
 #define IDC_THEME_FONT_FAMILY           1243
 #define IDC_THEME_FONT_SIZE             1244
+#define IDC_THEME_FONT_INTRO            1245
+#define IDC_THEME_FONT_FAMILY_LABEL     1246
+#define IDC_THEME_FONT_SIZE_LABEL       1247
+#define IDC_THEME_FONT_LYRICS_NOTE      1248
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -382,7 +386,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1245
+#define _APS_NEXT_CONTROL_VALUE         1249
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

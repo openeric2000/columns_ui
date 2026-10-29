@@ -7,6 +7,7 @@
 
 #include "config_appearance.h"
 #include "dark_mode_dialog.h"
+#include "nocturne_text.h"
 
 // 自編版新增：View/Layout/主題字型…
 // 選一個字型，一次換掉主題用到的 5 個 Columns UI 字型項目，以及兩個主題檔（ESLyric 佈局 main.xml、標頭 index.html）
@@ -46,10 +47,10 @@ struct SizeOption {
 constexpr size_t default_size_option_index = 1;
 
 constexpr std::array size_options{
-    SizeOption{L"小（90%）", 0.9f},
-    SizeOption{L"標準", 1.0f},
-    SizeOption{L"大（115%）", 1.15f},
-    SizeOption{L"特大（130%）", 1.3f},
+    SizeOption{nocturne_text::size_small, 0.9f},
+    SizeOption{nocturne_text::size_standard, 1.0f},
+    SizeOption{nocturne_text::size_large, 1.15f},
+    SizeOption{nocturne_text::size_extra_large, 1.3f},
 };
 
 struct Selection {
@@ -193,14 +194,14 @@ FileUpdateResult update_theme_file(
     {
         std::ifstream stream(path, std::ios::binary);
         if (!stream)
-            return {.error = "找不到檔案"};
+            return {.error = nocturne_text::error_file_not_found};
 
         content.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
     }
 
     std::smatch match;
     if (!std::regex_search(content, match, std::regex(file.pattern)))
-        return {.error = "檔案裡找不到字型設定"};
+        return {.error = nocturne_text::error_font_setting_not_found};
 
     const auto position = gsl::narrow<size_t>(match.position(1));
     const auto length = gsl::narrow<size_t>(match.length(1));
@@ -220,13 +221,13 @@ FileUpdateResult update_theme_file(
         stream.close();
 
         if (!stream)
-            return {.error = "寫入失敗"};
+            return {.error = nocturne_text::error_write_failed};
     }
 
     if (!MoveFileExW(temp_path.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         std::error_code error_code;
         std::filesystem::remove(temp_path, error_code);
-        return {.error = "寫入失敗"};
+        return {.error = nocturne_text::error_write_failed};
     }
 
     return {.changed = true};
@@ -243,6 +244,15 @@ std::optional<Selection> run_dialog(HWND parent_wnd, const std::vector<uih::dire
         parent_wnd, [&](HWND wnd, UINT msg, WPARAM wp, LPARAM lp) -> INT_PTR {
             switch (msg) {
             case WM_INITDIALOG: {
+                // 對話框的文字依語言填入（.rc 裡只放版面）
+                SetWindowText(wnd, nocturne_text::theme_font_title_w);
+                SetDlgItemText(wnd, IDC_THEME_FONT_INTRO, nocturne_text::theme_font_intro);
+                SetDlgItemText(wnd, IDC_THEME_FONT_FAMILY_LABEL, nocturne_text::theme_font_family_label);
+                SetDlgItemText(wnd, IDC_THEME_FONT_SIZE_LABEL, nocturne_text::theme_font_size_label);
+                SetDlgItemText(wnd, IDC_THEME_FONT_LYRICS_NOTE, nocturne_text::theme_font_lyrics_note);
+                SetDlgItemText(wnd, IDOK, nocturne_text::ok_text);
+                SetDlgItemText(wnd, IDCANCEL, nocturne_text::cancel_text);
+
                 const auto family_combo = GetDlgItem(wnd, IDC_THEME_FONT_FAMILY);
                 const auto current_name = get_current_family_name();
 
@@ -288,7 +298,7 @@ std::optional<Selection> run_dialog(HWND parent_wnd, const std::vector<uih::dire
 
 void open_theme_font_dialog(HWND parent_wnd)
 {
-    constexpr auto title = "主題字型";
+    constexpr auto title = nocturne_text::theme_font_title;
 
     std::vector<uih::direct_write::FontFamily> families;
     try {
@@ -300,7 +310,7 @@ void open_theme_font_dialog(HWND parent_wnd)
 
     if (families.empty()) {
         dark::modal_info_box(
-            parent_wnd, title, "讀不到系統字型清單。", uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
+            parent_wnd, title, nocturne_text::error_no_font_list, uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
         return;
     }
 
@@ -317,15 +327,15 @@ void open_theme_font_dialog(HWND parent_wnd)
         const auto font = find_regular_font(family_fonts);
 
         if (!font) {
-            dark::modal_info_box(
-                parent_wnd, title, "這個字型沒有可以用的樣式。", uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
+            dark::modal_info_box(parent_wnd, title, nocturne_text::error_no_usable_style, uih::InfoBoxType::Error,
+                uih::InfoBoxModalType::OK);
             return;
         }
 
         apply_columns_ui_fonts(family, *font, size_option.scale);
         file_family_name = mmh::to_utf8(get_english_family_name(family));
     } catch (const std::exception& ex) {
-        const auto message = fmt::format("換字型失敗：{}", ex.what());
+        const auto message = fmt::format(nocturne_text::error_change_failed, ex.what());
         dark::modal_info_box(parent_wnd, title, message.c_str(), uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
         return;
     }
@@ -342,30 +352,25 @@ void open_theme_font_dialog(HWND parent_wnd)
         is_any_file_changed = is_any_file_changed || result.changed;
 
         if (result.error)
-            failures += fmt::format("\n{}（{}）", mmh::to_utf8(path.native()), *result.error);
+            failures += fmt::format(nocturne_text::failure_item, mmh::to_utf8(path.native()), *result.error);
     }
 
     // 主題檔沒有變（只改了大小）時，Columns UI 的項目已經即時套用，不用重開
     if (!is_any_file_changed && failures.empty()) {
         const auto message = fmt::format(
-            "已經換成「{}」，大小「{}」，都已經套用好了。\n\n"
-            "歌詞字型不在這裡，請在歌詞上按右鍵 → 面板參數選項 另外設定。",
-            mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
+            nocturne_text::applied_message, mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
         dark::modal_info_box(
             parent_wnd, title, message.c_str(), uih::InfoBoxType::Information, uih::InfoBoxModalType::OK);
         return;
     }
 
-    auto message = fmt::format(
-        "已經換成「{}」，大小「{}」。\n\n"
-        "清單、分頁與資料夾樹已經換好；播放列、展開頁與上方專輯標頭要重開 foobar2000 才會換字型（大小固定不變）。\n"
-        "歌詞字型不在這裡，請在歌詞上按右鍵 → 面板參數選項 另外設定。",
-        mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
+    auto message
+        = fmt::format(nocturne_text::restart_message, mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
 
     if (!failures.empty())
-        message += fmt::format("\n\n下面的檔案沒有換到，要自己用記事本改：{}", failures);
+        message += fmt::format(nocturne_text::failures_message, failures);
 
-    message += "\n\n要現在重開 foobar2000 嗎？";
+    message += nocturne_text::restart_question;
 
     if (dark::modal_info_box(parent_wnd, title, message.c_str(),
             failures.empty() ? uih::InfoBoxType::Information : uih::InfoBoxType::Warning,

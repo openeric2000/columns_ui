@@ -7,13 +7,15 @@ constexpr auto max_panel_dimension = 0x7fff;
 
 // 自編版新增（View/Layout/切換播放頁）：主內容與播放列兩個面板的自訂標題
 // 播放列面板的子視窗（ESLyric）另外會掛 s_now_playing_bar_subclass_proc
-inline constexpr std::string_view now_playing_main_title = "主內容";
-inline constexpr std::string_view now_playing_bar_title = "播放列";
+// 中英兩種標題都認（中文版、個人版的版面是中文，英文版是英文），所以兩種語言的 DLL 都能用在任何一版的版面上
+using PanelTitles = std::array<std::string_view, 2>;
+inline constexpr PanelTitles now_playing_main_title{"主內容", "Main Content"};
+inline constexpr PanelTitles now_playing_bar_title{"播放列", "Now Playing Bar"};
 // 自編版新增：播放列高度固定為 ESLyric 佈局 main.xml 播放列（bar）的高度 138 DIP，改了那邊要跟著改
 // 版面裡存的高度會跟著存檔時的 DPI 換算而有誤差（219 實測少約 5px），播放列頂端的進度條就會被切掉
 inline constexpr int now_playing_bar_height = 138;
 // 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
-inline constexpr std::string_view now_playing_side_title = "展開頁右側";
+inline constexpr PanelTitles now_playing_side_title{"展開頁右側", "Now Playing Side"};
 // 自編版新增（展開頁動畫）：展開時視窗區域的上緣從播放列往上推、收合時往下蓋回的時間長度
 // 2026-10-28 使用者在示意頁選 A 款；280ms 實測「不夠絲滑」，改 400ms 並換平緩的曲線（見 get_now_playing_animation_rect）
 inline constexpr int now_playing_animation_duration_ms = 400;
@@ -175,7 +177,7 @@ private:
 
         uih::IntegerAndDpi<uint32_t> m_size{150};
 
-        bool has_custom_title(std::string_view title) const;
+        bool has_custom_title(const PanelTitles& titles) const;
 
         uie::splitter_item_full_v2_t* create_splitter_item(bool b_set_ptr = true);
 
@@ -227,7 +229,7 @@ private:
 
     std::vector<Panel::Ptr>::iterator find_panel_by_container_wnd(HWND wnd);
     std::vector<Panel::Ptr>::iterator find_panel_by_panel_wnd(HWND wnd);
-    Panel::Ptr find_panel_by_custom_title(std::string_view title) const;
+    Panel::Ptr find_panel_by_custom_title(const PanelTitles& titles) const;
     // 直向且同一層有主內容與播放列兩個面板時傳回播放列，否則 nullptr
     Panel::Ptr get_now_playing_bar_panel() const;
     // 有播放列時，同一層自訂標題「展開頁右側」的面板，否則 nullptr
