@@ -10,6 +10,7 @@
 #include "tab_main_window.h"
 #include "splitter.h"
 #include "theme_font.h"
+#include "nocturne_text.h"
 
 namespace cui::main_menu {
 
@@ -158,8 +159,8 @@ const MainMenuCommand live_editing{toggle_live_editing_id, "Live editing",
 // 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板（標題常數在 splitter.h）；找不到時什麼都不做
 using panels::splitter::FlatSplitterPanel;
 
-const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, "切換播放頁",
-    "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放時不展開。",
+const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, nocturne_text::toggle_now_playing_name,
+    nocturne_text::toggle_now_playing_description,
     [] {
         // 沒在播放（停止）時不展開；暫停算播放中。收合一律可以
         if (!FlatSplitterPanel::s_is_now_playing_expanded() && !playback_control::get()->is_playing())
@@ -333,8 +334,8 @@ service_factory_single_t<NowPlayingViewFieldProvider> now_playing_view_field_pro
 // 自編版新增：ESLyric 展開頁的大封面用 mm://View/Layout/顯示封面大圖 開 foobar2000 picture viewer
 // 雙擊播放列會被轉成第二次按下（見 splitter_window.cpp 的 s_now_playing_bar_subclass_proc），
 // 所以雙擊間隔內的第二次呼叫直接略過，不會開出兩個視窗
-const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, "顯示封面大圖",
-    "在 foobar2000 picture viewer 開啟正在播放曲目的封面。",
+const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, nocturne_text::show_cover_name,
+    nocturne_text::show_cover_description,
     [] {
         static ULONGLONG last_tick{};
         const auto now = GetTickCount64();
@@ -352,26 +353,25 @@ const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, "顯示�
     }};
 
 // 自編版新增：選一個字型，一次換掉主題的 Columns UI 字型項目與兩個主題檔（見 theme_font.cpp）
-const MainMenuCommand theme_font{theme_font_id, "主題字型…",
-    "一次換掉清單、分頁、資料夾樹、播放列與專輯標頭的字型，並調整清單的整體大小。",
+const MainMenuCommand theme_font{theme_font_id, nocturne_text::theme_font_name, nocturne_text::theme_font_description,
     [] { theme_font::open_theme_font_dialog(core_api::get_main_window()); }};
 
-const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, "展開頁：置中",
-    "展開頁的封面與歌詞整組置中。", [] { set_now_playing_style(1); }, {},
+const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, nocturne_text::style_centered_name,
+    nocturne_text::style_centered_description, [] { set_now_playing_style(1); }, {},
     [] { return now_playing_style.get() == 1; }};
 
 // 2026-10-27 使用者覺得樣式 2 還不對，先藏起來：選單項目要按住 Shift 才出現，也不放進切換循環
-const MainMenuCommand now_playing_style_spectrum{now_playing_style_spectrum_id, "展開頁：靠左＋VU 表",
-    "展開頁的封面靠左，右邊顯示 VU 表（版面裡自訂標題「展開頁右側」的面板）。", [] { set_now_playing_style(2); }, {},
+const MainMenuCommand now_playing_style_spectrum{now_playing_style_spectrum_id, nocturne_text::style_spectrum_name,
+    nocturne_text::style_spectrum_description, [] { set_now_playing_style(2); }, {},
     [] { return now_playing_style.get() == 2; }, true};
 
-const MainMenuCommand now_playing_style_info{now_playing_style_info_id, "展開頁：靠左＋資訊卡",
-    "展開頁的封面靠左，右邊顯示曲目資訊。", [] { set_now_playing_style(3); }, {},
+const MainMenuCommand now_playing_style_info{now_playing_style_info_id, nocturne_text::style_info_name,
+    nocturne_text::style_info_description, [] { set_now_playing_style(3); }, {},
     [] { return now_playing_style.get() == 3; }};
 
 // ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，在置中與靠左＋資訊卡之間切換（樣式 2 暫時不放進來）
-const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, "切換展開頁樣式",
-    "在展開頁樣式「置中」與「靠左＋資訊卡」之間切換。",
+const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, nocturne_text::cycle_style_name,
+    nocturne_text::cycle_style_description,
     [] { set_now_playing_style(now_playing_style.get() == 1 ? 3 : 1); }};
 
 const MainMenuCommand focus_filter_search{

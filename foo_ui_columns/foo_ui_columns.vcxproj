@@ -484,6 +484,7 @@
     <ClInclude Include="font_picker.h" />
     <ClInclude Include="format_code_generator.h" />
     <ClInclude Include="theme_font.h" />
+    <ClInclude Include="nocturne_text.h" />
     <ClInclude Include="gdi.h" />
     <ClInclude Include="get_msg_hook.h" />
     <ClInclude Include="icons.h" />

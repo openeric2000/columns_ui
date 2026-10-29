@@ -1360,10 +1360,10 @@ void FlatSplitterPanel::s_on_size_change()
     }
 }
 
-FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::find_panel_by_custom_title(std::string_view title) const
+FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::find_panel_by_custom_title(const PanelTitles& titles) const
 {
-    const auto iter
-        = std::ranges::find_if(m_panels, [title](const Panel::Ptr& panel) { return panel->has_custom_title(title); });
+    const auto iter = std::ranges::find_if(
+        m_panels, [&titles](const Panel::Ptr& panel) { return panel->has_custom_title(titles); });
 
     return iter != m_panels.end() ? *iter : nullptr;
 }
