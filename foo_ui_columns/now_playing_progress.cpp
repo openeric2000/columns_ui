@@ -1,11 +1,16 @@
 #include "pch.h"
 
 #include <timeapi.h>
+#include <thread>
 
 #include "now_playing_progress.h"
 #include "menu_items.h"
 
 #pragma comment(lib, "winmm.lib")
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 
 namespace cui::now_playing_progress {
 
@@ -14,7 +19,8 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 constexpr wchar_t window_class_name[] = L"columns_ui_now_playing_progress";
-constexpr UINT_PTR timer_id = 1;
+// 計時執行緒通知視窗「該更新了」的訊息
+constexpr UINT msg_tick = WM_USER + 0x4e6;
 // 播放中每格間隔；暫停、停止時沒有東西在動，慢慢檢查就好；看不到時更慢
 constexpr UINT interval_active_ms = 16;
 constexpr UINT interval_idle_ms = 100;
@@ -30,12 +36,35 @@ constexpr float thumb_radius_dip = 6;
 // 吸收掉的偏差再用 offset_decay_seconds 慢慢歸零（跟 next_track_toast.cpp 的 smooth_position 同一套）
 constexpr double max_absorb_seconds = 0.6;
 constexpr double offset_decay_seconds = 0.7;
-// 跳轉之後 fb2k 回報的位置要過一下才會更新，這段時間先顯示跳轉的目標，免得紅線先彈回舊位置
-constexpr auto seek_hold = std::chrono::milliseconds(400);
+// 跳轉之後到 fb2k 說「跳完了」之前先顯示跳轉的目標，免得紅線先彈回舊位置；等太久（沒收到通知）就放棄
+// 2026-11-02 錄影：原本固定壓住 400 ms，fb2k 其實已經開始播、位置一直在前進，期滿紅線才突然往前跳 0.4 秒，看起來像卡一下
+constexpr auto seek_hold_timeout = std::chrono::milliseconds(1500);
 
 const Gdiplus::Color background_colour(255, 24, 24, 24);
 const Gdiplus::Color track_colour(255, 61, 61, 61);
 const Gdiplus::Color played_colour(255, 247, 11, 11);
+
+// 每跳轉完成一次（任何來源：這個進度條、別的進度條、快速鍵）加一，進度條用它判斷自己發的跳轉完成了沒
+std::atomic<uint64_t> seek_generation{0};
+
+class SeekPlayCallback : public play_callback_static {
+public:
+    unsigned get_flags() override { return flag_on_playback_seek; }
+
+    void on_playback_seek(double time) override { ++seek_generation; }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    void on_playback_new_track(metadb_handle_ptr track) override {}
+    void on_playback_stop(play_control::t_stop_reason reason) override {}
+    void on_playback_pause(bool state) override {}
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_playback_time(double time) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<SeekPlayCallback> seek_play_callback;
 
 struct Geometry {
     float left{};
@@ -75,6 +104,9 @@ private:
     void draw(HDC dc, int width, int height) const;
     void ensure_buffer(HDC reference, int width, int height);
 
+    void start_ticker();
+    void stop_ticker();
+    void ticker_main();
     void tick();
     View sample_view();
     double smooth_position(double source, bool paused);
@@ -88,8 +120,16 @@ private:
     void invalidate();
 
     HWND m_wnd{};
+
+    // 計時執行緒：用高精度的等待計時器每 m_period_ms 毫秒通知一次視窗（PostMessage，上一個還沒處理就不再送）。
+    // 不用 WM_TIMER：它的優先權最低、粒度粗（16 ms 的計時器常常要等到 31 ms），錄影量到紅線只有約 37 Hz 在動
+    std::thread m_ticker;
+    wil::unique_event m_ticker_stop;
+    wil::unique_event m_ticker_wake;
+    std::atomic<UINT> m_period_ms{interval_idle_ms};
+    std::atomic<bool> m_tick_pending{false};
     UINT m_interval{};
-    // 計時精度是否已調成 1 ms（要成對還原）：預設 15.6 ms 的精度下 16 ms 的計時器常常要等到 31 ms
+    // 計時精度是否已調成 1 ms（要成對還原）；高精度等待計時器不可用時才靠它
     bool m_high_resolution_timer{};
 
     View m_view;
@@ -107,6 +147,8 @@ private:
 
     struct SeekHold {
         double seconds{};
+        // 發出跳轉前的 seek_generation；變大了就表示 fb2k 跳完了
+        uint64_t generation{};
         Clock::time_point until;
     };
     std::optional<SeekHold> m_seek_hold;
@@ -141,10 +183,10 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_CREATE:
-        set_interval(interval_idle_ms);
+        start_ticker();
         return 0;
     case WM_DESTROY:
-        KillTimer(m_wnd, timer_id);
+        stop_ticker();
         if (m_high_resolution_timer) {
             timeEndPeriod(1);
             m_high_resolution_timer = false;
@@ -155,15 +197,13 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
     case WM_PAINT:
         on_paint();
         return 0;
-    case WM_TIMER:
-        if (wp == timer_id) {
-            try {
-                tick();
-            }
-            CATCH_LOG()
-            return 0;
+    case msg_tick:
+        m_tick_pending = false;
+        try {
+            tick();
         }
-        break;
+        CATCH_LOG()
+        return 0;
     case WM_MOUSEMOVE:
         if (!m_tracking_mouse) {
             TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, m_wnd, 0};
@@ -271,8 +311,62 @@ void ProgressBar::draw(HDC dc, int width, int height) const
     }
 }
 
+void ProgressBar::start_ticker()
+{
+    m_ticker_stop.create(wil::EventOptions::ManualReset);
+    m_ticker_wake.create(wil::EventOptions::None);
+    m_ticker = std::thread([this] { ticker_main(); });
+}
+
+void ProgressBar::stop_ticker()
+{
+    if (!m_ticker.joinable())
+        return;
+
+    m_ticker_stop.SetEvent();
+    m_ticker.join();
+}
+
+void ProgressBar::ticker_main()
+{
+    // 高精度等待計時器（Windows 10 1803 之後）可以準到 1 ms 以內；不支援就退回一般的等待計時器
+    wil::unique_handle timer(
+        CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
+    if (!timer)
+        timer.reset(CreateWaitableTimerW(nullptr, FALSE, nullptr));
+    if (!timer)
+        return;
+
+    const HANDLE handles[]{m_ticker_stop.get(), m_ticker_wake.get(), timer.get()};
+    UINT period = 0;
+
+    for (;;) {
+        const auto wanted = m_period_ms.load();
+        if (wanted != period) {
+            LARGE_INTEGER due{};
+            due.QuadPart = -static_cast<LONGLONG>(wanted) * 10000;
+            SetWaitableTimer(timer.get(), &due, static_cast<LONG>(wanted), nullptr, nullptr, FALSE);
+            period = wanted;
+        }
+
+        const auto result = WaitForMultipleObjects(static_cast<DWORD>(std::size(handles)), handles, FALSE, INFINITE);
+
+        if (result == WAIT_OBJECT_0)
+            return;
+
+        if (result == WAIT_OBJECT_0 + 2) {
+            // 上一個通知還沒處理完就不再送，視窗忙的時候不會堆積
+            if (!m_tick_pending.exchange(true))
+                PostMessage(m_wnd, msg_tick, 0, 0);
+        } else if (result != WAIT_OBJECT_0 + 1) {
+            return;
+        }
+    }
+}
+
 void ProgressBar::set_interval(UINT ms)
 {
+    // 一般等待計時器（沒有高精度可用時）的精度要靠 timeBeginPeriod，有高精度時多開也無妨
     const auto want_high_resolution = ms == interval_active_ms;
     if (want_high_resolution != m_high_resolution_timer) {
         if (want_high_resolution)
@@ -286,7 +380,8 @@ void ProgressBar::set_interval(UINT ms)
         return;
 
     m_interval = ms;
-    SetTimer(m_wnd, timer_id, ms, nullptr);
+    m_period_ms = ms;
+    m_ticker_wake.SetEvent();
 }
 
 double ProgressBar::smooth_position(double source, bool paused)
@@ -347,14 +442,17 @@ View ProgressBar::sample_view()
     const auto now = Clock::now();
     double position{};
 
-    if (m_seek_hold && now < m_seek_hold->until) {
+    // 跳轉還沒完成（fb2k 還沒通知）而且沒等太久：顯示目標位置；完成了就改跟 fb2k 回報的位置，不再多壓
+    if (m_seek_hold && now >= m_seek_hold->until)
+        m_seek_hold.reset();
+    if (m_seek_hold && seek_generation.load() != m_seek_hold->generation) {
+        m_seek_hold.reset();
+        m_position_valid = false;
+    }
+
+    if (m_seek_hold) {
         position = m_seek_hold->seconds;
     } else {
-        if (m_seek_hold) {
-            m_seek_hold.reset();
-            m_position_valid = false;
-        }
-
         auto source = playback->playback_get_position();
         // 暫停中 ASIO+DSD 回報的位置會前後跳（見 menu_items.cpp），改用按下暫停時記下的位置
         if (view.paused) {
@@ -447,9 +545,10 @@ void ProgressBar::seek_to(double ratio)
     const auto target = std::clamp(ratio, 0.0, 1.0) * length;
     const auto seconds = std::clamp(target, 0.0, std::max(0.0, length - 0.1));
 
-    playback->playback_seek(seconds);
-    m_seek_hold = SeekHold{seconds, Clock::now() + seek_hold};
+    // 先記下目前的跳轉次數再發出跳轉：fb2k 的通知可能在 playback_seek 裡就同步送出
+    m_seek_hold = SeekHold{seconds, seek_generation.load(), Clock::now() + seek_hold_timeout};
     m_position_valid = false;
+    playback->playback_seek(seconds);
 }
 
 } // namespace
