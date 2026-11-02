@@ -10,6 +10,7 @@ unsigned FlatSplitterPanel::g_count = 0;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_horizontal;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_vertical;
 ULONGLONG FlatSplitterPanel::s_last_now_playing_toggle_tick = 0;
+ULONGLONG FlatSplitterPanel::s_last_now_playing_click_tick = 0;
 std::atomic<bool> FlatSplitterPanel::s_now_playing_expanded_for_fields{false};
 
 namespace {
@@ -1403,6 +1404,7 @@ bool FlatSplitterPanel::s_toggle_now_playing()
             continue;
 
         s_last_now_playing_toggle_tick = GetTickCount64();
+        s_last_now_playing_click_tick = s_last_now_playing_toggle_tick;
 
         // 動畫進行中再切換：不倒回去。倒回去那條路徑（再截圖、整片重畫）原本因為點擊根本排不進來而從沒被執行過，
         // 連點讓它第一次大量執行，錄影逐格看到露出來的主內容還沒畫好（播放清單只有標題列、資料列是空的、資料夾樹被截斷），
@@ -1666,7 +1668,9 @@ void FlatSplitterPanel::apply_deferred_now_playing_toggle()
 
 void FlatSplitterPanel::on_now_playing_settle_timer()
 {
-    if (m_now_playing_toggle_deferred && GetTickCount64() - s_last_now_playing_toggle_tick < now_playing_settle_quiet_ms)
+    // 看「按下滑鼠」而不是「切換」的時間：連點時每隔一下的點擊會被雙擊攔截吃掉、不會呼叫切換，
+    // 真正的切換只剩約每 0.38 秒一次，超過等待時間，會被誤判成已經停手（錄影看到連點中動畫還是一小段一小段地動）
+    if (m_now_playing_toggle_deferred && GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms)
         return;
 
     KillTimer(m_wnd, now_playing_settle_timer_id);
@@ -1835,6 +1839,9 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
     // ref_data 為 1：剛吞掉一個雙擊，接著那個放開也要吞掉
+    if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
+        s_last_now_playing_click_tick = GetTickCount64();
+
     switch (msg) {
     case WM_LBUTTONDBLCLK:
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它。

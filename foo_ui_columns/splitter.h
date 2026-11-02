@@ -299,6 +299,8 @@ private:
 
     // 自編版新增（切換播放頁）：上次切換的時間（GetTickCount64），給播放列的雙擊處理判斷第一下有沒有觸發切換
     static ULONGLONG s_last_now_playing_toggle_tick;
+    // 播放列上最後一次按下滑鼠的時間（包含被雙擊攔截吃掉、沒有呼叫切換的點擊），連點時用來判斷「停手了沒」
+    static ULONGLONG s_last_now_playing_click_tick;
 
     static LRESULT CALLBACK s_now_playing_bar_subclass_proc(
         HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data);
