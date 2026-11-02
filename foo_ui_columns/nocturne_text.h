@@ -20,6 +20,7 @@ inline constexpr auto next_track_toggle_description
       "chosen in Preferences.";
 inline constexpr wchar_t next_caption[] = L"Up next";
 inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
+inline constexpr wchar_t stopped_label[] = L"Stopped";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
 // 設定頁（Preferences → Display → Columns UI → Up Next Notice）
@@ -35,8 +36,9 @@ inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bot
 inline constexpr wchar_t next_toast_note[]
     = L"The notice is not shown when the track is shorter than twice the countdown, when the playback order is Random "
       L"or Repeat (track), or when there is no next track. While stopped with tracks in the queue, it shows the first "
-      L"queued track as \"Stopped · Up next\".\r\n\r\nThe corner can be changed here at any time; the left corners "
-      L"can overlap the cover or track details in some layouts.";
+      L"queued track as \"Stopped · Up next\", and the now playing view of the last track is dimmed behind it.\r\n\r\n"
+      L"The corner can be changed here at any time; the left corners can overlap the cover or track details in some "
+      L"layouts. Turning this option off also turns off the dimmed stopped view.";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
@@ -107,6 +109,7 @@ inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在設定頁選。";
 inline constexpr wchar_t next_caption[] = L"下一首";
 inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
+inline constexpr wchar_t stopped_label[] = L"已停止";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
 // 設定頁（Preferences → Display → Columns UI → 下一首提示）
@@ -121,8 +124,8 @@ inline constexpr wchar_t next_toast_position_label[] = L"位置";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
 inline constexpr wchar_t next_toast_note[]
     = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
-      L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首。\r\n\r\n"
-      L"位置隨時可以在這裡改；在某些版面中，左邊兩個角可能蓋到封面或曲目資訊。";
+      L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"
+      L"位置隨時可以在這裡改；在某些版面中，左邊兩個角可能蓋到封面或曲目資訊。關閉這個選項時，停止時變暗的畫面也一起不顯示。";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";

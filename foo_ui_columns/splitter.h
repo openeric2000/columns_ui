@@ -108,6 +108,8 @@ public:
     static bool s_is_now_playing_expanded();
     // 自編版新增（下一首提示）：展開頁已經完全展開（沒有動畫、沒有截圖視窗）時，傳回展開頁在螢幕上的位置與它所在的主視窗
     static bool s_get_now_playing_stage(RECT& screen_rect, HWND& owner);
+    // 自編版新增（停止畫面）：展開頁已經完全展開時，截下展開頁目前的畫面（跟 screen_rect 一樣大）；不能截就傳回空的
+    static wil::unique_hbitmap s_capture_now_playing_stage(RECT& screen_rect, HWND& owner);
     // 展開頁樣式改變時重新排版，讓「展開頁右側」面板跟著顯示或隱藏
     static void s_refresh_now_playing();
     // 給標題格式欄位用（可能在別的執行緒讀），跟 m_now_playing_expanded 同步

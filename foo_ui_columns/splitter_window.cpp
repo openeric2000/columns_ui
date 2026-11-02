@@ -1818,6 +1818,14 @@ bool FlatSplitterPanel::s_get_now_playing_stage(RECT& screen_rect, HWND& owner)
     return false;
 }
 
+wil::unique_hbitmap FlatSplitterPanel::s_capture_now_playing_stage(RECT& screen_rect, HWND& owner)
+{
+    if (!s_get_now_playing_stage(screen_rect, owner))
+        return {};
+
+    return capture_now_playing_area(owner, screen_rect);
+}
+
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
