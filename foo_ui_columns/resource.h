@@ -123,6 +123,7 @@
 #define IDD_PREFS_PVIEW_SEARCH          241
 #define IDD_LAYOUT_PROPERTIES           242
 #define IDD_THEME_FONT                  243
+#define IDD_PREFS_NEXT_TRACK_TOAST      244
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -377,6 +378,16 @@
 #define IDC_THEME_FONT_FAMILY_LABEL     1246
 #define IDC_THEME_FONT_SIZE_LABEL       1247
 #define IDC_THEME_FONT_LYRICS_NOTE      1248
+#define IDC_NEXT_TOAST_ENABLED          1249
+#define IDC_NEXT_TOAST_SECONDS_LABEL    1250
+#define IDC_NEXT_TOAST_SECONDS          1251
+#define IDC_NEXT_TOAST_SECONDS_SPIN     1252
+#define IDC_NEXT_TOAST_SHOW_SECONDS     1253
+#define IDC_NEXT_TOAST_SHOW_COVER       1254
+#define IDC_NEXT_TOAST_SHOW_TAG         1255
+#define IDC_NEXT_TOAST_POSITION_LABEL   1256
+#define IDC_NEXT_TOAST_POSITION         1257
+#define IDC_NEXT_TOAST_NOTE             1258
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -386,7 +397,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1249
+#define _APS_NEXT_CONTROL_VALUE         1259
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

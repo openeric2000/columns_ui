@@ -4,7 +4,7 @@
 // - 歌曲最後 N 秒出現，左邊的圈逆時針倒數；停止且佇列還有歌時改顯示「已停止 · 接下來」
 // - 下一首的決定順序：佇列第一首 → 隨機／單曲循環不顯示 → 播放跟隨游標 → 播放中那首的下一列（清單循環時最後一首接第一首）
 // - 提示是一個浮在主視窗上的分層視窗（不擋滑鼠、不搶焦點），自己用 GDI+ 畫，所以才畫得出倒數圈與淡入淡出
-// - 設定（以下五個）存在 Columns UI 設定裡，改了立刻生效
+// - 設定（以下六個）存在 Columns UI 設定裡，改了立刻生效；設定頁在 tab_next_track_toast.cpp
 
 namespace cui::next_track_toast {
 
@@ -12,6 +12,13 @@ inline constexpr uint32_t min_seconds = 3;
 inline constexpr uint32_t max_seconds = 30;
 // 有些歌結尾會有好幾秒無聲，5 秒太短，預設改 10 秒（2026-11-02）
 inline constexpr uint32_t default_seconds = 10;
+
+// 提示放在展開頁的哪個角落（存的是這四個值之一，數字不能改，已存進設定）
+inline constexpr uint32_t position_top_right = 0;
+inline constexpr uint32_t position_bottom_right = 1;
+inline constexpr uint32_t position_top_left = 2;
+inline constexpr uint32_t position_bottom_left = 3;
+inline constexpr uint32_t position_count = 4;
 
 // 啟用提示（關閉＝完全不出現，包含已停止的狀態）
 extern fbh::ConfigBool enabled;
@@ -23,5 +30,7 @@ extern fbh::ConfigBool show_seconds_in_ring;
 extern fbh::ConfigBool show_cover;
 // 顯示來源標籤（佇列／清單）
 extern fbh::ConfigBool show_source_tag;
+// 放在哪個角落（position_*）
+extern fbh::ConfigUint32 position;
 
 } // namespace cui::next_track_toast

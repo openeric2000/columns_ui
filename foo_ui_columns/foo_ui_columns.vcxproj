@@ -314,6 +314,7 @@
     <ClCompile Include="tab_pview_search.cpp" />
     <ClCompile Include="tab_playlist_swticher.cpp" />
     <ClCompile Include="tab_setup.cpp" />
+    <ClCompile Include="tab_next_track_toast.cpp" />
     <ClCompile Include="tab_status_pane.cpp" />
     <ClCompile Include="tab_text_rendering.cpp" />
     <ClCompile Include="tf_text_format.cpp" />

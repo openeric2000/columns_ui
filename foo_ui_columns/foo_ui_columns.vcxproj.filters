@@ -563,6 +563,9 @@
     <ClCompile Include="colour_utils.cpp">
       <Filter>Colours and fonts</Filter>
     </ClCompile>
+    <ClCompile Include="tab_next_track_toast.cpp">
+      <Filter>Config UI</Filter>
+    </ClCompile>
     <ClCompile Include="tab_status_pane.cpp">
       <Filter>Config UI</Filter>
     </ClCompile>

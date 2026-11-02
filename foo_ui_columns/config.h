@@ -108,6 +108,8 @@ PreferencesTab* g_get_tab_playlist_view_search();
 PreferencesTab* g_get_tab_status_bar();
 PreferencesTab* g_get_tab_status_pane();
 PreferencesTab* g_get_tab_system_tray();
+// 自編版新增：「下一首提示」設定分頁
+PreferencesTab* g_get_tab_next_track_toast();
 
 extern cfg_uint g_last_colour;
 extern service_factory_single_t<PreferencesTabsHost> page_main;

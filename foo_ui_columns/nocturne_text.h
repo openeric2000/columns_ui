@@ -16,11 +16,27 @@ inline constexpr auto toggle_now_playing_description
       "level, or puts it back. Does not expand while stopped with an empty queue.";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
-    = "Shows the next track at the top right of the now playing view during the last seconds of a track.";
+    = "Shows the next track in a corner of the now playing view during the last seconds of a track. The corner can be "
+      "chosen in Preferences.";
 inline constexpr wchar_t next_caption[] = L"Up next";
 inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
+// 設定頁（Preferences → Display → Columns UI → Up Next Notice）
+inline constexpr auto next_toast_tab_name = "Up Next Notice";
+inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
+inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
+inline constexpr wchar_t next_toast_seconds_label[] = L"Start counting down this many seconds before the track ends (3-30)";
+inline constexpr wchar_t next_toast_show_seconds[] = L"Show the remaining seconds inside the ring";
+inline constexpr wchar_t next_toast_show_cover[] = L"Show the cover of the next track";
+inline constexpr wchar_t next_toast_show_tag[] = L"Show where the next track comes from (Queue / Playlist)";
+inline constexpr wchar_t next_toast_position_label[] = L"Position";
+inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bottom right", L"Top left", L"Bottom left"};
+inline constexpr wchar_t next_toast_note[]
+    = L"The notice is not shown when the track is shorter than twice the countdown, when the playback order is Random "
+      L"or Repeat (track), or when there is no next track. While stopped with tracks in the queue, it shows the first "
+      L"queued track as \"Stopped · Up next\".\r\n\r\nThe corner can be changed here at any time; the left corners "
+      L"can overlap the cover or track details in some layouts.";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
@@ -88,11 +104,25 @@ inline constexpr auto toggle_now_playing_name = "切換播放頁";
 inline constexpr auto toggle_now_playing_description
     = "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放而且佇列沒有歌時不展開。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
-inline constexpr auto next_track_toggle_description = "在展開頁右上角，歌曲最後幾秒顯示下一首。";
+inline constexpr auto next_track_toggle_description = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在設定頁選。";
 inline constexpr wchar_t next_caption[] = L"下一首";
 inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
+// 設定頁（Preferences → Display → Columns UI → 下一首提示）
+inline constexpr auto next_toast_tab_name = "下一首提示";
+inline constexpr wchar_t next_toast_title[] = L"下一首提示";
+inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
+inline constexpr wchar_t next_toast_seconds_label[] = L"歌曲最後幾秒開始倒數（3～30 秒）";
+inline constexpr wchar_t next_toast_show_seconds[] = L"圈內顯示剩餘秒數";
+inline constexpr wchar_t next_toast_show_cover[] = L"顯示下一首的專輯封面";
+inline constexpr wchar_t next_toast_show_tag[] = L"顯示下一首的來源標籤（佇列／清單）";
+inline constexpr wchar_t next_toast_position_label[] = L"位置";
+inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
+inline constexpr wchar_t next_toast_note[]
+    = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
+      L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首。\r\n\r\n"
+      L"位置隨時可以在這裡改；在某些版面中，左邊兩個角可能蓋到封面或曲目資訊。";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";

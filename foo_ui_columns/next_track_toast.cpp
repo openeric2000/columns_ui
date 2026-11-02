@@ -21,6 +21,8 @@ fbh::ConfigBool show_seconds_in_ring(
 fbh::ConfigBool show_cover(GUID{0x15e7d9c3, 0xa046, 0x4d12, {0xbb, 0x78, 0x31, 0xf4, 0x6a, 0x8c, 0x02, 0xe9}}, true);
 fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
+fbh::ConfigUint32 position(
+    GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_top_right);
 
 namespace {
 
@@ -44,7 +46,7 @@ std::atomic<bool> g_alive{false};
 // 版面（DIP，乘上主視窗的縮放比例才是實際像素）
 // 2026-11-02 219（125%）版：實際約 620×120、離右邊 100、離上緣 115，對齊大封面上緣與版面右邊界；169 之後再調
 struct Layout {
-    int width, height, margin_right, margin_top;
+    int width, height, margin_side, margin_top, margin_bottom;
     int pad_left, pad_right, gap, radius;
     int ring, cover, cover_radius, tag_pad_x, tag_pad_y;
     float stroke, font_caption, font_tag, font_title, font_sub, font_number, line_gap;
@@ -55,8 +57,9 @@ struct Layout {
         const auto fpx = [scale](double dip) { return static_cast<float>(dip * scale); };
         width = px(496);
         height = px(96);
-        margin_right = px(80);
+        margin_side = px(80);
         margin_top = px(92);
+        margin_bottom = px(40);
         pad_left = px(21);
         pad_right = px(24);
         gap = px(16);
@@ -671,13 +674,13 @@ std::optional<Controller::Want> Controller::evaluate()
             return {};
 
         // 暫停中 ASIO+DSD 回報的位置會前後跳（見 menu_items.cpp），改用按下暫停時記下的位置，倒數圈才不會抖
-        auto position = playback->playback_get_position();
+        auto current_position = playback->playback_get_position();
         if (playback->is_paused()) {
             if (const auto paused_position = main_menu::get_paused_position())
-                position = *paused_position;
+                current_position = *paused_position;
         }
 
-        const auto remaining = length - position;
+        const auto remaining = length - current_position;
         if (remaining <= 0 || remaining > count)
             return {};
 
@@ -825,13 +828,20 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
     m_surface.copy_static_to_canvas();
     draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::ceil(want.remaining - 0.0001)));
 
-    POINT position{want.stage.right - layout.margin_right - layout.width,
-        want.stage.top + layout.margin_top - static_cast<int>(std::lround((1 - eased) * slide_dip * scale))};
+    // 淡入時從靠近邊緣那一側滑進來：放上面就從上往下，放下面就從下往上
+    const auto corner = std::min(position.get(), position_count - 1);
+    const auto on_left = corner == position_top_left || corner == position_bottom_left;
+    const auto on_bottom = corner == position_bottom_right || corner == position_bottom_left;
+    const auto slide = static_cast<int>(std::lround((1 - eased) * slide_dip * scale));
+
+    POINT origin{on_left ? want.stage.left + layout.margin_side : want.stage.right - layout.margin_side - layout.width,
+        on_bottom ? want.stage.bottom - layout.margin_bottom - layout.height + slide
+                  : want.stage.top + layout.margin_top - slide};
     SIZE size{layout.width, layout.height};
     POINT source{0, 0};
     BLENDFUNCTION blend{AC_SRC_OVER, 0, static_cast<BYTE>(std::lround(eased * 255)), AC_SRC_ALPHA};
 
-    UpdateLayeredWindow(m_wnd, nullptr, &position, &size, m_surface.dc(), &source, 0, &blend, ULW_ALPHA);
+    UpdateLayeredWindow(m_wnd, nullptr, &origin, &size, m_surface.dc(), &source, 0, &blend, ULW_ALPHA);
 
     if (!IsWindowVisible(m_wnd))
         ShowWindow(m_wnd, SW_SHOWNOACTIVATE);
