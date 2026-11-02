@@ -1407,7 +1407,8 @@ bool FlatSplitterPanel::s_toggle_now_playing()
         // 動畫進行中再切換：不倒回去。倒回去那條路徑（再截圖、整片重畫）原本因為點擊根本排不進來而從沒被執行過，
         // 連點讓它第一次大量執行，錄影逐格看到露出來的主內容還沒畫好（播放清單只有標題列、資料列是空的、資料夾樹被截斷），
         // 而且每次點擊都很重。改成只記下「還要再切換一次」，這段動畫結束後再接著動
-        if (splitter->m_now_playing_animating || splitter->m_now_playing_snapshot_wnd) {
+        if (splitter->m_now_playing_animating || splitter->m_now_playing_snapshot_wnd
+            || splitter->m_now_playing_settle_pending) {
             splitter->m_now_playing_toggle_deferred = !splitter->m_now_playing_toggle_deferred;
             return true;
         }
@@ -1654,6 +1655,24 @@ void FlatSplitterPanel::finish_now_playing_slide()
 
 void FlatSplitterPanel::apply_deferred_now_playing_toggle()
 {
+    if (!m_now_playing_toggle_deferred || m_now_playing_settle_pending)
+        return;
+
+    // 連點中先不動：延後套用版錄影追蹤展開頁上緣，連點時是「升起、落下、停頓、再升起」不斷重複，整頁大幅來回擺動看起來很急躁。
+    // 改成等停手 now_playing_settle_quiet_ms 之後，才往最後想要的狀態動一次
+    m_now_playing_settle_pending = true;
+    SetTimer(m_wnd, now_playing_settle_timer_id, 30, nullptr);
+}
+
+void FlatSplitterPanel::on_now_playing_settle_timer()
+{
+    if (m_now_playing_toggle_deferred && GetTickCount64() - s_last_now_playing_toggle_tick < now_playing_settle_quiet_ms)
+        return;
+
+    KillTimer(m_wnd, now_playing_settle_timer_id);
+    m_now_playing_settle_pending = false;
+
+    // 切換次數剛好抵銷，不用動
     if (!std::exchange(m_now_playing_toggle_deferred, false))
         return;
 
