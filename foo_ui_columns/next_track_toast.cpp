@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include <shlwapi.h>
+#include <timeapi.h>
 #include <thread>
 
 #include "next_track_toast.h"
@@ -10,6 +11,7 @@
 #include "splitter.h"
 
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "winmm.lib")
 
 namespace cui::next_track_toast {
 
@@ -37,6 +39,10 @@ constexpr UINT interval_idle_ms = 150;
 // 淡入拉長到 0.8 秒、淡出 0.5 秒，原本 0.3 秒太突然（2026-11-02）
 constexpr double fade_in_seconds = 0.8;
 constexpr double fade_out_seconds = 0.5;
+// 單次動畫最多推進這麼多秒：主執行緒卡住（例如換曲）時，淡入淡出順著時間拖長，不會一次跳一大截（原本 0.1 秒）
+constexpr double max_step_seconds = 0.04;
+// 換曲後這段時間不顯示提示，避免換曲瞬間播放位置還沒更新而誤判
+constexpr auto suppress_after_new_track = std::chrono::milliseconds(1500);
 // 提示淡入時從上方多少 DIP 滑下來
 constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
@@ -504,6 +510,7 @@ public:
     void stop();
     void tick();
     void invalidate_next() { m_next_valid = false; }
+    void on_new_track();
     void on_cover_loaded(uint64_t generation, std::shared_ptr<Gdiplus::Bitmap> cover);
 
 private:
@@ -531,8 +538,12 @@ private:
     HWND m_wnd{};
     HWND m_owner{};
     UINT m_interval{};
+    // 倒數期間是否已把系統計時精度調成 1 ms（要成對還原）
+    bool m_high_resolution_timer{};
     double m_alpha{};
     Clock::time_point m_last_tick{Clock::now()};
+    // 換曲後到這個時間點之前不顯示
+    Clock::time_point m_suppress_until{};
 
     std::optional<NextTrack> m_next;
     metadb_handle_ptr m_next_for;
@@ -606,15 +617,46 @@ void Controller::stop()
         m_timer_wnd = nullptr;
     }
     destroy_window();
+
+    if (m_high_resolution_timer) {
+        timeEndPeriod(1);
+        m_high_resolution_timer = false;
+    }
 }
 
 void Controller::set_interval(UINT ms)
 {
-    if (!m_timer_wnd || m_interval == ms)
+    if (!m_timer_wnd)
+        return;
+
+    // 只有顯示動畫的期間才把系統計時精度調成 1 ms：預設 15.6 ms 的精度下，16 ms 的計時器常常要等到 31 ms 才觸發，
+    // 動畫實測只剩 33～41 Hz；閒置時還原，不影響耗電
+    const auto want_high_resolution = ms == interval_active_ms;
+    if (want_high_resolution != m_high_resolution_timer) {
+        if (want_high_resolution)
+            timeBeginPeriod(1);
+        else
+            timeEndPeriod(1);
+        m_high_resolution_timer = want_high_resolution;
+    }
+
+    if (m_interval == ms)
         return;
 
     m_interval = ms;
     SetTimer(m_timer_wnd, timer_id, ms, nullptr);
+}
+
+// 換曲了：提示講的下一首已經在播，舊的提示不用淡出，直接收掉；錄影量到原本換曲後舊提示還會殘留 0.2～0.3 秒
+void Controller::on_new_track()
+{
+    m_suppress_until = Clock::now() + suppress_after_new_track;
+    m_next_valid = false;
+
+    if (m_wnd) {
+        destroy_window();
+        set_interval(interval_idle_ms);
+    }
 }
 
 void Controller::destroy_window()
@@ -653,6 +695,9 @@ std::optional<Controller::Want> Controller::evaluate()
     if (!enabled.get())
         return {};
 
+    if (Clock::now() < m_suppress_until)
+        return {};
+
     Want want;
     if (!FlatSplitterPanel::s_get_now_playing_stage(want.stage, want.owner))
         return {};
@@ -680,8 +725,9 @@ std::optional<Controller::Want> Controller::evaluate()
                 current_position = *paused_position;
         }
 
+        // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
         const auto remaining = length - current_position;
-        if (remaining <= 0 || remaining > count)
+        if (remaining <= fade_out_seconds || remaining > count)
             return {};
 
         want.mode = Mode::countdown;
@@ -850,7 +896,7 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
 void Controller::tick()
 {
     const auto now = Clock::now();
-    const auto elapsed = std::min(std::chrono::duration<double>(now - m_last_tick).count(), 0.1);
+    const auto elapsed = std::min(std::chrono::duration<double>(now - m_last_tick).count(), max_step_seconds);
     m_last_tick = now;
 
     const auto want = evaluate();
@@ -879,12 +925,17 @@ void Controller::tick()
     const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI;
     const Layout layout(scale);
 
+    // 第一次出現的這一格要建視窗、畫圖，會花一段時間；這一格先停在全透明，時間從下一格才開始算，
+    // 不然淡入的第一格就已經有兩成多亮度（錄影量到 21～27%）
+    const auto creating = !m_wnd;
+
     if (!ensure_window(shown.owner, layout) || !m_surface.ensure(layout.width, layout.height))
         return;
 
     if (want) {
         rebuild_content(shown, layout);
-        m_alpha = std::min(1.0, m_alpha + elapsed / fade_in_seconds);
+        if (!creating)
+            m_alpha = std::min(1.0, m_alpha + elapsed / fade_in_seconds);
     } else {
         m_alpha = std::max(0.0, m_alpha - elapsed / fade_out_seconds);
 
@@ -900,6 +951,9 @@ void Controller::tick()
 
     render_and_present(shown, layout, scale);
     set_interval(interval_active_ms);
+
+    if (creating)
+        m_last_tick = Clock::now();
 }
 
 class NextTrackToastInitQuit : public initquit {
@@ -934,6 +988,30 @@ public:
 };
 
 service_factory_single_t<QueueChangeCallback> queue_change_callback;
+
+// 換曲時馬上收掉提示（見 Controller::on_new_track）
+class NewTrackCallback : public play_callback_static {
+public:
+    unsigned get_flags() override { return flag_on_playback_new_track; }
+
+    void on_playback_new_track(metadb_handle_ptr track) override
+    {
+        if (g_alive)
+            controller().on_new_track();
+    }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    void on_playback_stop(play_control::t_stop_reason reason) override {}
+    void on_playback_seek(double time) override {}
+    void on_playback_pause(bool state) override {}
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_playback_time(double time) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<NewTrackCallback> new_track_callback;
 
 } // namespace
 
