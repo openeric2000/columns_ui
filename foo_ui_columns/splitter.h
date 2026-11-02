@@ -24,7 +24,8 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
 // 自編版新增：連點時畫面先不動，停手這麼久之後才往最後想要的狀態動一次（見 apply_deferred_now_playing_toggle）
 inline constexpr UINT_PTR now_playing_settle_timer_id = 0x4e6;
-inline constexpr ULONGLONG now_playing_settle_quiet_ms = 250;
+// 連點間隔實測中位數約 180 ms、偶爾有 350～390 ms 的慢一拍，所以門檻放 400 ms
+inline constexpr ULONGLONG now_playing_settle_quiet_ms = 400;
 
 enum Orientation {
     horizontal,

@@ -1657,11 +1657,15 @@ void FlatSplitterPanel::finish_now_playing_slide()
 
 void FlatSplitterPanel::apply_deferred_now_playing_toggle()
 {
-    if (!m_now_playing_toggle_deferred || m_now_playing_settle_pending)
+    // 連點中先不動：延後套用版錄影追蹤展開頁上緣，連點時是「升起、落下、停頓、再升起」不斷重複，整頁大幅來回擺動看起來很急躁。
+    // 改成等停手 now_playing_settle_quiet_ms 之後，才決定要不要往最後想要的狀態動一次。
+    // 只要動畫期間有被點過（切換過，或點擊被雙擊攔截吃掉），或最近才點過，就進入等待：
+    // 不能只看「有沒有還要切換」，否則切換次數剛好抵銷（偶數）時沒進入等待，連點中的下一下又被當成全新的第一下、立刻動畫
+    // （錄影看到連點期間約每 1.05 秒動畫一次）
+    const auto still_clicking = GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms;
+    if (m_now_playing_settle_pending || !(m_now_playing_toggle_deferred || still_clicking))
         return;
 
-    // 連點中先不動：延後套用版錄影追蹤展開頁上緣，連點時是「升起、落下、停頓、再升起」不斷重複，整頁大幅來回擺動看起來很急躁。
-    // 改成等停手 now_playing_settle_quiet_ms 之後，才往最後想要的狀態動一次
     m_now_playing_settle_pending = true;
     SetTimer(m_wnd, now_playing_settle_timer_id, 30, nullptr);
 }
@@ -1669,8 +1673,9 @@ void FlatSplitterPanel::apply_deferred_now_playing_toggle()
 void FlatSplitterPanel::on_now_playing_settle_timer()
 {
     // 看「按下滑鼠」而不是「切換」的時間：連點時每隔一下的點擊會被雙擊攔截吃掉、不會呼叫切換，
-    // 真正的切換只剩約每 0.38 秒一次，超過等待時間，會被誤判成已經停手（錄影看到連點中動畫還是一小段一小段地動）
-    if (m_now_playing_toggle_deferred && GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms)
+    // 真正的切換只剩約每 0.38 秒一次，超過等待時間，會被誤判成已經停手
+    // 只要還在連點就一直等，不管切換次數目前是奇數還是偶數
+    if (GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms)
         return;
 
     KillTimer(m_wnd, now_playing_settle_timer_id);
