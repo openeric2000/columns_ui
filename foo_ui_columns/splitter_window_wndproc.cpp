@@ -29,16 +29,7 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         // 自編版新增（展開頁動畫）
         on_now_playing_animation_frame();
         return 0;
-    case WM_TIMER:
-        // 等停手的計時器（見 apply_deferred_now_playing_toggle）
-        if (wp == now_playing_settle_timer_id) {
-            on_now_playing_settle_timer();
-            return 0;
-        }
-        break;
     case WM_DESTROY:
-        KillTimer(wnd, now_playing_settle_timer_id);
-        m_now_playing_settle_pending = false;
         m_now_playing_animating = false;
         if (m_now_playing_snapshot_wnd)
             DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));

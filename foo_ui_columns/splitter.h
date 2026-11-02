@@ -22,10 +22,6 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 // 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
 // （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
-// 自編版新增：連點時畫面先不動，停手這麼久之後才往最後想要的狀態動一次（見 apply_deferred_now_playing_toggle）
-inline constexpr UINT_PTR now_playing_settle_timer_id = 0x4e6;
-// 連點間隔實測中位數約 180 ms、偶爾有 350～390 ms 的慢一拍，所以門檻放 400 ms
-inline constexpr ULONGLONG now_playing_settle_quiet_ms = 400;
 
 enum Orientation {
     horizontal,
@@ -256,10 +252,6 @@ private:
     void let_now_playing_bar_update();
     // 自編版新增：排定下一格動畫。先處理輸入佇列裡的滑鼠、鍵盤訊息（已投遞的訊息優先於輸入，不處理的話點擊要等整段動畫結束），再投遞下一格
     void schedule_now_playing_animation_frame();
-    // 自編版新增：一段動畫結束後，如果動畫進行中又被切換過（奇數次），不立刻再動，等停手一小段時間才往最後想要的狀態動一次
-    void apply_deferred_now_playing_toggle();
-    // 等停手的計時器：還在連點就繼續等，切換次數抵銷就不動，否則動畫一次
-    void on_now_playing_settle_timer();
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
@@ -267,10 +259,6 @@ private:
 
     bool m_refresh_children_in_progress{};
     bool m_now_playing_expanded{};
-    // 自編版新增：動畫進行中又被切換時，不倒回去，只記下「還要再切換一次」（切換奇數次才是真的）；這段動畫結束後再接著動
-    bool m_now_playing_toggle_deferred{};
-    // 正在等停手（計時器已啟動）：這段時間再被切換也只記奇偶，不立刻動畫
-    bool m_now_playing_settle_pending{};
     // 自編版新增（展開頁動畫）：收合時的視窗區域（排版給播放列的位置，on_size_changed 時更新）、動畫的起點與開始時間
     RECT m_now_playing_bar_rect{};
     bool m_now_playing_animating{};
@@ -300,8 +288,6 @@ private:
 
     // 自編版新增（切換播放頁）：上次切換的時間（GetTickCount64），給播放列的雙擊處理判斷第一下有沒有觸發切換
     static ULONGLONG s_last_now_playing_toggle_tick;
-    // 播放列上最後一次按下滑鼠的時間（包含被雙擊攔截吃掉、沒有呼叫切換的點擊），連點時用來判斷「停手了沒」
-    static ULONGLONG s_last_now_playing_click_tick;
 
     static LRESULT CALLBACK s_now_playing_bar_subclass_proc(
         HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data);

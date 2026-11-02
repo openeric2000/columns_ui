@@ -10,7 +10,6 @@ unsigned FlatSplitterPanel::g_count = 0;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_horizontal;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_vertical;
 ULONGLONG FlatSplitterPanel::s_last_now_playing_toggle_tick = 0;
-ULONGLONG FlatSplitterPanel::s_last_now_playing_click_tick = 0;
 std::atomic<bool> FlatSplitterPanel::s_now_playing_expanded_for_fields{false};
 
 namespace {
@@ -1404,17 +1403,6 @@ bool FlatSplitterPanel::s_toggle_now_playing()
             continue;
 
         s_last_now_playing_toggle_tick = GetTickCount64();
-        s_last_now_playing_click_tick = s_last_now_playing_toggle_tick;
-
-        // 動畫進行中再切換：不倒回去。倒回去那條路徑（再截圖、整片重畫）原本因為點擊根本排不進來而從沒被執行過，
-        // 連點讓它第一次大量執行，錄影逐格看到露出來的主內容還沒畫好（播放清單只有標題列、資料列是空的、資料夾樹被截斷），
-        // 而且每次點擊都很重。改成只記下「還要再切換一次」，這段動畫結束後再接著動
-        if (splitter->m_now_playing_animating || splitter->m_now_playing_snapshot_wnd
-            || splitter->m_now_playing_settle_pending) {
-            splitter->m_now_playing_toggle_deferred = !splitter->m_now_playing_toggle_deferred;
-            return true;
-        }
-
         splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
         // 自編版（展開頁動畫）：不再一次切換區域，改成由下往上揭開／由上往下蓋回
         splitter->start_now_playing_animation();
@@ -1440,16 +1428,12 @@ void FlatSplitterPanel::start_now_playing_animation()
         const auto& rect = m_now_playing_slide_rect;
         snapshot->offset = offset;
 
-        if (!m_now_playing_expanded && snapshot->main) {
-            // 展開到一半改收合：底下已經是真的展開頁，先收起來、主內容畫好，
-            // 截圖視窗改成只顯示展開頁、跟著往下移（上方露出真的主內容）
-            on_size_changed();
-            RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-            snapshot->main.reset();
-            SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top + offset, wil::rect_width(rect),
-                wil::rect_height(rect) - offset, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
-            UpdateWindow(m_now_playing_snapshot_wnd);
-        } else if (m_now_playing_expanded && !snapshot->main) {
+        // 展開到一半改收合（snapshot->main 存在、目前是固定蓋住整個展開頁的模式）：什麼真視窗都不動，
+        // 截圖已經有「主內容」和「展開頁」兩張圖，只要倒過來繼續滑（下面的 m_now_playing_slide_from／expanding），
+        // 滑完整頁被主內容截圖蓋住後，才在 finish_now_playing_slide 把真視窗收合、再拿掉截圖。
+        // 原本這裡馬上把底下的真視窗收合、整片重畫、並把截圖縮成只剩展開頁，主內容還沒被合成到畫面上就被露出來，
+        // 錄影逐格看到空白帶、播放清單資料列空白、資料夾樹被截斷
+        if (m_now_playing_expanded && !snapshot->main) {
             // 收合到一半改展開：截目前的主內容（底下還是收合的）當偏移上方的底，截圖視窗改成固定蓋住整個展開頁
             // 截不到就維持跟著移動（下緣可能露出一條縫）
             if (auto main = capture_now_playing_area(GetAncestor(m_wnd, GA_ROOT), rect)) {
@@ -1608,8 +1592,8 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
 // 已投遞的訊息優先順序高於滑鼠與鍵盤輸入，每格結尾都投遞下一格時，動畫進行中輸入佇列的點擊會一直排不到，
 // 要等整段動畫（400ms）跑完才被處理，處理完又啟動新的一段，下一個點擊再等這段跑完：連點 N 次就連續動 N 段，
 // 程式裡「動畫中再切換就從目前位置倒回去」的邏輯根本沒機會被用到
-// 投遞下一格之前，先把輸入佇列裡的滑鼠、鍵盤訊息直接處理掉。動畫進行中點擊只是記下「要再切換」（見 s_toggle_now_playing），很輕，
-// 所以可以在這裡處理。不用計時訊息讓出：計時器最短 10 ms 以上，每個點擊都讓動畫停一拍（錄影量到點擊後 0.12 秒內有停頓的占 69%）
+// 投遞下一格之前，先把輸入佇列裡的滑鼠、鍵盤訊息直接處理掉，讓動畫進行中的點擊馬上生效（倒回去，見 start_now_playing_animation）。
+// 倒回去現在只是改方向與起點、不動真視窗（最慢的是「收合到一半又展開」那一次截圖），所以可以在這裡處理。
 // 有上限，避免輸入太多把這一格拖長
 void FlatSplitterPanel::schedule_now_playing_animation_frame()
 {
@@ -1641,52 +1625,24 @@ void FlatSplitterPanel::let_now_playing_bar_update()
 
 void FlatSplitterPanel::finish_now_playing_slide()
 {
-    // 滑上來的截圖已經整個蓋住展開頁：底下如果還是收合的（收合到一半又展開），先換成真的展開頁再拿掉截圖
+    // 截圖已經整個蓋住（展開時蓋住展開頁、倒回去收合時蓋住主內容）：底下的真視窗如果還不是最後的狀態，先換過去再拿掉截圖
+    // - 收合到一半又展開：真視窗還是收合的，換成展開
+    // - 展開到一半又收合（固定蓋住整個展開頁的模式，snapshot->main 存在）：真視窗還是展開的，換成收合
+    // 都是在截圖蓋著的時候做，再 DwmFlush 等新畫面合成出來才拿掉截圖，不會閃
     const auto now_playing_bar = get_now_playing_bar_panel();
+    const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
     RECT region_box{};
-    if (m_now_playing_slide_expanding && now_playing_bar && now_playing_bar->m_wnd
-        && GetWindowRgnBox(now_playing_bar->m_wnd, &region_box) != ERROR) {
+    const auto real_collapsed = now_playing_bar && now_playing_bar->m_wnd
+        && GetWindowRgnBox(now_playing_bar->m_wnd, &region_box) != ERROR;
+    const auto needs_sync = m_now_playing_slide_expanding ? real_collapsed : (snapshot && snapshot->main);
+
+    if (needs_sync) {
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         [[maybe_unused]] const auto hr = DwmFlush();
     }
 
     DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
-    apply_deferred_now_playing_toggle();
-}
-
-void FlatSplitterPanel::apply_deferred_now_playing_toggle()
-{
-    // 連點中先不動：延後套用版錄影追蹤展開頁上緣，連點時是「升起、落下、停頓、再升起」不斷重複，整頁大幅來回擺動看起來很急躁。
-    // 改成等停手 now_playing_settle_quiet_ms 之後，才決定要不要往最後想要的狀態動一次。
-    // 只要動畫期間有被點過（切換過，或點擊被雙擊攔截吃掉），或最近才點過，就進入等待：
-    // 不能只看「有沒有還要切換」，否則切換次數剛好抵銷（偶數）時沒進入等待，連點中的下一下又被當成全新的第一下、立刻動畫
-    // （錄影看到連點期間約每 1.05 秒動畫一次）
-    const auto still_clicking = GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms;
-    if (m_now_playing_settle_pending || !(m_now_playing_toggle_deferred || still_clicking))
-        return;
-
-    m_now_playing_settle_pending = true;
-    SetTimer(m_wnd, now_playing_settle_timer_id, 30, nullptr);
-}
-
-void FlatSplitterPanel::on_now_playing_settle_timer()
-{
-    // 看「按下滑鼠」而不是「切換」的時間：連點時每隔一下的點擊會被雙擊攔截吃掉、不會呼叫切換，
-    // 真正的切換只剩約每 0.38 秒一次，超過等待時間，會被誤判成已經停手
-    // 只要還在連點就一直等，不管切換次數目前是奇數還是偶數
-    if (GetTickCount64() - s_last_now_playing_click_tick < now_playing_settle_quiet_ms)
-        return;
-
-    KillTimer(m_wnd, now_playing_settle_timer_id);
-    m_now_playing_settle_pending = false;
-
-    // 切換次數剛好抵銷，不用動
-    if (!std::exchange(m_now_playing_toggle_deferred, false))
-        return;
-
-    m_now_playing_expanded = !m_now_playing_expanded;
-    start_now_playing_animation();
 }
 
 void FlatSplitterPanel::on_now_playing_animation_frame()
@@ -1745,10 +1701,8 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
         RedrawWindow(m_wnd, &changed_rect, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
 
-    if (!m_now_playing_animating) {
-        apply_deferred_now_playing_toggle();
+    if (!m_now_playing_animating)
         return;
-    }
 
     const auto paint_ms = to_ms(clock::now() - frame_start);
 
@@ -1844,9 +1798,6 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
     // ref_data 為 1：剛吞掉一個雙擊，接著那個放開也要吞掉
-    if (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONDBLCLK)
-        s_last_now_playing_click_tick = GetTickCount64();
-
     switch (msg) {
     case WM_LBUTTONDBLCLK:
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它。
