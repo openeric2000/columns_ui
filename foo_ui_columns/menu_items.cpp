@@ -204,6 +204,25 @@ const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, noctur
     },
     [] { return FlatSplitterPanel::s_is_now_playing_expanded(); }};
 
+// 自編版新增：ESLyric 播放列的停止鈕用 mm://View/Layout/停止或收起播放頁
+// - 播放中（含暫停）：照常停止；佇列有歌時展開頁留住，顯示「已停止 · 接下來」（見 stopped_page.cpp）
+// - 已經停止、展開頁還開著：收起展開頁，佇列保留不動（要清佇列自己清，清空後展開頁會自動收，見 next_track_toast.cpp）
+// - 已經停止而且已收合：什麼都不做
+// 只有接這個命令的按鈕有這個行為；鍵盤、媒體鍵的停止還是核心的停止，展開頁照舊
+const MainMenuCommand stop_or_collapse{stop_or_collapse_id, nocturne_text::stop_or_collapse_name,
+    nocturne_text::stop_or_collapse_description,
+    [] {
+        const auto playback = playback_control::get();
+
+        if (playback->is_playing()) {
+            playback->stop();
+            return;
+        }
+
+        if (FlatSplitterPanel::s_is_now_playing_expanded())
+            FlatSplitterPanel::s_toggle_now_playing();
+    }};
+
 // 自編版新增：展開頁右上角的「下一首」提示開關（View/Layout/下一首提示），設定在設定頁也看得到，是同一個設定
 const MainMenuCommand next_track_toast_toggle{next_track_toast_toggle_id, nocturne_text::next_track_toggle_name,
     nocturne_text::next_track_toggle_description, [] { next_track_toast::enabled = !next_track_toast::enabled.get(); },
@@ -618,7 +637,7 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
-    show_now_playing_cover, now_playing_style_centered, now_playing_style_spectrum, now_playing_style_info,
+    stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_spectrum, now_playing_style_info,
     cycle_now_playing_style, next_track_toast_toggle, theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(

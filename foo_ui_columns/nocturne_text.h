@@ -14,6 +14,10 @@ inline constexpr auto toggle_now_playing_name = "Toggle Now Playing";
 inline constexpr auto toggle_now_playing_description
     = "Lets the panel with the custom title \"Now Playing Bar\" cover the panel titled \"Main Content\" at the same "
       "level, or puts it back. Does not expand while stopped with an empty queue.";
+inline constexpr auto stop_or_collapse_name = "Stop or Collapse Now Playing";
+inline constexpr auto stop_or_collapse_description
+    = "Stops playback. If playback is already stopped and the now playing view is still open (it stays open while the "
+      "queue has tracks), closes the view and leaves the queue as it is.";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view during the last seconds of a track. The corner can be "
@@ -105,6 +109,9 @@ inline constexpr auto restart_question = "\n\nRestart foobar2000 now?";
 inline constexpr auto toggle_now_playing_name = "切換播放頁";
 inline constexpr auto toggle_now_playing_description
     = "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放而且佇列沒有歌時不展開。";
+inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
+inline constexpr auto stop_or_collapse_description
+    = "停止播放；已經停止而展開頁還開著（佇列有歌時停止不會自動收）時，收起展開頁，佇列保留不動。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在設定頁選。";
 inline constexpr wchar_t next_caption[] = L"下一首";
