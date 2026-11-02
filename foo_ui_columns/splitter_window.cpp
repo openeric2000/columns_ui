@@ -9,7 +9,6 @@ ui_extension::window_host_factory<FlatSplitterPanel::FlatSplitterPanelHost> g_sp
 unsigned FlatSplitterPanel::g_count = 0;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_horizontal;
 wil::unique_hfont FlatSplitterPanel::g_font_menu_vertical;
-ULONGLONG FlatSplitterPanel::s_last_now_playing_toggle_tick = 0;
 std::atomic<bool> FlatSplitterPanel::s_now_playing_expanded_for_fields{false};
 
 namespace {
@@ -1402,7 +1401,6 @@ bool FlatSplitterPanel::s_toggle_now_playing()
         if (!splitter->get_now_playing_bar_panel())
             continue;
 
-        s_last_now_playing_toggle_tick = GetTickCount64();
         splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
         // 自編版（展開頁動畫）：不再一次切換區域，改成由下往上揭開／由上往下蓋回
         splitter->start_now_playing_animation();
@@ -1797,28 +1795,12 @@ bool FlatSplitterPanel::s_get_now_playing_stage(RECT& screen_rect, HWND& owner)
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
-    // ref_data 為 1：剛吞掉一個雙擊，接著那個放開也要吞掉
     switch (msg) {
     case WM_LBUTTONDBLCLK:
-        // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它。
-        // 第一下剛觸發切換播放頁：第二下整個吞掉，不然會再切一次；
-        // 否則當成一般的按下，連點下一首這類按鈕照常作用
-        if (GetTickCount64() - s_last_now_playing_toggle_tick <= GetDoubleClickTime()) {
-            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 1);
-            return 0;
-        }
+        // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它，改當成一般的按下。
+        // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，
+        // 吞掉就變成每隔一下沒反應（2026-11-02 錄影：74 下點擊只有 43 次切換）。代價是誤雙擊會開了又關
         return DefSubclassProc(wnd, WM_LBUTTONDOWN, wp, lp);
-    case WM_LBUTTONDOWN:
-        // 上一個放開沒送到這裡（例如按著拖出去）
-        if (ref_data)
-            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 0);
-        break;
-    case WM_LBUTTONUP:
-        if (ref_data) {
-            SetWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id, 0);
-            return 0;
-        }
-        break;
     case WM_NCDESTROY:
         RemoveWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id);
         break;

@@ -286,9 +286,6 @@ private:
     static unsigned g_count;
     static pfc::ptr_list_t<FlatSplitterPanel> g_instances;
 
-    // 自編版新增（切換播放頁）：上次切換的時間（GetTickCount64），給播放列的雙擊處理判斷第一下有沒有觸發切換
-    static ULONGLONG s_last_now_playing_toggle_tick;
-
     static LRESULT CALLBACK s_now_playing_bar_subclass_proc(
         HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data);
 
