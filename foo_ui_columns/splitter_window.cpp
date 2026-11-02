@@ -1588,7 +1588,25 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
     UpdateWindow(m_now_playing_snapshot_wnd);
 
     [[maybe_unused]] const auto hr = DwmFlush();
+    let_now_playing_bar_update();
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+}
+
+// 每格結尾都 PostMessage 下一格，主執行緒的佇列一直有已投遞的訊息，優先順序比較低的 WM_TIMER、WM_PAINT 就一直排不到，
+// 整段動畫（連點時是整串動畫）ESLyric 的進度條與時間都停住，動畫結束才一次跳到真實位置
+// （2026-11-02 錄影實測：單次動畫紅線連續不動 350～383ms，連點 6～8 秒時紅線不動 5.8～7.7 秒、時間停在原地）
+// 所以每格送出下一格前，自己先處理播放列的計時與重畫
+void FlatSplitterPanel::let_now_playing_bar_update()
+{
+    // 計時訊息（有上限，避免別的視窗的計時器把這一格拖長）
+    MSG msg{};
+    for (int count = 0; count < 16 && PeekMessage(&msg, nullptr, WM_TIMER, WM_TIMER, PM_REMOVE); ++count)
+        DispatchMessage(&msg);
+
+    // 計時可能讓 ESLyric 標記要重畫，沒有待畫的區域時這一步幾乎沒有成本
+    const auto now_playing_bar = get_now_playing_bar_panel();
+    if (now_playing_bar && now_playing_bar->m_wnd)
+        RedrawWindow(now_playing_bar->m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
 }
 
 void FlatSplitterPanel::finish_now_playing_slide()
@@ -1685,6 +1703,7 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
             break;
     }
 
+    let_now_playing_bar_update();
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 

@@ -246,6 +246,8 @@ private:
     int get_now_playing_slide_offset() const;
     // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
     void finish_now_playing_slide();
+    // 自編版新增：動畫每格送出下一格前，先讓播放列（ESLyric 的進度條與時間）更新
+    void let_now_playing_bar_update();
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
