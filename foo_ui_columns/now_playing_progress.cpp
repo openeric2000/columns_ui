@@ -419,7 +419,10 @@ double ProgressBar::smooth_position(double source, bool paused)
 
     if (m_position_valid) {
         const auto dt = std::chrono::duration<double>(now - m_position_time).count();
-        const auto expected = (paused && m_position_paused) ? 0.0 : dt;
+        // 上一次取樣時是暫停，這段時間（暫停→繼續的那一次取樣，最多一個閒置間隔 100 ms）紅線沒有在走，應該前進 0。
+        // 原本只在「前後都是暫停」時算 0，繼續播放那一次取樣把整段暫停時間當成播放中，紅線一次往前補 dt，
+        // 2026-11-02 自動化錄影：繼續第一步 0.25～1.0 px 不等（取決於繼續時閒置計時器走到哪），跟 dt 吻合
+        const auto expected = m_position_paused ? 0.0 : dt;
         const auto residual = (source - m_position_source) - expected;
 
         if (std::abs(residual) <= max_absorb_seconds)
