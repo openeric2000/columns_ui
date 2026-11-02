@@ -2,6 +2,7 @@
 #include "config.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "playlist_item_helpers.h"
 
 // 自編版新增：Preferences → Display → Columns UI →「下一首提示」分頁（2026-11-02）
 // 設定都存在 next_track_toast 的設定變數裡，改了立刻生效；啟用開關跟 View → Layout → 下一首提示 是同一個設定
@@ -53,12 +54,15 @@ private:
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_POSITION_LABEL, nocturne_text::next_toast_position_label);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_NOTE, nocturne_text::next_toast_note);
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
+        SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
 
         const auto check = [wnd](int id, bool checked) { CheckDlgButton(wnd, id, checked ? BST_CHECKED : BST_UNCHECKED); };
         check(IDC_NEXT_TOAST_ENABLED, next_track_toast::enabled.get());
         check(IDC_NEXT_TOAST_SHOW_SECONDS, next_track_toast::show_seconds_in_ring.get());
         check(IDC_NEXT_TOAST_SHOW_COVER, next_track_toast::show_cover.get());
         check(IDC_NEXT_TOAST_SHOW_TAG, next_track_toast::show_source_tag.get());
+        check(IDC_KEEP_QUEUE_ON_PLAY, playlist_item_helpers::keep_queue_on_play.get());
 
         const auto spin = GetDlgItem(wnd, IDC_NEXT_TOAST_SECONDS_SPIN);
         SendMessage(spin, UDM_SETRANGE32, next_track_toast::min_seconds, next_track_toast::max_seconds);
@@ -99,6 +103,10 @@ private:
             if (code == BN_CLICKED)
                 next_track_toast::show_source_tag = is_checked();
             break;
+        case IDC_KEEP_QUEUE_ON_PLAY:
+            if (code == BN_CLICKED)
+                playlist_item_helpers::keep_queue_on_play = is_checked();
+            break;
         case IDC_NEXT_TOAST_SECONDS:
             if (code == EN_CHANGE) {
                 // 打字或按微調鈕時，範圍內的值馬上生效；打到一半（空白、超出範圍）先不動
@@ -126,7 +134,7 @@ private:
     }
 
     bool m_initialising{};
-    PreferencesTabHelper m_helper{{IDC_TITLE1}};
+    PreferencesTabHelper m_helper{{IDC_TITLE1, IDC_TITLE2}};
 };
 
 TabNextTrackToast g_tab_next_track_toast;

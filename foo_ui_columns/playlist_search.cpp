@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "playlist_search.h"
+#include "playlist_item_helpers.h"
 #include "string.h"
 
 namespace cui::playlist_search {
@@ -122,7 +123,7 @@ void PlaylistSearch::on_return()
         metadb_handle_ptr track;
         m_playlist_api->queue_add_item_playlist(m_playlist_index, *focus_index);
     } else {
-        m_playlist_api->playlist_execute_default_action(m_playlist_index, *focus_index);
+        playlist_item_helpers::play_item_keeping_queue(m_playlist_index, *focus_index);
     }
 }
 

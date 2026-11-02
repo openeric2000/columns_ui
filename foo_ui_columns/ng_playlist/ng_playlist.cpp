@@ -1446,7 +1446,7 @@ bool PlaylistView::notify_on_contextmenu(const POINT& pt, bool from_keyboard)
             menu.append_command(collector.add([&] {
                 if (tracked_item.m_playlist != std::numeric_limits<size_t>::max()
                     && tracked_item.m_item != std::numeric_limits<size_t>::max()) {
-                    m_playlist_api->playlist_execute_default_action(tracked_item.m_playlist, tracked_item.m_item);
+                    playlist_item_helpers::play_item_keeping_queue(tracked_item.m_playlist, tracked_item.m_item);
                 }
             }),
                 L"Play"_zv, {.is_default = true});
@@ -1830,7 +1830,7 @@ void PlaylistView::execute_default_action(size_t index, size_t column, bool b_ke
         if (active != -1)
             m_playlist_api->queue_add_item_playlist(active, index);
     } else {
-        m_playlist_api->activeplaylist_execute_default_action(index);
+        playlist_item_helpers::play_active_item_keeping_queue(index);
     }
 }
 void PlaylistView::move_selection(int delta)

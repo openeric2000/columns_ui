@@ -13,6 +13,7 @@
 #include "font_utils.h"
 #include "menu_items.h"
 #include "nocturne_text.h"
+#include "playlist_item_helpers.h"
 #include "splitter.h"
 
 #pragma comment(lib, "shlwapi.lib")
@@ -1427,6 +1428,7 @@ initquit_factory_t<NextTrackToastInitQuit> next_track_toast_initquit;
 
 // 佇列有變動：馬上重算下一首。停止中使用者把佇列清空，展開頁就沒有東西可以顯示，自動收合（跟「停止就收」一致）
 // 只看使用者移除的那一種：播放推進時佇列變空，不能收（那時下一首正要開始播）
+// 雙擊播放別首歌時，核心會先清佇列、再由 playlist_item_helpers 補回（2026-11-03），那一瞬間的空佇列不算使用者清空
 class QueueChangeCallback : public playback_queue_callback {
 public:
     void on_changed(t_change_origin origin) override
@@ -1434,7 +1436,8 @@ public:
         controller().invalidate_next();
 
         if (origin == changed_user_removed && !play_control::get()->is_playing()
-            && playlist_manager::get()->queue_get_count() == 0 && FlatSplitterPanel::s_is_now_playing_expanded())
+            && playlist_manager::get()->queue_get_count() == 0 && FlatSplitterPanel::s_is_now_playing_expanded()
+            && !playlist_item_helpers::is_restoring_queue())
             FlatSplitterPanel::s_toggle_now_playing();
     }
 };
