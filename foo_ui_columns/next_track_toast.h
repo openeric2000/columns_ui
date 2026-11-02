@@ -10,7 +10,8 @@ namespace cui::next_track_toast {
 
 inline constexpr uint32_t min_seconds = 3;
 inline constexpr uint32_t max_seconds = 30;
-inline constexpr uint32_t default_seconds = 5;
+// 有些歌結尾會有好幾秒無聲，5 秒太短，預設改 10 秒（2026-11-02）
+inline constexpr uint32_t default_seconds = 10;
 
 // 啟用提示（關閉＝完全不出現，包含已停止的狀態）
 extern fbh::ConfigBool enabled;

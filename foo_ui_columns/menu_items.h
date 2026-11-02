@@ -47,4 +47,8 @@ void on_lock_window_size_changed();
 // 自編版新增：目前的展開頁樣式（1 置中、2 靠左＋VU 表、3 靠左＋資訊卡）
 uint32_t get_now_playing_style();
 
+// 自編版新增：暫停時按下暫停（或暫停中跳轉）當下記下的位置（秒）；沒在暫停或沒記到時為空
+// 有些輸出方式暫停中回報的位置會前後跳，要顯示暫停中的位置請用這個，不要讀 playback_get_position
+std::optional<double> get_paused_position();
+
 } // namespace cui::main_menu

@@ -5,6 +5,7 @@
 
 #include "next_track_toast.h"
 #include "font_utils.h"
+#include "menu_items.h"
 #include "nocturne_text.h"
 #include "splitter.h"
 
@@ -31,9 +32,11 @@ constexpr wchar_t timer_class_name[] = L"columns_ui_next_track_toast_timer";
 constexpr UINT_PTR timer_id = 1;
 constexpr UINT interval_active_ms = 16;
 constexpr UINT interval_idle_ms = 150;
-constexpr double fade_seconds = 0.3;
+// 淡入拉長到 0.8 秒、淡出 0.5 秒，原本 0.3 秒太突然（2026-11-02）
+constexpr double fade_in_seconds = 0.8;
+constexpr double fade_out_seconds = 0.5;
 // 提示淡入時從上方多少 DIP 滑下來
-constexpr double slide_dip = 10;
+constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
 
 std::atomic<bool> g_alive{false};
@@ -72,6 +75,11 @@ struct Layout {
         line_gap = fpx(2);
     }
 };
+
+// 每行字的行框高度（字級的倍數）
+constexpr float line_box_ratio = 1.25f;
+// 字的視覺中心在基線上方多少（字級的倍數），用來把字放在行框正中央
+constexpr float ink_center_above_baseline = 0.38f;
 
 struct NextTrack {
     metadb_handle_ptr handle;
@@ -279,11 +287,22 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
     const Gdiplus::Font title_font(family.get(), layout.font_title, style, Gdiplus::UnitPixel);
     const Gdiplus::Font sub_font(family.get(), layout.font_sub, style, Gdiplus::UnitPixel);
 
-    const auto caption_height = caption_font.GetHeight(&g);
-    const auto title_height = title_font.GetHeight(&g);
-    const auto sub_height = sub_font.GetHeight(&g);
-    const auto block_height = caption_height + title_height + sub_height + layout.line_gap * 2;
+    // 每行用固定行框，不用字型自己的行高：主題字型（DFHanziPen）行高是字級的 1.5 倍，三行加起來會塞滿卡片、文字貼上緣
+    const auto caption_box = layout.font_caption * line_box_ratio;
+    const auto title_box = layout.font_title * line_box_ratio;
+    const auto sub_box = layout.font_sub * line_box_ratio;
+    const auto block_height = caption_box + title_box + sub_box + layout.line_gap * 2;
     auto y = (height - block_height) / 2.f;
+
+    // GDI+ 畫字的 y 是字高頂端，基線在其下方 ascent 處；這裡換算成讓字的視覺中心落在行框正中央的 y
+    const auto em_height = static_cast<float>(family->GetEmHeight(style));
+    const auto text_top = [&](float box_top, float box_height, float font_size) {
+        const auto ascent = font_size * family->GetCellAscent(style) / em_height;
+        return box_top + box_height / 2.f + font_size * ink_center_above_baseline - ascent;
+    };
+    const auto cell_height = [&](float font_size) {
+        return font_size * (family->GetCellAscent(style) + family->GetCellDescent(style)) / em_height;
+    };
 
     Gdiplus::StringFormat caption_format(Gdiplus::StringFormat::GenericTypographic());
     caption_format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsMeasureTrailingSpaces);
@@ -295,7 +314,8 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
     const Gdiplus::SolidBrush bright(rgba(255, 241, 241, 241));
 
     // 第一行：「下一首」＋來源標籤
-    g.DrawString(content.caption.c_str(), -1, &caption_font, Gdiplus::PointF(x, y), &caption_format, &muted);
+    g.DrawString(content.caption.c_str(), -1, &caption_font,
+        Gdiplus::PointF(x, text_top(y, caption_box, layout.font_caption)), &caption_format, &muted);
 
     if (content.show_tag && !content.tag.empty()) {
         Gdiplus::RectF caption_bounds;
@@ -305,9 +325,9 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         Gdiplus::RectF tag_bounds;
         g.MeasureString(content.tag.c_str(), -1, &tag_font, Gdiplus::PointF(0, 0), &caption_format, &tag_bounds);
 
-        const auto pill_height = tag_bounds.Height + layout.tag_pad_y * 2;
+        const auto pill_height = layout.font_tag + layout.tag_pad_y * 2;
         const auto pill_x = x + caption_bounds.Width + layout.gap * 0.6f;
-        const auto pill_y = y + (caption_height - pill_height) / 2.f;
+        const auto pill_y = y + (caption_box - pill_height) / 2.f;
         Gdiplus::GraphicsPath pill;
         add_round_rect(pill,
             Gdiplus::RectF(pill_x, pill_y, tag_bounds.Width + layout.tag_pad_x * 2, pill_height), pill_height / 2.f);
@@ -315,18 +335,21 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         g.DrawPath(&pill_border, &pill);
 
         const Gdiplus::SolidBrush tag_brush(rgba(255, 207, 207, 207));
-        g.DrawString(content.tag.c_str(), -1, &tag_font, Gdiplus::PointF(pill_x + layout.tag_pad_x, pill_y + layout.tag_pad_y),
+        g.DrawString(content.tag.c_str(), -1, &tag_font,
+            Gdiplus::PointF(pill_x + layout.tag_pad_x, text_top(pill_y, pill_height, layout.font_tag)),
             &caption_format, &tag_brush);
     }
-    y += caption_height + layout.line_gap;
+    y += caption_box + layout.line_gap;
 
     // 第二行：歌名；第三行：歌手
-    g.DrawString(content.title.c_str(), -1, &title_font, Gdiplus::RectF(x, y, text_width, title_height), &line_format,
-        &bright);
-    y += title_height + layout.line_gap;
+    g.DrawString(content.title.c_str(), -1, &title_font,
+        Gdiplus::RectF(x, text_top(y, title_box, layout.font_title), text_width, cell_height(layout.font_title)),
+        &line_format, &bright);
+    y += title_box + layout.line_gap;
 
-    g.DrawString(content.artist.c_str(), -1, &sub_font, Gdiplus::RectF(x, y, text_width, sub_height), &line_format,
-        &muted);
+    g.DrawString(content.artist.c_str(), -1, &sub_font,
+        Gdiplus::RectF(x, text_top(y, sub_box, layout.font_sub), text_width, cell_height(layout.font_sub)),
+        &line_format, &muted);
 }
 
 // 動態那一層：倒數圈（每格重畫）
@@ -464,10 +487,12 @@ LRESULT CALLBACK toast_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProc(wnd, msg, wp, lp);
 }
 
+// 餘弦緩動：起步與收尾都很緩，比原本的 smoothstep 柔
 double ease(double progress)
 {
+    constexpr double pi = 3.14159265358979323846;
     progress = std::clamp(progress, 0.0, 1.0);
-    return progress * progress * (3 - 2 * progress);
+    return 0.5 - 0.5 * std::cos(progress * pi);
 }
 
 class Controller {
@@ -645,7 +670,14 @@ std::optional<Controller::Want> Controller::evaluate()
         if (length <= 0 || length < 2.0 * count)
             return {};
 
-        const auto remaining = length - playback->playback_get_position();
+        // 暫停中 ASIO+DSD 回報的位置會前後跳（見 menu_items.cpp），改用按下暫停時記下的位置，倒數圈才不會抖
+        auto position = playback->playback_get_position();
+        if (playback->is_paused()) {
+            if (const auto paused_position = main_menu::get_paused_position())
+                position = *paused_position;
+        }
+
+        const auto remaining = length - position;
         if (remaining <= 0 || remaining > count)
             return {};
 
@@ -842,9 +874,9 @@ void Controller::tick()
 
     if (want) {
         rebuild_content(shown, layout);
-        m_alpha = std::min(1.0, m_alpha + elapsed / fade_seconds);
+        m_alpha = std::min(1.0, m_alpha + elapsed / fade_in_seconds);
     } else {
-        m_alpha = std::max(0.0, m_alpha - elapsed / fade_seconds);
+        m_alpha = std::max(0.0, m_alpha - elapsed / fade_out_seconds);
 
         if (m_alpha <= 0) {
             destroy_window();

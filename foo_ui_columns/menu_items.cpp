@@ -711,4 +711,13 @@ uint32_t get_now_playing_style()
     return commands::now_playing_style.get();
 }
 
+std::optional<double> get_paused_position()
+{
+    const auto position = commands::paused_position_ms.load();
+    if (position < 0)
+        return {};
+
+    return static_cast<double>(position) / 1000.0;
+}
+
 } // namespace cui::main_menu
