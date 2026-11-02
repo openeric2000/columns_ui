@@ -558,6 +558,28 @@ double ease(double progress)
     return 0.5 - 0.5 * std::cos(progress * pi);
 }
 
+// 把卡片放到主視窗正上方：比主視窗自己擁有的其他浮動視窗（變暗頁、動畫截圖）高，但比蓋在主視窗前面的別的程式低。
+// 使用者回報 LINE 蓋在 fb2k 前面時卡片會浮在 LINE 上面，所以顯示後明確指定層級，不靠系統預設的位置
+void place_above_owner(HWND wnd, HWND owner)
+{
+    // 從主視窗往上找第一個不是主視窗自己擁有的視窗
+    auto above = GetWindow(owner, GW_HWNDPREV);
+
+    while (above && GetWindow(above, GW_OWNER) == owner)
+        above = GetWindow(above, GW_HWNDPREV);
+
+    auto insert_after = HWND_TOP;
+
+    if (above) {
+        const auto is_topmost = [](HWND window) { return (GetWindowLongPtr(window, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0; };
+
+        // 上面那個是「永遠在最上面」的視窗、主視窗不是：排在它後面會讓卡片也變成最上層，改排在一般視窗的最上面
+        insert_after = is_topmost(above) && !is_topmost(owner) ? HWND_NOTOPMOST : above;
+    }
+
+    SetWindowPos(wnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 class Controller {
 public:
     void start();
@@ -992,8 +1014,10 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
 
     UpdateLayeredWindow(m_wnd, nullptr, &origin, &size, m_surface.dc(), &source, 0, &blend, ULW_ALPHA);
 
-    if (!IsWindowVisible(m_wnd))
+    if (!IsWindowVisible(m_wnd)) {
         ShowWindow(m_wnd, SW_SHOWNOACTIVATE);
+        place_above_owner(m_wnd, m_owner);
+    }
 }
 
 void Controller::tick()
