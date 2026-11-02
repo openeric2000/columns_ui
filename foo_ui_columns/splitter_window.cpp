@@ -1482,7 +1482,7 @@ void FlatSplitterPanel::start_now_playing_animation()
 
     // 動畫進行中再切換時，原本那一串訊息還在跑，不要再送一個（會變成每格跑兩次）
     if (!was_animating)
-        PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+        schedule_now_playing_animation_frame();
 }
 
 bool FlatSplitterPanel::start_now_playing_slide()
@@ -1544,7 +1544,7 @@ bool FlatSplitterPanel::start_now_playing_slide()
     m_now_playing_slide_rect = stage_rect;
     m_now_playing_slide_expanding = m_now_playing_expanded;
     m_now_playing_snapshot_start = std::chrono::steady_clock::now();
-    PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+    schedule_now_playing_animation_frame();
     return true;
 }
 
@@ -1589,6 +1589,20 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
 
     [[maybe_unused]] const auto hr = DwmFlush();
     let_now_playing_bar_update();
+    schedule_now_playing_animation_frame();
+}
+
+// 排定下一格動畫（2026-11-02）
+// 已投遞的訊息優先順序高於滑鼠與鍵盤輸入，每格結尾都投遞下一格時，動畫進行中輸入佇列的點擊會一直排不到，
+// 要等整段動畫（400ms）跑完才被處理，處理完又啟動新的一段，下一個點擊再等這段跑完：連點 N 次就連續動 N 段，
+// 程式裡「動畫中再切換就從目前位置倒回去」的邏輯根本沒機會被用到
+// 輸入佇列裡有點擊、按鍵時先讓出：計時訊息優先順序最低，要等輸入都處理完才會收到，再接著跑下一格
+void FlatSplitterPanel::schedule_now_playing_animation_frame()
+{
+    if (HIWORD(GetQueueStatus(QS_MOUSEBUTTON | QS_KEY | QS_HOTKEY)) != 0
+        && SetTimer(m_wnd, now_playing_animation_yield_timer_id, 1, nullptr) != 0)
+        return;
+
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }
 
@@ -1704,7 +1718,7 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
     }
 
     let_now_playing_bar_update();
-    PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+    schedule_now_playing_animation_frame();
 }
 
 RECT FlatSplitterPanel::get_now_playing_animation_rect(unsigned width, unsigned height) const

@@ -22,6 +22,8 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 // 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
 // （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
+// 自編版新增：輸入佇列裡有點擊或按鍵時，下一格改由這個計時器接續（見 schedule_now_playing_animation_frame）
+inline constexpr UINT_PTR now_playing_animation_yield_timer_id = 0x4e5;
 
 enum Orientation {
     horizontal,
@@ -250,6 +252,8 @@ private:
     void finish_now_playing_slide();
     // 自編版新增：動畫每格送出下一格前，先讓播放列（ESLyric 的進度條與時間）更新
     void let_now_playing_bar_update();
+    // 自編版新增：排定下一格動畫。輸入佇列裡有點擊或按鍵時先讓出（連點才不會排隊），否則直接投遞下一格
+    void schedule_now_playing_animation_frame();
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
