@@ -1605,12 +1605,16 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
 // 已投遞的訊息優先順序高於滑鼠與鍵盤輸入，每格結尾都投遞下一格時，動畫進行中輸入佇列的點擊會一直排不到，
 // 要等整段動畫（400ms）跑完才被處理，處理完又啟動新的一段，下一個點擊再等這段跑完：連點 N 次就連續動 N 段，
 // 程式裡「動畫中再切換就從目前位置倒回去」的邏輯根本沒機會被用到
-// 輸入佇列裡有點擊、按鍵時先讓出：計時訊息優先順序最低，要等輸入都處理完才會收到，再接著跑下一格
+// 投遞下一格之前，先把輸入佇列裡的滑鼠、鍵盤訊息直接處理掉。動畫進行中點擊只是記下「要再切換」（見 s_toggle_now_playing），很輕，
+// 所以可以在這裡處理。不用計時訊息讓出：計時器最短 10 ms 以上，每個點擊都讓動畫停一拍（錄影量到點擊後 0.12 秒內有停頓的占 69%）
+// 有上限，避免輸入太多把這一格拖長
 void FlatSplitterPanel::schedule_now_playing_animation_frame()
 {
-    if (HIWORD(GetQueueStatus(QS_MOUSEBUTTON | QS_KEY | QS_HOTKEY)) != 0
-        && SetTimer(m_wnd, now_playing_animation_yield_timer_id, 1, nullptr) != 0)
-        return;
+    MSG msg{};
+    for (int count = 0; count < 64 && PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE | PM_QS_INPUT); ++count) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
 
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
 }

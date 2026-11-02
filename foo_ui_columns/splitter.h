@@ -22,8 +22,6 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 // 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
 // （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
-// 自編版新增：輸入佇列裡有點擊或按鍵時，下一格改由這個計時器接續（見 schedule_now_playing_animation_frame）
-inline constexpr UINT_PTR now_playing_animation_yield_timer_id = 0x4e5;
 
 enum Orientation {
     horizontal,
@@ -252,7 +250,7 @@ private:
     void finish_now_playing_slide();
     // 自編版新增：動畫每格送出下一格前，先讓播放列（ESLyric 的進度條與時間）更新
     void let_now_playing_bar_update();
-    // 自編版新增：排定下一格動畫。輸入佇列裡有點擊或按鍵時先讓出（連點才不會排隊），否則直接投遞下一格
+    // 自編版新增：排定下一格動畫。先處理輸入佇列裡的滑鼠、鍵盤訊息（已投遞的訊息優先於輸入，不處理的話點擊要等整段動畫結束），再投遞下一格
     void schedule_now_playing_animation_frame();
     // 自編版新增：一段動畫結束後，如果動畫進行中又被切換過（奇數次），再接著往最後想要的狀態動一次
     void apply_deferred_now_playing_toggle();
