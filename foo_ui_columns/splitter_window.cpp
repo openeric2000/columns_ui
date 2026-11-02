@@ -1403,6 +1403,15 @@ bool FlatSplitterPanel::s_toggle_now_playing()
             continue;
 
         s_last_now_playing_toggle_tick = GetTickCount64();
+
+        // 動畫進行中再切換：不倒回去。倒回去那條路徑（再截圖、整片重畫）原本因為點擊根本排不進來而從沒被執行過，
+        // 連點讓它第一次大量執行，錄影逐格看到露出來的主內容還沒畫好（播放清單只有標題列、資料列是空的、資料夾樹被截斷），
+        // 而且每次點擊都很重。改成只記下「還要再切換一次」，這段動畫結束後再接著動
+        if (splitter->m_now_playing_animating || splitter->m_now_playing_snapshot_wnd) {
+            splitter->m_now_playing_toggle_deferred = !splitter->m_now_playing_toggle_deferred;
+            return true;
+        }
+
         splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
         // 自編版（展開頁動畫）：不再一次切換區域，改成由下往上揭開／由上往下蓋回
         splitter->start_now_playing_animation();
@@ -1636,6 +1645,16 @@ void FlatSplitterPanel::finish_now_playing_slide()
     }
 
     DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+    apply_deferred_now_playing_toggle();
+}
+
+void FlatSplitterPanel::apply_deferred_now_playing_toggle()
+{
+    if (!std::exchange(m_now_playing_toggle_deferred, false))
+        return;
+
+    m_now_playing_expanded = !m_now_playing_expanded;
+    start_now_playing_animation();
 }
 
 void FlatSplitterPanel::on_now_playing_animation_frame()
@@ -1694,8 +1713,10 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
         RedrawWindow(m_wnd, &changed_rect, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
 
-    if (!m_now_playing_animating)
+    if (!m_now_playing_animating) {
+        apply_deferred_now_playing_toggle();
         return;
+    }
 
     const auto paint_ms = to_ms(clock::now() - frame_start);
 

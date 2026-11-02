@@ -254,6 +254,8 @@ private:
     void let_now_playing_bar_update();
     // 自編版新增：排定下一格動畫。輸入佇列裡有點擊或按鍵時先讓出（連點才不會排隊），否則直接投遞下一格
     void schedule_now_playing_animation_frame();
+    // 自編版新增：一段動畫結束後，如果動畫進行中又被切換過（奇數次），再接著往最後想要的狀態動一次
+    void apply_deferred_now_playing_toggle();
 
     service_ptr_t<FlatSplitterPanelHost> m_window_host;
     std::vector<Panel::Ptr> m_panels;
@@ -261,6 +263,8 @@ private:
 
     bool m_refresh_children_in_progress{};
     bool m_now_playing_expanded{};
+    // 自編版新增：動畫進行中又被切換時，不倒回去，只記下「還要再切換一次」（切換奇數次才是真的）；這段動畫結束後再接著動
+    bool m_now_playing_toggle_deferred{};
     // 自編版新增（展開頁動畫）：收合時的視窗區域（排版給播放列的位置，on_size_changed 時更新）、動畫的起點與開始時間
     RECT m_now_playing_bar_rect{};
     bool m_now_playing_animating{};
