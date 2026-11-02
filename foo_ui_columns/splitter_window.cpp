@@ -1743,6 +1743,36 @@ bool FlatSplitterPanel::s_is_now_playing_expanded()
     return false;
 }
 
+bool FlatSplitterPanel::s_get_now_playing_stage(RECT& screen_rect, HWND& owner)
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+
+        if (!splitter->get_now_playing_bar_panel())
+            continue;
+
+        // 動畫中或截圖視窗還蓋著時，展開頁的內容還沒定，不算展開完成
+        if (!splitter->m_now_playing_expanded || splitter->m_now_playing_animating
+            || splitter->m_now_playing_snapshot_wnd || !splitter->m_wnd)
+            return false;
+
+        // 展開頁＝分割面板扣掉底部播放列那一段（同 start_now_playing_slide）
+        RECT client_rect{};
+        GetClientRect(splitter->m_wnd, &client_rect);
+        RECT stage_rect{0, 0, client_rect.right, splitter->m_now_playing_bar_rect.top};
+
+        if (stage_rect.bottom <= stage_rect.top)
+            return false;
+
+        MapWindowPoints(splitter->m_wnd, HWND_DESKTOP, reinterpret_cast<POINT*>(&stage_rect), 2);
+        screen_rect = stage_rect;
+        owner = GetAncestor(splitter->m_wnd, GA_ROOT);
+        return true;
+    }
+
+    return false;
+}
+
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {

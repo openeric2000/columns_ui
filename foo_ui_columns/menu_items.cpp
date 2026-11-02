@@ -14,6 +14,7 @@
 #include "splitter.h"
 #include "theme_font.h"
 #include "nocturne_text.h"
+#include "next_track_toast.h"
 
 namespace cui::main_menu {
 
@@ -193,13 +194,20 @@ using panels::splitter::FlatSplitterPanel;
 const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, nocturne_text::toggle_now_playing_name,
     nocturne_text::toggle_now_playing_description,
     [] {
-        // 沒在播放（停止）時不展開；暫停算播放中。收合一律可以
-        if (!FlatSplitterPanel::s_is_now_playing_expanded() && !playback_control::get()->is_playing())
+        // 沒在播放（停止）而且佇列也沒有歌時不展開；暫停算播放中。收合一律可以
+        // 佇列還有歌時停止中也能展開，展開頁會顯示「已停止 · 接下來」（見 next_track_toast.cpp）
+        if (!FlatSplitterPanel::s_is_now_playing_expanded() && !playback_control::get()->is_playing()
+            && playlist_manager::get()->queue_get_count() == 0)
             return;
 
         FlatSplitterPanel::s_toggle_now_playing();
     },
     [] { return FlatSplitterPanel::s_is_now_playing_expanded(); }};
+
+// 自編版新增：展開頁右上角的「下一首」提示開關（View/Layout/下一首提示），設定在設定頁也看得到，是同一個設定
+const MainMenuCommand next_track_toast_toggle{next_track_toast_toggle_id, nocturne_text::next_track_toggle_name,
+    nocturne_text::next_track_toggle_description, [] { next_track_toast::enabled = !next_track_toast::enabled.get(); },
+    [] { return next_track_toast::enabled.get(); }};
 
 // 自編版新增：播放停止（按停止、清單播完）時，展開中的播放頁自動收回；換曲與結束 fb2k 不處理
 class NowPlayingViewPlayCallback : public play_callback_static {
@@ -209,6 +217,10 @@ public:
     void on_playback_stop(play_control::t_stop_reason reason) override
     {
         if (reason == play_control::stop_reason_starting_another || reason == play_control::stop_reason_shutting_down)
+            return;
+
+        // 佇列還有歌：停止後展開頁保持展開，顯示「已停止 · 接下來」；佇列被清空時由 next_track_toast.cpp 收回
+        if (playlist_manager::get()->queue_get_count() > 0)
             return;
 
         if (FlatSplitterPanel::s_is_now_playing_expanded())
@@ -607,7 +619,7 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
     show_now_playing_cover, now_playing_style_centered, now_playing_style_spectrum, now_playing_style_info,
-    cycle_now_playing_style, theme_font);
+    cycle_now_playing_style, next_track_toast_toggle, theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);

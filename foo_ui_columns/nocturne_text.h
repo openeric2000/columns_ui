@@ -13,7 +13,14 @@ namespace cui::nocturne_text {
 inline constexpr auto toggle_now_playing_name = "Toggle Now Playing";
 inline constexpr auto toggle_now_playing_description
     = "Lets the panel with the custom title \"Now Playing Bar\" cover the panel titled \"Main Content\" at the same "
-      "level, or puts it back. Does not expand while stopped.";
+      "level, or puts it back. Does not expand while stopped with an empty queue.";
+inline constexpr auto next_track_toggle_name = "Up Next Notice";
+inline constexpr auto next_track_toggle_description
+    = "Shows the next track at the top right of the now playing view during the last seconds of a track.";
+inline constexpr wchar_t next_caption[] = L"Up next";
+inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
+inline constexpr wchar_t next_source_queue[] = L"Queue";
+inline constexpr wchar_t next_source_list[] = L"Playlist";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
@@ -79,7 +86,13 @@ inline constexpr auto restart_question = "\n\nRestart foobar2000 now?";
 // 選單（View/Layout）
 inline constexpr auto toggle_now_playing_name = "切換播放頁";
 inline constexpr auto toggle_now_playing_description
-    = "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放時不展開。";
+    = "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放而且佇列沒有歌時不展開。";
+inline constexpr auto next_track_toggle_name = "下一首提示";
+inline constexpr auto next_track_toggle_description = "在展開頁右上角，歌曲最後幾秒顯示下一首。";
+inline constexpr wchar_t next_caption[] = L"下一首";
+inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
+inline constexpr wchar_t next_source_queue[] = L"佇列";
+inline constexpr wchar_t next_source_list[] = L"清單";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";
