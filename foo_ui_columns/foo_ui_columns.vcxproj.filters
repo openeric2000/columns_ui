@@ -674,6 +674,9 @@
     <ClCompile Include="next_track_toast.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="now_playing_progress.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1041,6 +1044,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="next_track_toast.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_progress.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_text.h">

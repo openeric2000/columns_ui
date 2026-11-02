@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "splitter.h"
 #include "menu_items.h"
+#include "now_playing_progress.h"
 
 namespace cui::panels::splitter {
 
@@ -407,6 +408,16 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
                 m_now_playing_expanded ? nullptr : CreateRectRgnIndirect(&now_playing_bar_rect), TRUE);
         }
         s_now_playing_expanded_for_fields = m_now_playing_expanded;
+    }
+
+    // 播放列最上緣的進度條：每次排版都要重新放到最上層（上面的 DeferWindowPos 會把播放列容器放到最上）
+    if (now_playing_bar && now_playing_bar->m_wnd) {
+        if (!m_now_playing_progress_wnd)
+            m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());
+        if (m_now_playing_progress_wnd)
+            now_playing_progress::layout(m_now_playing_progress_wnd, now_playing_bar_rect);
+    } else if (m_now_playing_progress_wnd) {
+        DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
     }
 
     if (now_playing_side && now_playing_side->m_wnd) {

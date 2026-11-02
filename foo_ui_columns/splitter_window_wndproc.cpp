@@ -33,6 +33,8 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         m_now_playing_animating = false;
         if (m_now_playing_snapshot_wnd)
             DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+        if (m_now_playing_progress_wnd)
+            DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
         destroy_children();
         m_dark_mode_notifier.reset();
         if (!--g_count) {

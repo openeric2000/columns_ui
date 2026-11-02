@@ -283,6 +283,7 @@
     <ClCompile Include="format_code_generator.cpp" />
     <ClCompile Include="theme_font.cpp" />
     <ClCompile Include="next_track_toast.cpp" />
+    <ClCompile Include="now_playing_progress.cpp" />
     <ClCompile Include="gdi.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="imaging.cpp" />
@@ -487,6 +488,7 @@
     <ClInclude Include="format_code_generator.h" />
     <ClInclude Include="theme_font.h" />
     <ClInclude Include="next_track_toast.h" />
+    <ClInclude Include="now_playing_progress.h" />
     <ClInclude Include="nocturne_text.h" />
     <ClInclude Include="gdi.h" />
     <ClInclude Include="get_msg_hook.h" />
