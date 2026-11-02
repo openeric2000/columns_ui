@@ -43,6 +43,11 @@ constexpr double fade_out_seconds = 0.5;
 constexpr double max_step_seconds = 0.04;
 // 換曲後這段時間不顯示提示，避免換曲瞬間播放位置還沒更新而誤判
 constexpr auto suppress_after_new_track = std::chrono::milliseconds(1500);
+// 倒數圈用的播放位置要保持連續：暫停→繼續時 fb2k 回報的位置會往前跳約 0.2～0.3 秒（ASIO+DSD，錄影量到進度條紅線跳 2 px、
+// 圈內數字早翻一格），狂按暫停就一直小卡。單次不超過這個秒數的跳動當成回報誤差吸收掉，更大的（跳轉、換曲）照實顯示
+constexpr double max_absorb_seconds = 0.6;
+// 吸收掉的偏差用這個時間常數慢慢歸零，免得每次暫停繼續都累積落後
+constexpr double offset_decay_seconds = 0.7;
 // 提示淡入時從上方多少 DIP 滑下來
 constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
@@ -526,6 +531,7 @@ private:
     };
 
     std::optional<Want> evaluate();
+    double smooth_position(double source, bool paused);
     void update_next(const metadb_handle_ptr& now_playing);
     bool ensure_window(HWND owner, const Layout& layout);
     void destroy_window();
@@ -544,6 +550,12 @@ private:
     Clock::time_point m_last_tick{Clock::now()};
     // 換曲後到這個時間點之前不顯示
     Clock::time_point m_suppress_until{};
+    // 播放位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
+    bool m_position_valid{};
+    bool m_position_paused{};
+    double m_position_source{};
+    double m_position_offset{};
+    Clock::time_point m_position_time{};
 
     std::optional<NextTrack> m_next;
     metadb_handle_ptr m_next_for;
@@ -652,6 +664,7 @@ void Controller::on_new_track()
 {
     m_suppress_until = Clock::now() + suppress_after_new_track;
     m_next_valid = false;
+    m_position_valid = false;
 
     if (m_wnd) {
         destroy_window();
@@ -690,6 +703,37 @@ void Controller::update_next(const metadb_handle_ptr& now_playing)
     m_next_valid = true;
 }
 
+// 讓倒數用的播放位置保持連續。顯示位置＝來源位置＋偏差；每次比較「來源位置實際前進多少」與「這段時間理應前進多少
+// （播放中＝經過的時間，暫停中＝0）」，差距在 max_absorb_seconds 以內就算回報誤差，記進偏差讓顯示位置不跳，
+// 差距更大（跳轉）就重設偏差照實顯示；偏差再以 offset_decay_seconds 慢慢歸零
+double Controller::smooth_position(double source, bool paused)
+{
+    const auto now = Clock::now();
+
+    if (m_position_valid) {
+        const auto dt = std::chrono::duration<double>(now - m_position_time).count();
+        const auto expected = (paused && m_position_paused) ? 0.0 : dt;
+        const auto residual = (source - m_position_source) - expected;
+
+        if (std::abs(residual) <= max_absorb_seconds)
+            m_position_offset -= residual;
+        else
+            m_position_offset = 0;
+
+        // 暫停中偏差要原地不動，不然顯示位置會在暫停時慢慢往前爬
+        if (!paused)
+            m_position_offset *= std::exp(-dt / offset_decay_seconds);
+    } else {
+        m_position_offset = 0;
+    }
+
+    m_position_valid = true;
+    m_position_paused = paused;
+    m_position_source = source;
+    m_position_time = now;
+    return source + m_position_offset;
+}
+
 std::optional<Controller::Want> Controller::evaluate()
 {
     if (!enabled.get())
@@ -710,20 +754,28 @@ std::optional<Controller::Want> Controller::evaluate()
     metadb_handle_ptr now_playing;
 
     if (playback->is_playing()) {
-        if (!playback->get_now_playing(now_playing))
+        if (!playback->get_now_playing(now_playing)) {
+            m_position_valid = false;
             return {};
+        }
 
         const auto length = playback->playback_get_length();
         // 長度未知（串流）或太短（不到 2N 秒）不顯示，免得一開始就出現
-        if (length <= 0 || length < 2.0 * count)
+        if (length <= 0 || length < 2.0 * count) {
+            m_position_valid = false;
             return {};
+        }
 
         // 暫停中 ASIO+DSD 回報的位置會前後跳（見 menu_items.cpp），改用按下暫停時記下的位置，倒數圈才不會抖
-        auto current_position = playback->playback_get_position();
-        if (playback->is_paused()) {
+        const auto paused = playback->is_paused();
+        auto source_position = playback->playback_get_position();
+        if (paused) {
             if (const auto paused_position = main_menu::get_paused_position())
-                current_position = *paused_position;
+                source_position = *paused_position;
         }
+
+        // 再把暫停→繼續瞬間位置往前跳的小誤差吸收掉，圈與數字才不會在狂按暫停時一直跳
+        const auto current_position = smooth_position(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
         const auto remaining = length - current_position;
@@ -734,6 +786,8 @@ std::optional<Controller::Want> Controller::evaluate()
         want.remaining = remaining;
         want.ratio = remaining / count;
     } else {
+        m_position_valid = false;
+
         if (playlist_manager::get()->queue_get_count() == 0)
             return {};
 
