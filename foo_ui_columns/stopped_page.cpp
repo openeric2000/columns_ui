@@ -426,6 +426,35 @@ bool Controller::ensure_window(HWND owner, const RECT& stage, double scale)
     return true;
 }
 
+// 放到主視窗的正上方：比主視窗自己擁有的其他浮動視窗（角落的提示、動畫截圖）低，它們才不會被這張變暗頁蓋住。
+// 不能用 HWND_BOTTOM：被擁有的視窗必須在擁有者之上，丟到最底層時 Windows 會連主視窗一起壓到所有別的程式的視窗後面
+// （2026-11-03 使用者按停止鍵時，原本在 fb2k 後面的檔案總管跑到 fb2k 前面）
+void place_just_above_owner(HWND wnd)
+{
+    const auto owner = GetWindow(wnd, GW_OWNER);
+
+    if (!owner)
+        return;
+
+    // 主視窗正上方的那個視窗；放在它的正下方＝主視窗的正上方
+    const auto above = GetWindow(owner, GW_HWNDPREV);
+
+    if (above == wnd)
+        return;
+
+    auto insert_after = HWND_TOP;
+
+    if (above) {
+        const auto is_topmost = [](HWND window) { return (GetWindowLongPtr(window, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0; };
+
+        // 上面那個是「永遠在最上面」的視窗、主視窗不是：排在它後面會讓變暗頁也變成最上層，
+        // 這時主視窗上面沒有任何自己的浮動視窗，改放一般視窗的最上面就是主視窗正上方
+        insert_after = is_topmost(above) && !is_topmost(owner) ? HWND_NOTOPMOST : above;
+    }
+
+    SetWindowPos(wnd, insert_after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void Controller::present(const RECT& stage)
 {
     POINT origin{stage.left, stage.top};
@@ -437,8 +466,8 @@ void Controller::present(const RECT& stage)
 
     if (!IsWindowVisible(m_wnd)) {
         ShowWindow(m_wnd, SW_SHOWNOACTIVATE);
-        // 放到同一個主視窗底下所有浮動視窗的最下面（仍在主視窗之上），角落的提示與動畫截圖才不會被它蓋住
-        SetWindowPos(m_wnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        // 放在主視窗正上方（仍在主視窗之上），角落的提示與動畫截圖才不會被它蓋住
+        place_just_above_owner(m_wnd);
     }
 }
 
