@@ -3,6 +3,63 @@
 
 namespace cui::playlist_item_helpers {
 
+fbh::ConfigBool keep_queue_on_play(
+    GUID{0x4b2e8a17, 0x6d03, 0x4e95, {0xa8, 0x1c, 0x72, 0xf0, 0x3d, 0x95, 0xbe, 0x26}}, true);
+
+namespace {
+
+// 只在主執行緒用（播放清單的操作都在主執行緒）
+size_t restoring_depth{};
+
+template <typename RunDefaultAction>
+void run_keeping_queue(RunDefaultAction&& run_default_action)
+{
+    const auto api = playlist_manager::get();
+
+    if (!keep_queue_on_play.get() || api->queue_get_count() == 0) {
+        run_default_action();
+        return;
+    }
+
+    pfc::list_t<t_playback_queue_item> saved;
+    api->queue_get_contents(saved);
+
+    ++restoring_depth;
+    const auto leave = wil::scope_exit([] { --restoring_depth; });
+
+    run_default_action();
+
+    // 核心把佇列清空了才補回；佇列沒變空就不動，免得加成兩份
+    if (api->queue_get_count() != 0)
+        return;
+
+    for (size_t index = 0; index < saved.get_count(); index++) {
+        const auto& entry = saved[index];
+
+        if (entry.m_playlist != pfc_infinite)
+            api->queue_add_item_playlist(entry.m_playlist, entry.m_item);
+        else
+            api->queue_add_item(entry.m_handle);
+    }
+}
+
+} // namespace
+
+void play_item_keeping_queue(size_t playlist, size_t item)
+{
+    run_keeping_queue([&] { playlist_manager::get()->playlist_execute_default_action(playlist, item); });
+}
+
+void play_active_item_keeping_queue(size_t item)
+{
+    run_keeping_queue([&] { playlist_manager::get()->activeplaylist_execute_default_action(item); });
+}
+
+bool is_restoring_queue()
+{
+    return restoring_depth > 0;
+}
+
 void action_remove_track(bool on_item, size_t idx)
 {
     if (on_item) {

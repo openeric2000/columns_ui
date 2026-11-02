@@ -37,6 +37,8 @@ inline constexpr wchar_t next_toast_show_cover[] = L"Show the cover of the next 
 inline constexpr wchar_t next_toast_show_tag[] = L"Show where the next track comes from (Queue / Playlist)";
 inline constexpr wchar_t next_toast_position_label[] = L"Position";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bottom right", L"Top left", L"Bottom left"};
+inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
+inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
 inline constexpr wchar_t next_toast_note[]
     = L"The notice is not shown when the track is shorter than twice the countdown, when the playback order is Random "
       L"or Repeat (track), or when there is no next track. While stopped with tracks in the queue, it shows the first "
@@ -129,6 +131,8 @@ inline constexpr wchar_t next_toast_show_cover[] = L"顯示下一首的專輯封
 inline constexpr wchar_t next_toast_show_tag[] = L"顯示下一首的來源標籤（佇列／清單）";
 inline constexpr wchar_t next_toast_position_label[] = L"位置";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
+inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
+inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
 inline constexpr wchar_t next_toast_note[]
     = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
       L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"
