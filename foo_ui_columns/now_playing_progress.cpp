@@ -21,6 +21,8 @@ using Clock = std::chrono::steady_clock;
 constexpr wchar_t window_class_name[] = L"columns_ui_now_playing_progress";
 // 計時執行緒通知視窗「該更新了」的訊息
 constexpr UINT msg_tick = WM_USER + 0x4e6;
+// 播放狀態改變（暫停、繼續、開始、停止、跳轉）時叫視窗馬上量一次，不等計時執行緒下一次醒來
+constexpr UINT msg_wake = WM_USER + 0x4e7;
 // 播放中每格間隔；暫停、停止時沒有東西在動，慢慢檢查就好；看不到時更慢
 constexpr UINT interval_active_ms = 16;
 constexpr UINT interval_idle_ms = 100;
@@ -47,16 +49,39 @@ const Gdiplus::Color played_colour(255, 247, 11, 11);
 // 每跳轉完成一次（任何來源：這個進度條、別的進度條、快速鍵）加一，進度條用它判斷自己發的跳轉完成了沒
 std::atomic<uint64_t> seek_generation{0};
 
+// 現存的進度條視窗（只在主執行緒增減）
+std::vector<HWND>& live_bars()
+{
+    static std::vector<HWND> bars;
+    return bars;
+}
+
+// 2026-11-02 自動化錄影：暫停時計時器 100 ms 才看一次，繼續播放沒人叫醒它，最多等 100 ms 才動，
+// 動的時候補一步，紅線在繼續的瞬間往前跳 1.0～1.5 px（約 0.1 秒）
+void wake_all()
+{
+    for (const auto wnd : live_bars())
+        PostMessage(wnd, msg_wake, 0, 0);
+}
+
 class SeekPlayCallback : public play_callback_static {
 public:
-    unsigned get_flags() override { return flag_on_playback_seek; }
+    unsigned get_flags() override
+    {
+        return flag_on_playback_seek | flag_on_playback_pause | flag_on_playback_starting | flag_on_playback_new_track
+            | flag_on_playback_stop;
+    }
 
-    void on_playback_seek(double time) override { ++seek_generation; }
+    void on_playback_seek(double time) override
+    {
+        ++seek_generation;
+        wake_all();
+    }
 
-    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
-    void on_playback_new_track(metadb_handle_ptr track) override {}
-    void on_playback_stop(play_control::t_stop_reason reason) override {}
-    void on_playback_pause(bool state) override {}
+    void on_playback_starting(play_control::t_track_command command, bool paused) override { wake_all(); }
+    void on_playback_new_track(metadb_handle_ptr track) override { wake_all(); }
+    void on_playback_stop(play_control::t_stop_reason reason) override { wake_all(); }
+    void on_playback_pause(bool state) override { wake_all(); }
     void on_playback_edited(metadb_handle_ptr track) override {}
     void on_playback_dynamic_info(const file_info& info) override {}
     void on_playback_dynamic_info_track(const file_info& info) override {}
@@ -183,9 +208,11 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
     case WM_CREATE:
+        live_bars().push_back(m_wnd);
         start_ticker();
         return 0;
     case WM_DESTROY:
+        std::erase(live_bars(), m_wnd);
         stop_ticker();
         if (m_high_resolution_timer) {
             timeEndPeriod(1);
@@ -199,6 +226,8 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case msg_tick:
         m_tick_pending = false;
+        [[fallthrough]];
+    case msg_wake:
         try {
             tick();
         }
@@ -574,7 +603,25 @@ HWND create(HWND parent)
 
 void layout(HWND wnd, const RECT& bar_rect)
 {
-    SetWindowPos(wnd, HWND_TOP, bar_rect.left, bar_rect.top, bar_rect.right - bar_rect.left,
+    const auto width = bar_rect.right - bar_rect.left;
+    const auto height = uih::scale_dpi_value(bar_height_dip);
+
+    // 位置、大小都沒變、已經顯示而且在最上層就什麼都不做（排版時已經用 defer_layout 放好的話就是這種情況）
+    RECT current{};
+    GetWindowRect(wnd, &current);
+    MapWindowPoints(HWND_DESKTOP, GetParent(wnd), reinterpret_cast<POINT*>(&current), 2);
+    const auto on_top = GetWindow(GetParent(wnd), GW_CHILD) == wnd;
+
+    if (IsWindowVisible(wnd) && on_top && current.left == bar_rect.left && current.top == bar_rect.top
+        && current.right - current.left == width && current.bottom - current.top == height)
+        return;
+
+    SetWindowPos(wnd, HWND_TOP, bar_rect.left, bar_rect.top, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
+{
+    return DeferWindowPos(dwp, wnd, HWND_TOP, bar_rect.left, bar_rect.top, bar_rect.right - bar_rect.left,
         uih::scale_dpi_value(bar_height_dip), SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 

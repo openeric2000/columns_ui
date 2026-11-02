@@ -367,7 +367,12 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_INVALIDATE);
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()));
+    // 播放列最上緣的進度條視窗：下面跟其他面板放在同一批 DeferWindowPos。先放容器、再另外放進度條的話，
+    // 中間那一格會露出底下 ESLyric 的條（2026-11-02 錄影：展開／收合 6 次有 3～4 次整條閃 1 幀，變暗或整條同一個灰）
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_now_playing_progress_wnd)
+        m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());
+
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 1);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -394,6 +399,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
                 size_cumulative += size;
             }
         }
+
+        if (m_now_playing_progress_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = now_playing_progress::defer_layout(dwp, m_now_playing_progress_wnd, now_playing_bar_rect);
+
         EndDeferWindowPos(dwp);
     }
 
@@ -410,7 +419,7 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         s_now_playing_expanded_for_fields = m_now_playing_expanded;
     }
 
-    // 播放列最上緣的進度條：每次排版都要重新放到最上層（上面的 DeferWindowPos 會把播放列容器放到最上）
+    // 播放列最上緣的進度條：上面的批次已經放好了；批次失敗或剛建立時由這裡補放（位置沒變就什麼都不做）
     if (now_playing_bar && now_playing_bar->m_wnd) {
         if (!m_now_playing_progress_wnd)
             m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());

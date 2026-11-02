@@ -16,6 +16,12 @@ namespace cui::now_playing_progress {
 HWND create(HWND parent);
 
 // 移到 bar_rect（播放列在分割面板裡的位置）的上緣，寬度同播放列，並放到子視窗的最上層
+// 位置、大小都沒變而且已經在最上層時什麼都不做
 void layout(HWND wnd, const RECT& bar_rect);
+
+// 同 layout，但加進呼叫端的 DeferWindowPos 批次（要放在把播放列容器放到最上層的那一筆「之後」）：
+// 容器被放到最上層的同一個動作裡，進度條也回到它上面，中間不會有一格露出底下 ESLyric 的條
+// （2026-11-02 錄影：先放容器、再另外放進度條，展開／收合 6 次有 3～4 次整條閃 1 幀）
+HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);
 
 } // namespace cui::now_playing_progress
