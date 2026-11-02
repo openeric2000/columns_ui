@@ -1,6 +1,6 @@
 #pragma once
 
-// 自編版新增：展開頁右上角的「下一首」提示（2026-11-02）
+// 自編版新增：展開頁角落的「下一首」提示（2026-11-02），預設放右下，可在設定頁改成其他三個角落
 // - 歌曲最後 N 秒出現，左邊的圈逆時針倒數；停止且佇列還有歌時改顯示「已停止 · 接下來」
 // - 下一首的決定順序：佇列第一首 → 隨機／單曲循環不顯示 → 播放跟隨游標 → 播放中那首的下一列（清單循環時最後一首接第一首）
 // - 提示是一個浮在主視窗上的分層視窗（不擋滑鼠、不搶焦點），自己用 GDI+ 畫，所以才畫得出倒數圈與淡入淡出
@@ -13,7 +13,7 @@ inline constexpr uint32_t max_seconds = 30;
 // 有些歌結尾會有好幾秒無聲，5 秒太短，預設改 10 秒（2026-11-02）
 inline constexpr uint32_t default_seconds = 10;
 
-// 提示放在展開頁的哪個角落（存的是這四個值之一，數字不能改，已存進設定）
+// 提示放在展開頁的哪個角落（存的是這四個值之一，數字不能改，已存進設定）；預設 position_bottom_right
 inline constexpr uint32_t position_top_right = 0;
 inline constexpr uint32_t position_bottom_right = 1;
 inline constexpr uint32_t position_top_left = 2;

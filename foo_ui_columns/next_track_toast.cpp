@@ -24,7 +24,7 @@ fbh::ConfigBool show_cover(GUID{0x15e7d9c3, 0xa046, 0x4d12, {0xbb, 0x78, 0x31, 0
 fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
 fbh::ConfigUint32 position(
-    GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_top_right);
+    GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_bottom_right);
 
 namespace {
 
@@ -55,7 +55,7 @@ constexpr auto next_refresh_interval = std::chrono::seconds(1);
 std::atomic<bool> g_alive{false};
 
 // 版面（DIP，乘上主視窗的縮放比例才是實際像素）
-// 2026-11-02 219（125%）版：實際約 620×120、離右邊 100、離上緣 115，對齊大封面上緣與版面右邊界；169 之後再調
+// 2026-11-02 219（125%）版：實際約 620×120，預設放右下；離左右邊 60（右邊對齊播放列「0.00 dB」文字的右緣）、離上緣 115、離下緣 50；169 之後再調
 struct Layout {
     int width, height, margin_side, margin_top, margin_bottom;
     int pad_left, pad_right, gap, radius;
@@ -68,7 +68,7 @@ struct Layout {
         const auto fpx = [scale](double dip) { return static_cast<float>(dip * scale); };
         width = px(496);
         height = px(96);
-        margin_side = px(80);
+        margin_side = px(48);
         margin_top = px(92);
         margin_bottom = px(40);
         pad_left = px(21);
