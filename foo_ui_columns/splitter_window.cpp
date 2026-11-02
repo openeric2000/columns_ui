@@ -149,7 +149,8 @@ wil::unique_hbitmap capture_now_playing_area(HWND owner, const RECT& screen_rect
 }
 
 // 在螢幕 window_rect 開一個不搶焦點、不擋滑鼠的視窗顯示截圖
-HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot> snapshot, const RECT& window_rect)
+// 開成功才把 snapshot 交給視窗；失敗時還在呼叫端手上（收合改展開換視窗時，失敗要把圖拿回舊視窗）
+HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot>&& snapshot, const RECT& window_rect)
 {
     static const auto class_registered = [] {
         WNDCLASSEX wc{};
@@ -1434,11 +1435,25 @@ void FlatSplitterPanel::start_now_playing_animation()
         if (m_now_playing_expanded && !snapshot->main) {
             // 收合到一半改展開：截目前的主內容（底下還是收合的）當偏移上方的底，截圖視窗改成固定蓋住整個展開頁
             // 截不到就維持跟著移動（下緣可能露出一條縫）
-            if (auto main = capture_now_playing_area(GetAncestor(m_wnd, GA_ROOT), rect)) {
-                snapshot->main = std::move(main);
-                SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top, wil::rect_width(rect),
-                    wil::rect_height(rect), SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
-                UpdateWindow(m_now_playing_snapshot_wnd);
+            // 不能直接把現在這個視窗改位置、改大小：收合中的視窗又移又縮，改成蓋整頁時 Windows 先套用新位置，
+            // 新的大小與內容晚一格才到，那一格只有原本視窗高度（整頁高度－偏移）的上面一塊蓋著，
+            // 其餘露出底下的真視窗，看起來是封面和歌詞單獨出現在最上面（2026-11-02 錄影：11 次收合改展開有 9 次）。
+            // 所以另外開一個新視窗，整頁畫好才顯示，DwmFlush 等合成出來再拿掉舊的
+            const auto owner = GetAncestor(m_wnd, GA_ROOT);
+            if (auto main = capture_now_playing_area(owner, rect)) {
+                auto replacement = std::make_unique<NowPlayingSnapshot>();
+                replacement->stage = std::move(snapshot->stage);
+                replacement->main = std::move(main);
+                replacement->stage_rect = snapshot->stage_rect;
+                replacement->offset = offset;
+
+                if (const auto new_wnd = create_now_playing_snapshot(owner, std::move(replacement), rect)) {
+                    [[maybe_unused]] const auto hr = DwmFlush();
+                    DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, new_wnd));
+                } else {
+                    // 開不出新視窗：圖還給舊視窗，維持跟著移動
+                    snapshot->stage = std::move(replacement->stage);
+                }
             }
         }
 
