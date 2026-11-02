@@ -240,6 +240,55 @@ std::unique_ptr<Gdiplus::FontFamily> create_font_family()
     return family;
 }
 
+// 暖機 GDI+ 的字型表：進程裡第一次依名稱建立字型家族時，GDI+ 要列舉整台電腦的字型、建內部字型表，
+// 實測 219 要 1.4 秒、169 要 3 秒左右（跟裝了多少字型有關），之後都有快取。不先做的話，第一次顯示提示就在
+// 主執行緒上做這一步，整個介面（進度條、播放時間）停住，提示也晚出現（待辦第 10 項）。
+// 啟動時放到背景執行緒做。這裡自己握一份 GDI+ 的啟動計數直到結束：主視窗那份還沒啟動時，暖機用的那份一關，
+// 剛建好的字型表會跟著被丟掉
+namespace font_warm_up {
+
+ULONG_PTR token{};
+bool started{};
+std::thread worker;
+
+void start()
+{
+    // 字型名稱在主執行緒讀，跟畫提示時用的是同一個字型（Common (labels)）
+    std::wstring face_name;
+    try {
+        face_name = fonts::get_log_font_with_fallback(fonts::labels_font_id).lfFaceName;
+    } catch (...) {
+        return;
+    }
+
+    const Gdiplus::GdiplusStartupInput input;
+    if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok)
+        return;
+    started = true;
+
+    worker = std::thread([face_name = std::move(face_name)] {
+        const Gdiplus::FontFamily family(face_name.c_str());
+        if (family.GetLastStatus() == Gdiplus::Ok) {
+            // 順便建一個字型，把字型的度量資料也載進來
+            const Gdiplus::Font font(&family, 16.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+            (void)font;
+        }
+    });
+}
+
+void stop()
+{
+    if (worker.joinable())
+        worker.join();
+
+    if (started) {
+        Gdiplus::GdiplusShutdown(token);
+        started = false;
+    }
+}
+
+} // namespace font_warm_up
+
 Gdiplus::FontStyle pick_font_style(const Gdiplus::FontFamily& family)
 {
     if (family.IsStyleAvailable(Gdiplus::FontStyleRegular))
@@ -1016,11 +1065,13 @@ public:
     {
         g_alive = true;
         controller().start();
+        font_warm_up::start();
     }
 
     void on_quit() override
     {
         g_alive = false;
+        font_warm_up::stop();
         controller().stop();
     }
 };
