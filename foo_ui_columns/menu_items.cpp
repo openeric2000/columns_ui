@@ -1,4 +1,7 @@
 #include "pch.h"
+
+#include <mutex>
+
 #include "menu_items.h"
 #include "layout.h"
 #include "ng_playlist/ng_playlist.h"
@@ -79,8 +82,36 @@ const MainMenuCommand playlist_view_search{.guid = playlist_view_search_id,
     .execute_callback = [] { panels::playlist_view::PlaylistView::s_show_search_bar(); },
     .is_available_callback = [] { return panels::playlist_view::PlaylistView::s_has_active_instance(); }};
 
+// 自編版修改：fb2k 核心記住的「正在播的那一項」被移出清單時（例如 Album list 自動送了別的資料夾，換回來後是新加入的項目），
+// highlight_playing_item 會失敗，改成在目前清單裡找同一首歌，選取並捲到那一列（2026-11-02）
+void activate_now_playing_item()
+{
+    const auto playlists = playlist_manager::get();
+
+    if (playlists->highlight_playing_item())
+        return;
+
+    metadb_handle_ptr track;
+    if (!play_control::get()->get_now_playing(track))
+        return;
+
+    const auto playlist = playlists->get_active_playlist();
+    if (playlist == pfc_infinite)
+        return;
+
+    pfc::list_t<metadb_handle_ptr> items;
+    playlists->playlist_get_all_items(playlist, items);
+
+    const auto index = items.find_item(track);
+    if (index == pfc_infinite)
+        return;
+
+    playlists->playlist_set_focus_item(playlist, index);
+    playlists->playlist_set_selection(playlist, bit_array_true(), bit_array_one(index));
+}
+
 const MainMenuCommand activate_now_playing{activate_now_playing_id, "Activate now playing",
-    "Activates the currently playing item.", [] { playlist_manager::get()->highlight_playing_item(); }};
+    "Activates the currently playing item.", [] { activate_now_playing_item(); }};
 
 const MainMenuCommand show_groups{show_groups_id, "Show groups", "Shows or hides playlist view groups.",
     [] {
@@ -291,17 +322,70 @@ public:
 
 play_callback_static_factory_t<PausedPositionPlayCallback> paused_position_play_callback;
 
+// 自編版新增：記住正在播放的檔案，給標題格式欄位 %cui_now_playing_file% 用
+// 播放清單的 ▶ 標記原本靠核心記的「正在播的那一項」，Album list 換了資料夾、再換回來之後那一項已經不在清單裡，標記就沒了；
+// 這個欄位改成直接比對檔案，同一首歌出現在任何清單的哪一列都標得出來（2026-11-02）
+// 標題格式可能在別的執行緒算，所以用 mutex 保護
+std::mutex now_playing_file_mutex;
+metadb_handle_ptr now_playing_file;
+
+void set_now_playing_file(const metadb_handle_ptr& track)
+{
+    metadb_handle_ptr previous;
+    {
+        std::scoped_lock lock(now_playing_file_mutex);
+        previous = now_playing_file;
+        now_playing_file = track;
+    }
+    // 舊的與新的那幾列都要重算（▶ 要換位置）
+    panels::playlist_view::PlaylistView::s_on_now_playing_file_change(previous, track);
+}
+
+class NowPlayingFilePlayCallback : public play_callback_static {
+public:
+    unsigned get_flags() override
+    {
+        return flag_on_playback_new_track | flag_on_playback_pause | flag_on_playback_stop;
+    }
+
+    void on_playback_new_track(metadb_handle_ptr track) override { set_now_playing_file(track); }
+
+    // 暫停時符號從 ▶ 變 ❚❚，這幾列也要重算
+    void on_playback_pause(bool state) override
+    {
+        metadb_handle_ptr track;
+        {
+            std::scoped_lock lock(now_playing_file_mutex);
+            track = now_playing_file;
+        }
+        panels::playlist_view::PlaylistView::s_on_now_playing_file_change(track, track);
+    }
+
+    void on_playback_stop(play_control::t_stop_reason reason) override { set_now_playing_file({}); }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    void on_playback_seek(double time) override {}
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_playback_time(double time) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play_callback;
+
 // 自編版新增：標題格式欄位 %cui_now_playing_expanded%，播放頁展開時為 1、收合時不存在，給 ESLyric 佈局切換 ⌃／⌄
 // 以及 %cui_now_playing_style%（展開頁樣式 1～3）
 // 以及 %cui_paused_position_ms%／%cui_paused_length_ms%（暫停時的位置與曲長，毫秒；沒在暫停時不存在）
+// 以及 %cui_now_playing_file%（這一列的歌就是正在播放的檔案時為 1，否則不存在；播放清單的 ▶ 標記用）
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 4; }
+    t_uint32 get_field_count() override { return 5; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
-        constexpr const char* names[]{
-            "cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms", "cui_paused_length_ms"};
+        constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
+            "cui_paused_length_ms", "cui_now_playing_file"};
         out = names[index];
     }
 
@@ -309,6 +393,15 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            return true;
+        }
+
+        if (index == 4) {
+            std::scoped_lock lock(now_playing_file_mutex);
+            if (!handle || handle != now_playing_file.get_ptr())
+                return false;
+
+            out->write(titleformat_inputtypes::meta, "1");
             return true;
         }
 

@@ -407,6 +407,25 @@ void PlaylistView::refresh_all_items_text()
     update_items(0, get_item_count());
 }
 
+void PlaylistView::s_on_now_playing_file_change(const metadb_handle_ptr& previous, const metadb_handle_ptr& current)
+{
+    for (auto& window : s_windows)
+        window->refresh_items_of_tracks(previous, current);
+}
+
+// 只重算目前清單裡是這兩首歌的列；整個清單重算在大清單上太重
+void PlaylistView::refresh_items_of_tracks(const metadb_handle_ptr& first, const metadb_handle_ptr& second)
+{
+    pfc::list_t<metadb_handle_ptr> items;
+    m_playlist_api->activeplaylist_get_all_items(items);
+
+    const auto count = std::min(items.get_count(), get_item_count());
+    for (size_t index = 0; index < count; index++) {
+        if ((first.is_valid() && items[index] == first) || (second.is_valid() && items[index] == second))
+            update_items(index, 1);
+    }
+}
+
 void PlaylistView::invalidate_styles(size_t index, size_t count)
 {
     for (const auto item_index : ranges::views::iota(index, index + count)) {

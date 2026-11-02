@@ -213,6 +213,8 @@ public:
     static void g_on_time_change();
     static void s_show_search_bar();
     static bool s_has_active_instance() { return !s_windows.empty(); }
+    // 自編版新增：正在播放的檔案換了（或暫停、停止），重算清單裡這幾首的欄位（%cui_now_playing_file% 用）
+    static void s_on_now_playing_file_change(const metadb_handle_ptr& previous, const metadb_handle_ptr& current);
 
     void on_font_change();
     void on_group_font_change();
@@ -379,6 +381,7 @@ private:
 
     void update_all_items();
     void refresh_all_items_text();
+    void refresh_items_of_tracks(const metadb_handle_ptr& first, const metadb_handle_ptr& second);
     void invalidate_styles(size_t index, size_t count);
     void update_items(size_t index, size_t count);
 
