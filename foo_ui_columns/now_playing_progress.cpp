@@ -590,6 +590,9 @@ HWND create(HWND parent)
     static const auto class_registered = [] {
         WNDCLASSEX window_class{};
         window_class.cbSize = sizeof(window_class);
+        // 大小一變就整個視窗重畫。預設（沒有這兩個樣式）放大時只重畫新增的那一段、舊畫面保留，舊線右端 6 px 的縮進
+        // 就留成缺口；停止／暫停時沒有東西會觸發重畫，要等滑鼠移上去才接回來（2026-11-03 使用者回報：視窗先縮小再放大到全螢幕）
+        window_class.style = CS_HREDRAW | CS_VREDRAW;
         window_class.lpfnWndProc = ProgressBar::s_wndproc;
         window_class.hInstance = core_api::get_my_instance();
         window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
