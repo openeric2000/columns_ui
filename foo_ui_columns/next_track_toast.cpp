@@ -622,6 +622,9 @@ private:
     Clock::time_point m_last_tick{Clock::now()};
     // 換曲後到這個時間點之前不顯示
     Clock::time_point m_suppress_until{};
+    // 這一輪 evaluate() 是因為展開頁已經不在（收合、動畫中、截圖視窗還蓋著）而沒有東西要顯示；
+    // 這種情況提示要直接收掉，不能淡出（見 tick）
+    bool m_stage_unavailable{};
     // 播放位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
     bool m_position_valid{};
     bool m_position_paused{};
@@ -808,6 +811,8 @@ double Controller::smooth_position(double source, bool paused)
 
 std::optional<Controller::Want> Controller::evaluate()
 {
+    m_stage_unavailable = false;
+
     if (!enabled.get())
         return {};
 
@@ -815,8 +820,10 @@ std::optional<Controller::Want> Controller::evaluate()
         return {};
 
     Want want;
-    if (!FlatSplitterPanel::s_get_now_playing_stage(want.stage, want.owner))
+    if (!FlatSplitterPanel::s_get_now_playing_stage(want.stage, want.owner)) {
+        m_stage_unavailable = true;
         return {};
+    }
 
     if (IsIconic(want.owner) || !IsWindowVisible(want.owner))
         return {};
@@ -1031,6 +1038,13 @@ void Controller::tick()
 
     if (want) {
         m_last_want = want;
+    } else if (m_wnd && m_stage_unavailable) {
+        // 展開頁收合了（按停止退出來、點播放列收合都一樣）：提示跟著頁面走，直接收掉，不淡出。
+        // 收合動畫的截圖視窗一出現就蓋住提示，淡到一半的提示在截圖往下滑開後又露出來，看起來像再閃一下（2026-11-03）。
+        // 歌曲快結束的淡出不受影響：那時頁面還是展開的，evaluate() 不會是因為頁面不在而沒有東西可顯示
+        destroy_window();
+        set_interval(interval_idle_ms);
+        return;
     } else if (m_wnd && m_last_want
         && (!IsWindow(m_last_want->owner) || IsIconic(m_last_want->owner) || !IsWindowVisible(m_last_want->owner))) {
         // 主視窗縮小或不見了：不淡出，直接收掉
