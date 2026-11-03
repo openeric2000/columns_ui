@@ -439,7 +439,8 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
     size_t index = pfc_infinite;
 
     if (!playlists->get_playing_item_location(&playlist, &index)) {
-        // 核心記的「正在播的那一項」已經不在清單裡（例如 Album list 換過資料夾）：在播放中那份清單用檔案找同一首
+        // 核心記的「正在播的那一項」已經不在清單裡（例如 Album list 換過資料夾）：在播放中那份清單用檔案找同一首，
+        // 找不到 index 就留著 pfc_infinite（下面跟隨游標還是要看）
         playlist = playlists->get_playing_playlist();
         if (playlist == pfc_infinite)
             return {};
@@ -447,11 +448,10 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
         pfc::list_t<metadb_handle_ptr> items;
         playlists->playlist_get_all_items(playlist, items);
         index = items.find_item(now_playing);
-        if (index == pfc_infinite)
-            return {};
     }
 
-    // 播放跟隨游標：游標（反白）停在別的項目時，下一首就是它（這個行為我是照印象寫的，要實測確認）
+    // 播放跟隨游標：游標（反白）停在別的項目時，下一首就是它（2026-11-03 錄影證實：Album list 換了資料夾、
+    // 正在播的那首已不在清單裡，核心播完仍接新清單反白的那首，所以這裡不能要求找得到正在播的那首）
     if (config_object::g_get_data_bool_simple(standard_config_objects::bool_playback_follows_cursor, false)) {
         const auto focus = playlists->playlist_get_focus_item(playlist);
         if (focus != pfc_infinite && focus != index) {
@@ -460,6 +460,10 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
                 return NextTrack{std::move(handle), false};
         }
     }
+
+    // 找不到正在播的那首、又沒有可跟隨的反白：核心會接哪一首不知道，寧可不顯示
+    if (index == pfc_infinite)
+        return {};
 
     const auto count = playlists->playlist_get_item_count(playlist);
     size_t next = index + 1;
