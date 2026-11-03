@@ -3,7 +3,8 @@
 	url = https://github.com/reupen/foobar2000-sdk-modified.git
 [submodule "ui_helpers"]
 	path = ui_helpers
-	url = https://github.com/reupen/ui_helpers.git
+	url = https://github.com/openeric2000/ui_helpers.git
+	branch = fb2k-nocturne
 [submodule "mmh"]
 	path = mmh
 	url = https://github.com/reupen/mmh.git
