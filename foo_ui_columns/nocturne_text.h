@@ -40,11 +40,12 @@ inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bot
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
 inline constexpr wchar_t next_toast_note[]
-    = L"The notice is not shown when the track is shorter than twice the countdown, when the playback order is Random "
-      L"or Repeat (track), or when there is no next track. While stopped with tracks in the queue, it shows the first "
-      L"queued track as \"Stopped · Up next\", and the now playing view of the last track is dimmed behind it.\r\n\r\n"
-      L"The corner can be changed here at any time; the left corners can overlap the cover or track details in some "
-      L"layouts. Turning this option off also turns off the dimmed stopped view.";
+    // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉並蓋到下面的「Playback queue」
+    = L"Hidden when the track is shorter than twice the countdown, when the order is Random or Repeat (track), or when "
+      L"there is no next track. While stopped with queued tracks, it shows the first one as \"Stopped · Up next\" over "
+      L"a dimmed view of the last page.\r\n\r\n"
+      L"The corner can be changed at any time; the left corners may overlap the cover or track details in some "
+      L"layouts. Turning this off also turns off the dimmed stopped view.";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
