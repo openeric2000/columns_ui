@@ -42,6 +42,14 @@ constexpr double offset_decay_seconds = 0.7;
 // 2026-11-02 錄影：原本固定壓住 400 ms，fb2k 其實已經開始播、位置一直在前進，期滿紅線才突然往前跳 0.4 秒，看起來像卡一下
 constexpr auto seek_hold_timeout = std::chrono::milliseconds(1500);
 
+// 滑鼠滾輪（2026-11-05 使用者決定）：滑鼠在進度條上滾一格（WHEEL_DELTA）跳 5 秒，按住 Shift 跳 30 秒，向上滾＝快進
+// 連續滾時紅線與圓點先走到累積的目標位置，滾輪停下來 wheel_commit_delay_ms 之後才真的送一次跳轉
+// （fb2k 每次跳轉都會重開解碼，每格都送，ASIO／DSD 可能爆音或卡頓）
+constexpr double wheel_step_seconds = 5.0;
+constexpr double wheel_shift_step_seconds = 30.0;
+constexpr UINT wheel_commit_delay_ms = 250;
+constexpr UINT_PTR timer_wheel_commit = 1;
+
 const Gdiplus::Color background_colour(255, 24, 24, 24);
 const Gdiplus::Color track_colour(255, 61, 61, 61);
 const Gdiplus::Color played_colour(255, 247, 11, 11);
@@ -142,6 +150,9 @@ private:
     void begin_drag(int x);
     void finish_drag(bool apply);
     void seek_to(double ratio);
+    void on_mouse_wheel(WPARAM wp);
+    void commit_wheel_seek();
+    void cancel_wheel_seek();
     void invalidate();
 
     HWND m_wnd{};
@@ -162,6 +173,10 @@ private:
     bool m_tracking_mouse{};
     bool m_dragging{};
     double m_drag_ratio{};
+
+    // 滑鼠滾輪：還沒滿一格的滾動量（觸控板一次只給幾十單位），以及累積中、還沒送出的跳轉目標（秒）
+    int m_wheel_remainder{};
+    std::optional<double> m_wheel_target;
 
     // 位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
     bool m_position_valid{};
@@ -212,6 +227,7 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
         start_ticker();
         return 0;
     case WM_DESTROY:
+        KillTimer(m_wnd, timer_wheel_commit);
         std::erase(live_bars(), m_wnd);
         stop_ticker();
         if (m_high_resolution_timer) {
@@ -254,6 +270,16 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
             invalidate();
         }
         return 0;
+    case WM_MOUSEWHEEL:
+        // get_msg_hook.cpp 會把滾輪訊息轉給滑鼠底下的視窗，所以不用先點進度條取得焦點
+        on_mouse_wheel(wp);
+        return 0;
+    case WM_TIMER:
+        if (wp == timer_wheel_commit) {
+            commit_wheel_seek();
+            return 0;
+        }
+        break;
     case WM_LBUTTONDOWN:
         begin_drag(GET_X_LPARAM(lp));
         return 0;
@@ -452,6 +478,7 @@ View ProgressBar::sample_view()
     if (!playback->is_playing()) {
         m_position_valid = false;
         m_seek_hold.reset();
+        cancel_wheel_seek();
         return view;
     }
 
@@ -468,6 +495,12 @@ View ProgressBar::sample_view()
 
     if (m_dragging) {
         view.ratio = m_drag_ratio;
+        return view;
+    }
+
+    // 滾輪累積中：顯示目標位置，等滾輪停下來才真的跳轉
+    if (m_wheel_target) {
+        view.ratio = std::clamp(*m_wheel_target / length, 0.0, 1.0);
         return view;
     }
 
@@ -540,6 +573,9 @@ double ProgressBar::ratio_from_x(int x) const
 
 void ProgressBar::begin_drag(int x)
 {
+    // 滾輪還在累積、沒送出的跳轉作廢，以點下去的位置為準（不然拖完放開後，計時一到又跳回滾輪的目標）
+    cancel_wheel_seek();
+
     // 這一格的畫面狀態可能還沒更新，點下去前先量一次
     apply_view(sample_view());
     if (!m_view.seekable)
@@ -581,6 +617,76 @@ void ProgressBar::seek_to(double ratio)
     m_seek_hold = SeekHold{seconds, seek_generation.load(), Clock::now() + seek_hold_timeout};
     m_position_valid = false;
     playback->playback_seek(seconds);
+}
+
+void ProgressBar::on_mouse_wheel(WPARAM wp)
+{
+    // 拖曳中、沒在播放、曲長不明：跟點擊一樣不處理
+    if (m_dragging)
+        return;
+
+    const auto playback = playback_control::get();
+    const auto length = playback->playback_get_length();
+    if (!playback->is_playing() || length <= 0)
+        return;
+
+    // 觸控板一次只給幾十單位，累積滿一格（WHEEL_DELTA）才算；換方向時丟掉沒滿一格的零頭
+    const int delta = GET_WHEEL_DELTA_WPARAM(wp);
+    if ((m_wheel_remainder > 0) != (delta > 0))
+        m_wheel_remainder = 0;
+    m_wheel_remainder += delta;
+
+    const auto notches = m_wheel_remainder / WHEEL_DELTA;
+    if (notches == 0)
+        return;
+    m_wheel_remainder -= notches * WHEEL_DELTA;
+
+    const auto step = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) ? wheel_shift_step_seconds : wheel_step_seconds;
+
+    // 起點：已經在累積就從累積的目標接著加；否則從目前顯示的位置（先量一次，免得拿到上一格的）
+    double base{};
+    if (m_wheel_target) {
+        base = *m_wheel_target;
+    } else {
+        apply_view(sample_view());
+        if (!m_view.seekable)
+            return;
+        base = m_view.ratio * length;
+    }
+
+    // 跳到最後一刻會直接結束這首，留一點（跟 seek_to 同一個規則）
+    m_wheel_target = std::clamp(base + notches * step, 0.0, std::max(0.0, length - 0.1));
+
+    // 每滾一格就重新計時，滾輪停下來才送出跳轉
+    SetTimer(m_wnd, timer_wheel_commit, wheel_commit_delay_ms, nullptr);
+    apply_view(sample_view());
+}
+
+void ProgressBar::commit_wheel_seek()
+{
+    KillTimer(m_wnd, timer_wheel_commit);
+    if (!m_wheel_target)
+        return;
+
+    const auto seconds = *m_wheel_target;
+    m_wheel_target.reset();
+    m_wheel_remainder = 0;
+
+    // seek_to 會記下跳轉目標，fb2k 說跳完之前紅線停在目標，不會彈回舊位置
+    const auto length = playback_control::get()->playback_get_length();
+    if (length > 0)
+        seek_to(seconds / length);
+
+    apply_view(sample_view());
+}
+
+void ProgressBar::cancel_wheel_seek()
+{
+    if (m_wheel_target)
+        KillTimer(m_wnd, timer_wheel_commit);
+
+    m_wheel_target.reset();
+    m_wheel_remainder = 0;
 }
 
 } // namespace
