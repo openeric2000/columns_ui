@@ -28,6 +28,8 @@ constexpr double slide_back_seconds = 0.6;
 constexpr int chip_height = 36;
 constexpr int chip_padding = 8;
 constexpr int tag_height = 20;
+// 選單最上面的標題列高度（標題字級用 tag_font_dip）；標題底下有一條跟群組分隔線同款的線（2026-11-05 預覽選的樣式 B）
+constexpr int menu_title_height = 28;
 constexpr int tag_padding_x = 7;
 // 類型標記與名字之間的空隙：原本 8，使用者覺得太靠近、要多 1～2 px（2026-11-05），125% 下 8→11.75 DIP 約多 2 px
 constexpr float tag_name_gap_dip = 9.4f;
@@ -735,6 +737,14 @@ private:
         m_rows.clear();
         m_separators.clear();
         int y = pad_v;
+
+        // 最上面：標題「輸出模式」＋底下一條分隔線，再接各列
+        m_title_top = y;
+        m_title_h = dip(menu_title_height);
+        y += m_title_h;
+        m_separators.push_back(y + sep_h / 2);
+        y += sep_h;
+
         for (size_t i = 0; i < m_items.size(); ++i) {
             if (i > 0 && m_items[i].kind != m_items[i - 1].kind) {
                 m_separators.push_back(y + sep_h / 2);
@@ -787,6 +797,14 @@ private:
             left.SetLineAlignment(Gdiplus::StringAlignmentCenter);
             left.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
             left.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+
+            // 標題：淡灰小字（跟滑過面板的提示字同色），靠左邊緣
+            {
+                const Gdiplus::SolidBrush title_brush(Gdiplus::Color(255, 154, 154, 154));
+                const Gdiplus::RectF title_rect(shadow + m_pad_x, shadow + m_title_top,
+                    static_cast<float>(m_body_w - 2 * m_pad_x), static_cast<float>(m_title_h));
+                g.DrawString(nocturne_text::chip_menu_title, -1, &tag_font, title_rect, &left, &title_brush);
+            }
 
             for (size_t i = 0; i < m_items.size(); ++i) {
                 const auto& item = m_items[i];
@@ -964,6 +982,8 @@ private:
     bool m_dismiss_pending{};
     std::vector<RECT> m_rows;
     std::vector<int> m_separators;
+    int m_title_top{};
+    int m_title_h{};
     int m_pad_x{};
     int m_check_w{};
     int m_tag_w{};
