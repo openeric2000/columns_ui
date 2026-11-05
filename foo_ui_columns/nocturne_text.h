@@ -71,13 +71,6 @@ inline constexpr wchar_t font_tab_foot[]
       L"of foobar2000 to show it.";
 inline constexpr wchar_t font_restart_note[] = L"Changed fonts will show after foobar2000 restarts.";
 inline constexpr wchar_t font_restart_button[] = L"Restart now";
-inline constexpr wchar_t next_toast_note[]
-    // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉
-    = L"Hidden when the track is shorter than twice the countdown, when the order is Random or Repeat (track), or when "
-      L"there is no next track. While stopped with queued tracks, it shows the first one as \"Stopped · Up next\" over "
-      L"a dimmed view of the last page.\r\n\r\n"
-      L"The corner can be changed at any time; the left corners may overlap the cover or track details in some "
-      L"layouts. Turning this off also turns off the dimmed stopped view.";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
@@ -196,10 +189,6 @@ inline constexpr wchar_t font_tab_foot[]
     = L"播放列、展開頁與專輯標頭只能換字型、不能調大小，要重開 foobar2000 才會換。";
 inline constexpr wchar_t font_restart_note[] = L"換過字型的部分要重開 foobar2000 才會生效。";
 inline constexpr wchar_t font_restart_button[] = L"立即重開";
-inline constexpr wchar_t next_toast_note[]
-    = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
-      L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"
-      L"位置隨時可以在這裡改；在某些版面中，左邊兩個角可能蓋到封面或曲目資訊。關閉這個選項時，停止時變暗的畫面也一起不顯示。";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";

@@ -389,7 +389,6 @@
 #define IDC_NEXT_TOAST_SHOW_TAG         1255
 #define IDC_NEXT_TOAST_POSITION_LABEL   1256
 #define IDC_NEXT_TOAST_POSITION         1257
-#define IDC_NEXT_TOAST_NOTE             1258
 #define IDC_KEEP_QUEUE_ON_PLAY          1259
 #define IDC_WHEEL_SEEK_ENABLED          1260
 #define IDC_WHEEL_SEEK_NOTE             1261
