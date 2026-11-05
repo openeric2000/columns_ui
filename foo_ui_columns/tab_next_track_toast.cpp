@@ -13,6 +13,7 @@
 // - 下一首提示：展開頁角落的提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
+// 設定視窗下方的「Reset page」會把播放、下一首提示兩個分頁還原成預設（字型分頁不動）
 // 檔名沿用 tab_next_track_toast.cpp，免得動到專案檔
 
 namespace cui::prefs {
@@ -334,9 +335,24 @@ cfg_int cfg_nocturne_active_tab(
 constexpr GUID guid_nocturne_preferences_page
     = {0x67ee972d, 0x3fb3, 0x4607, {0xbd, 0xaf, 0xce, 0x86, 0x32, 0x73, 0x47, 0xd0}};
 
+// 設定視窗的「Reset page」：播放與下一首提示兩個分頁的所有設定還原成預設。
+// 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
+void reset_nocturne_settings()
+{
+    now_playing_progress::wheel_seek_enabled.reset();
+    playlist_item_helpers::keep_queue_on_play.reset();
+
+    next_track_toast::enabled.reset();
+    next_track_toast::seconds.reset();
+    next_track_toast::show_seconds_in_ring.reset();
+    next_track_toast::show_cover.reset();
+    next_track_toast::show_source_tag.reset();
+    next_track_toast::position.reset();
+}
+
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）
 service_factory_single_t<PreferencesTabsHost> g_nocturne_preferences_page("Nocturne", g_nocturne_tabs,
-    guid_nocturne_preferences_page, preferences_page::guid_tools, cfg_nocturne_active_tab);
+    guid_nocturne_preferences_page, preferences_page::guid_tools, cfg_nocturne_active_tab, reset_nocturne_settings);
 
 } // namespace
 
