@@ -163,6 +163,7 @@ private:
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_COVER, nocturne_text::next_toast_show_cover);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_POSITION_LABEL, nocturne_text::next_toast_position_label);
+        SetDlgItemText(wnd, IDC_NEXT_TOAST_SIZE_LABEL, nocturne_text::next_toast_size_label);
 
         CheckDlgButton(wnd, IDC_NEXT_TOAST_ENABLED, check_state(next_track_toast::enabled.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, check_state(next_track_toast::show_seconds_in_ring.get()));
@@ -178,6 +179,12 @@ private:
             ComboBox_AddString(position_combo, name);
         ComboBox_SetCurSel(position_combo,
             gsl::narrow<int>(std::min(next_track_toast::position.get(), next_track_toast::position_count - 1)));
+
+        const auto size_combo = GetDlgItem(wnd, IDC_NEXT_TOAST_SIZE);
+        for (const auto& name : nocturne_text::next_toast_size_names)
+            ComboBox_AddString(size_combo, name);
+        ComboBox_SetCurSel(size_combo,
+            gsl::narrow<int>(std::min(next_track_toast::size_index.get(), next_track_toast::size_count - 1)));
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -224,6 +231,13 @@ private:
                 const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
                 if (selection != CB_ERR)
                     next_track_toast::position = gsl::narrow<uint32_t>(selection);
+            }
+            break;
+        case IDC_NEXT_TOAST_SIZE:
+            if (code == CBN_SELCHANGE) {
+                const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+                if (selection != CB_ERR)
+                    next_track_toast::size_index = gsl::narrow<uint32_t>(selection);
             }
             break;
         }
@@ -493,6 +507,7 @@ void reset_nocturne_settings()
     next_track_toast::show_cover.reset();
     next_track_toast::show_source_tag.reset();
     next_track_toast::position.reset();
+    next_track_toast::size_index.reset();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）

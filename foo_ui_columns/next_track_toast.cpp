@@ -31,6 +31,8 @@ fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
 fbh::ConfigUint32 position(
     GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_bottom_right);
+fbh::ConfigUint32 size_index(
+    GUID{0x6f1c2f68, 0x295e, 0x48fd, {0xa6, 0x40, 0x95, 0xd5, 0x21, 0x33, 0x33, 0x70}}, size_default);
 
 namespace {
 
@@ -1389,7 +1391,9 @@ void Controller::tick()
     // 淡出時沿用最後一次的內容與位置；歌曲最後半秒（fading）的圈與數字用這一格算出的新值
     const auto& shown = want ? *want : *m_last_want;
     const auto dpi = std::max<UINT>(GetDpiForWindow(shown.owner), USER_DEFAULT_SCREEN_DPI);
-    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI;
+    // 使用者在設定頁選的大小（小／標準／大／特大）乘上螢幕縮放，整張卡片一起照比例變
+    const auto user_percent = size_percents[std::min(size_index.get(), size_count - 1)];
+    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * user_percent / 100.0;
     const Layout layout(scale);
 
     // 第一次出現的這一格要建視窗、畫圖，會花一段時間；這一格先停在全透明，時間從下一格才開始算，
