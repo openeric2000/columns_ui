@@ -461,15 +461,14 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
         }
     }
 
-    // 找不到正在播的那首、又沒有可跟隨的反白：核心會接哪一首不知道，寧可不顯示
-    if (index == pfc_infinite)
-        return {};
-
     const auto count = playlists->playlist_get_item_count(playlist);
-    size_t next = index + 1;
+
+    // 找不到正在播的那首、又沒有可跟隨的反白（Album list 換了資料夾但沒點任何歌）：
+    // 2026-11-05 使用者確認核心會接新清單的第一首（預設與重複清單順序）
+    size_t next = index == pfc_infinite ? 0 : index + 1;
 
     if (next >= count) {
-        if (order != OrderKind::repeat_playlist || count == 0)
+        if (index == pfc_infinite || order != OrderKind::repeat_playlist || count == 0)
             return {};
         next = 0;
     }
