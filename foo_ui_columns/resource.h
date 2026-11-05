@@ -126,7 +126,6 @@
 #define IDD_PREFS_NEXT_TRACK_TOAST      244
 #define IDD_PREFS_NOCTURNE_PLAYBACK     245
 #define IDD_PREFS_NOCTURNE_FONT         246
-#define IDD_PREFS_NOCTURNE_ABOUT        247
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -428,7 +427,6 @@
 #define IDC_CHIP_ENABLED               1320
 #define IDC_CHIP_CLICK                 1321
 #define IDC_CHIP_ALIASES               1322
-#define IDC_ABOUT_TEXT                 1330
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

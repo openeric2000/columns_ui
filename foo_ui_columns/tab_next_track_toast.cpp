@@ -8,7 +8,6 @@
 #include "output_chip.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
-#include "version.h"
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），三個分頁：
@@ -447,109 +446,11 @@ private:
     }
 };
 
-// ---- 關於 ----
-// 版本與必要元件檢查（2026-11-05）：顯示 Columns UI 自編版與 foobar2000 的版本，並列出主題需要的元件有沒有裝，
-// 缺了會怎樣；朋友版／公開版的使用者遇到「某個面板空白」時，看這一頁就知道是不是少了元件
-class TabNocturneAbout : public NocturneTab {
-public:
-    TabNocturneAbout() : NocturneTab({IDC_TITLE1}) {}
-
-    const char* get_name() override { return nocturne_text::about_tab_name; }
-
-private:
-    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_ABOUT; }
-
-    // 已安裝的元件裡，檔名含 file_part（小寫比對）的第一個；傳回它的版本字串，沒有就傳回空
-    static std::optional<std::wstring> installed_version(std::string_view file_part)
-    {
-        service_enum_t<componentversion> components;
-        service_ptr_t<componentversion> component;
-
-        while (components.next(component)) {
-            pfc::string8 file_name;
-            component->get_file_name(file_name);
-
-            std::string lower(file_name.c_str());
-            std::ranges::transform(
-                lower, lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (lower.find(file_part) == std::string::npos)
-                continue;
-
-            pfc::string8 version;
-            component->get_component_version(version);
-            return mmh::to_utf16(std::string_view(version.c_str()));
-        }
-        return std::nullopt;
-    }
-
-    // 一行：「名稱：已安裝 版本」或「名稱：沒有安裝（缺了會怎樣）」。part_a／part_b 是兩個可能的檔名片段（有一個符合就算裝了）
-    static std::wstring component_line(
-        const wchar_t* label, const wchar_t* impact, std::string_view part_a, std::string_view part_b = {})
-    {
-        auto version = installed_version(part_a);
-        if (!version && !part_b.empty())
-            version = installed_version(part_b);
-
-        std::wstring line = L"  ";
-        line += label;
-        line += nocturne_text::about_sep;
-        if (version) {
-            line += nocturne_text::about_installed;
-            if (!version->empty())
-                line += L" " + *version;
-        } else {
-            line += nocturne_text::about_missing;
-            line += nocturne_text::about_open;
-            line += impact;
-            line += nocturne_text::about_close;
-        }
-        line += L"\r\n";
-        return line;
-    }
-
-    void on_init_dialog(HWND wnd) override
-    {
-        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::about_tab_title);
-
-        std::wstring text = nocturne_text::about_product;
-        text += L"\r\n";
-        text += nocturne_text::about_columns_ui;
-        text += nocturne_text::about_sep;
-        text += mmh::to_utf16(std::string_view(cui::version));
-        text += L"\r\n";
-        text += nocturne_text::about_fb2k;
-        text += nocturne_text::about_sep;
-        text += mmh::to_utf16(std::string_view(core_version_info_v2::get()->get_version_as_text()));
-        text += L"\r\n\r\n";
-
-        text += nocturne_text::about_required;
-        text += L"\r\n";
-        text += component_line(nocturne_text::about_webview, nocturne_text::about_webview_impact, "foo_webview2");
-        text += component_line(nocturne_text::about_eslyric, nocturne_text::about_eslyric_impact, "eslyric");
-        text += component_line(
-            nocturne_text::about_queue, nocturne_text::about_queue_impact, "foo_queue_mirror", "foo_queue_playlist");
-        text += L"\r\n";
-
-        text += nocturne_text::about_optional;
-        text += L"\r\n";
-        text += component_line(nocturne_text::about_playcount, nocturne_text::about_playcount_impact, "foo_playcount");
-        text += component_line(
-            nocturne_text::about_enhanced, nocturne_text::about_enhanced_impact, "foo_enhanced_playcount");
-
-        SetDlgItemText(wnd, IDC_ABOUT_TEXT, text.c_str());
-    }
-
-    void on_command(HWND, WPARAM) override {}
-};
-
 TabNocturnePlayback g_tab_nocturne_playback;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
-TabNocturneAbout g_tab_nocturne_about;
 
-// 分頁順序存在 cfg_nocturne_active_tab：新分頁一律加在最後面，不要改前面的順序
-PreferencesTab* g_nocturne_tabs[]
-    = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font, &g_tab_nocturne_about};
+PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font};
 
 // 最後開啟的分頁（存分頁順序；之後新增分頁請加在最後面，不要改前面的順序）
 cfg_int cfg_nocturne_active_tab(
