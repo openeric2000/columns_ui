@@ -27,6 +27,16 @@ inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
 inline constexpr wchar_t stopped_label[] = L"Stopped";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
+// 播放列的輸出裝置顯示（output_chip.cpp）
+inline constexpr wchar_t chip_kind_default[] = L"Default";
+inline constexpr wchar_t chip_kind_exclusive[] = L"Exclusive";
+inline constexpr wchar_t chip_kind_mute[] = L"Muted";
+inline constexpr wchar_t chip_mode_exclusive[] = L"Exclusive mode";
+inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
+inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
+inline constexpr wchar_t chip_panel_title[] = L"Output device";
+inline constexpr wchar_t chip_hint[] = L"Click to switch device";
+inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Display → Columns UI → Up Next Notice）
 inline constexpr auto next_toast_tab_name = "Up Next Notice";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
@@ -122,6 +132,16 @@ inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
 inline constexpr wchar_t stopped_label[] = L"已停止";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
+// 播放列的輸出裝置顯示（output_chip.cpp）
+inline constexpr wchar_t chip_kind_default[] = L"預設";
+inline constexpr wchar_t chip_kind_exclusive[] = L"獨占";
+inline constexpr wchar_t chip_kind_mute[] = L"靜音";
+inline constexpr wchar_t chip_mode_exclusive[] = L"獨占模式";
+inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
+inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
+inline constexpr wchar_t chip_panel_title[] = L"輸出裝置";
+inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
+inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Display → Columns UI → 下一首提示）
 inline constexpr auto next_toast_tab_name = "下一首提示";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";

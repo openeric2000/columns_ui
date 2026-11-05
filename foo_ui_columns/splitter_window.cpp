@@ -2,6 +2,7 @@
 #include "splitter.h"
 #include "menu_items.h"
 #include "now_playing_progress.h"
+#include "output_chip.h"
 
 namespace cui::panels::splitter {
 
@@ -371,8 +372,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
     // 中間那一格會露出底下 ESLyric 的條（2026-11-02 錄影：展開／收合 6 次有 3～4 次整條閃 1 幀，變暗或整條同一個灰）
     if (now_playing_bar && now_playing_bar->m_wnd && !m_now_playing_progress_wnd)
         m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_output_chip_wnd)
+        m_output_chip_wnd = output_chip::create(get_wnd());
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 1);
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 2);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -402,6 +405,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
 
         if (m_now_playing_progress_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = now_playing_progress::defer_layout(dwp, m_now_playing_progress_wnd, now_playing_bar_rect);
+        if (m_output_chip_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = output_chip::defer_layout(dwp, m_output_chip_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -425,8 +430,15 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());
         if (m_now_playing_progress_wnd)
             now_playing_progress::layout(m_now_playing_progress_wnd, now_playing_bar_rect);
-    } else if (m_now_playing_progress_wnd) {
-        DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
+        if (!m_output_chip_wnd)
+            m_output_chip_wnd = output_chip::create(get_wnd());
+        if (m_output_chip_wnd)
+            output_chip::layout(m_output_chip_wnd, now_playing_bar_rect);
+    } else {
+        if (m_now_playing_progress_wnd)
+            DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
+        if (m_output_chip_wnd)
+            DestroyWindow(std::exchange(m_output_chip_wnd, nullptr));
     }
 
     if (now_playing_side && now_playing_side->m_wnd) {

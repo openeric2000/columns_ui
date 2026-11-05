@@ -274,6 +274,8 @@ private:
     HWND m_now_playing_snapshot_wnd{};
     // 播放列最上緣的進度條視窗（自己畫，見 now_playing_progress.h）；有播放列時才存在
     HWND m_now_playing_progress_wnd{};
+    // 播放列上的輸出裝置顯示視窗（自己畫，見 output_chip.h）；有播放列時才存在
+    HWND m_output_chip_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
     int m_now_playing_slide_from{};
