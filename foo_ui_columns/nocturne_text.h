@@ -75,9 +75,9 @@ inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
 inline constexpr wchar_t startup_hold_note[]
     = L"The main window stays hidden for the first second or two while the panels load, so you never see empty panels. "
-      L"It appears as soon as the web panel (the album header) is ready, or after 3 seconds at most. Nothing is "
-      L"waited for if the web panel component is not installed. Turn this off to show the window the moment it is "
-      L"created. Takes effect the next time foobar2000 starts.";
+      L"It fades in gently as soon as the web panel (the album header) is ready, or appears right away after 3 seconds "
+      L"at most. Nothing is waited for if the web panel component is not installed. Turn this off to show the window "
+      L"the moment it is created. Takes effect the next time foobar2000 starts.";
 inline constexpr wchar_t font_tab_note[]
     = L"Change the font of each part separately, or all parts at once with the first row. The lists, tabs, folder tree "
       L"and other interface text also take a size. These apply at once.";
@@ -217,7 +217,7 @@ inline constexpr auto startup_tab_name = "啟動";
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]
-    = L"啟動時主視窗先不顯示，等網頁面板（專輯標頭）載好再一起出現，不會先看到空殼畫面；最多等 3 秒，逾時就直接顯示。"
+    = L"啟動時主視窗先不顯示，等網頁面板（專輯標頭）載好再整個柔和淡入，不會先看到空殼畫面；最多等 3 秒，逾時就直接顯示（不淡入）。"
       L"沒有安裝網頁面板元件時不會等。關掉就是視窗一建好立刻顯示。下次啟動 foobar2000 才會生效。";
 inline constexpr wchar_t font_tab_note[]
     = L"每個區塊可以各自換字型，也可以用第一列一次全換。清單、分頁、資料夾樹與其餘介面文字還能調大小，改了馬上生效。";

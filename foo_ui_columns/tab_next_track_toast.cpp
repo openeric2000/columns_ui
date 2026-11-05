@@ -521,7 +521,7 @@ public:
         }
 
         if (text.find(page_ready_marker) != std::string_view::npos) {
-            fb2k::inMainThread([] { main_window.end_startup_hold("page ready"); });
+            fb2k::inMainThread([] { main_window.end_startup_hold("page ready", true); });
             return;
         }
 

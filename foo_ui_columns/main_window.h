@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <thread>
 
 #include "config_utils.h"
@@ -20,6 +21,7 @@ enum {
     MSG_CREATE_TASKBAR_BUTTONS,
     MSG_UPDATE_TASKBAR_BUTTONS,
     MSG_STARTUP_HOLD_TIMEOUT, // 開機優化 B：等太久，監看執行緒已經把視窗顯示出來了，通知主執行緒收尾
+    MSG_STARTUP_FADE_DONE,    // 開機優化 B：淡入做完了（或被中斷），通知主執行緒收尾
 };
 
 void on_show_status_change();
@@ -48,14 +50,19 @@ extern fbh::ConfigBool startup_hold_until_ready;
 // 視窗建立時已經剩不到 startup_hold_min_ms 就不等了（機器慢到這個地步，等也只是讓空殼晚幾秒出現）
 inline constexpr DWORD startup_hold_timeout_ms = 3000;
 inline constexpr DWORD startup_hold_min_ms = 400;
+// 網頁回報「好了」之後柔和淡入的時間（透明度 0 → 100%，曲線跟輸出裝置面板縮回去一樣是兩頭都慢的 smootherstep）。
+// 逾時、第二次啟動轉送時不淡入，直接出現
+inline constexpr DWORD startup_fade_ms = 400;
 
 class MainWindow {
 public:
     HWND initialise(user_interface::HookProc_t hook, bool is_hidden = false);
 
     // 結束「先不顯示」的狀態，讓視窗的畫面出現。
-    // 網頁回報「好了」、逾時、第二次啟動轉送時都走這裡；沒在延後的時候什麼都不做，可以放心重複呼叫
-    void end_startup_hold(const char* reason = "other");
+    // 網頁回報「好了」、逾時、第二次啟動轉送時都走這裡；沒在延後的時候什麼都不做，可以放心重複呼叫。
+    // fade＝true 時柔和淡入（只有網頁回報好了那條路用；其餘直接出現）
+    void end_startup_hold(const char* reason = "other", bool fade = false);
+    void finish_startup_fade();
     void shutdown();
     void on_query_capability();
     void update_title();
@@ -136,6 +143,16 @@ private:
     ULONGLONG m_startup_hold_started_ms{};
     wil::unique_handle m_startup_hold_cancel;
     std::thread m_startup_hold_watchdog;
+    // 監看執行緒已經因逾時把視窗顯示出來了（這時網頁才回報好了就不能再淡入，不然視窗會先消失再淡入）
+    std::atomic<bool> m_startup_hold_timed_out{};
+
+    // 柔和淡入：視窗先變成全透明的分層視窗、解除隱形，再由另一條執行緒把透明度推上去
+    // （開機時主執行緒的計時器會被拖延，淡入不能靠它），推完通知主執行緒把自己加的分層樣式拿掉
+    void begin_startup_fade();
+    void stop_startup_fade();
+    wil::unique_handle m_startup_fade_cancel;
+    std::thread m_startup_fade;
+    bool m_startup_fade_added_layered{};
 
     wil::unique_himagelist m_taskbar_button_images;
     std::optional<uih::BufferedPaintInitialiser> m_buffered_paint_initialiser;
