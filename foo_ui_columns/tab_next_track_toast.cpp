@@ -392,6 +392,27 @@ cfg_int cfg_nocturne_active_tab(
 constexpr GUID guid_nocturne_preferences_page
     = {0x67ee972d, 0x3fb3, 0x4607, {0xbd, 0xaf, 0xce, 0x86, 0x32, 0x73, 0x47, 0xd0}};
 
+// 專輯標頭等網頁面板：焦點在網頁裡時（滑鼠點過面板之後），WebView2 把 Ctrl+P 當成瀏覽器的「列印」，跳出列印視窗，
+// 根本不會交給 foobar2000（2026-11-05）。網頁（index.html）自己攔下 Ctrl+P、不讓它列印，再用 fb2k.component.print
+// 往 Console 印一行暗號；這裡收到暗號就執行 File → Preferences，效果等於在別處按 Ctrl+P。
+// 暗號只是一行 Console 文字：沒有這個元件的環境（朋友版、舊版）網頁印了也無害，只是 Ctrl+P 在網頁裡什麼都不會發生。
+// 不用 shell.execute：網頁面板預設沒開「執行 shell」權限（實測 canExecuteShellOperations＝false），也不該為了這個去開
+constexpr std::string_view open_preferences_marker = "[Nocturne] open-preferences";
+
+class OpenPreferencesFromConsole : public console_receiver {
+public:
+    void print(const char* message, t_size length) override
+    {
+        if (std::string_view(message, length).find(open_preferences_marker) == std::string_view::npos)
+            return;
+
+        // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
+        fb2k::inMainThread([] { standard_commands::main_preferences(); });
+    }
+};
+
+service_factory_single_t<OpenPreferencesFromConsole> g_open_preferences_from_console;
+
 // 設定視窗的「Reset page」：播放與下一首提示兩個分頁的所有設定還原成預設。
 // 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
 void reset_nocturne_settings()
