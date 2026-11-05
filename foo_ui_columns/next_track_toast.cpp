@@ -625,6 +625,15 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         } else {
             Gdiplus::SolidBrush placeholder(rgba(255, 43, 43, 43));
             g.FillPath(&placeholder, &cover_path);
+
+            // 沒封面：畫跟專輯標頭（index.html 的 .cover svg）同款的雙圓圖示
+            // 外圓半徑 9、內圓半徑 2.5、線寬 1.5（都是 24 格的座標），圖示寬度佔方塊的 34%
+            const auto unit = box.Width * 0.34f / 24.f;
+            const auto centre_x = box.X + box.Width / 2.f;
+            const auto centre_y = box.Y + box.Height / 2.f;
+            Gdiplus::Pen icon_pen(rgba(255, 150, 150, 150), 1.5f * unit);
+            g.DrawEllipse(&icon_pen, centre_x - 9.f * unit, centre_y - 9.f * unit, 18.f * unit, 18.f * unit);
+            g.DrawEllipse(&icon_pen, centre_x - 2.5f * unit, centre_y - 2.5f * unit, 5.f * unit, 5.f * unit);
         }
         x += static_cast<float>(layout.cover + layout.gap);
     }
