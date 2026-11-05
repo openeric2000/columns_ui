@@ -49,8 +49,20 @@ inline constexpr wchar_t next_toast_position_label[] = L"Position";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bottom right", L"Top left", L"Bottom left"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
+// 設定頁的分頁：播放、下一首提示、字型
+inline constexpr auto playback_tab_name = "Playback";
+inline constexpr wchar_t progress_title[] = L"Progress bar";
+inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
+inline constexpr wchar_t wheel_seek_note[]
+    = L"One notch seeks 5 seconds (30 seconds while holding Shift). Scroll up to go forward.";
+inline constexpr auto font_tab_name = "Fonts";
+inline constexpr wchar_t font_tab_title[] = L"Fonts";
+inline constexpr wchar_t font_tab_note[]
+    = L"Changes the font of the lists, tabs, folder tree, now playing bar, now playing view and album header at once, "
+      L"and sets the overall list size.";
+inline constexpr wchar_t font_tab_button[] = L"Theme Font…";
 inline constexpr wchar_t next_toast_note[]
-    // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉並蓋到下面的「Playback queue」
+    // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉
     = L"Hidden when the track is shorter than twice the countdown, when the order is Random or Repeat (track), or when "
       L"there is no next track. While stopped with queued tracks, it shows the first one as \"Stopped · Up next\" over "
       L"a dimmed view of the last page.\r\n\r\n"
@@ -155,6 +167,16 @@ inline constexpr wchar_t next_toast_position_label[] = L"位置";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
 inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
+// 設定頁的分頁：播放、下一首提示、字型
+inline constexpr auto playback_tab_name = "播放";
+inline constexpr wchar_t progress_title[] = L"進度條";
+inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
+inline constexpr wchar_t wheel_seek_note[] = L"滾一格跳 5 秒，按住 Shift 滾一格跳 30 秒；向上滾是快進。";
+inline constexpr auto font_tab_name = "字型";
+inline constexpr wchar_t font_tab_title[] = L"字型";
+inline constexpr wchar_t font_tab_note[]
+    = L"一次換掉清單、分頁、資料夾樹、播放列、展開頁與上方專輯標頭的字型，並可調整清單的整體大小。";
+inline constexpr wchar_t font_tab_button[] = L"主題字型…";
 inline constexpr wchar_t next_toast_note[]
     = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
       L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"

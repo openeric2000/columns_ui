@@ -124,6 +124,8 @@
 #define IDD_LAYOUT_PROPERTIES           242
 #define IDD_THEME_FONT                  243
 #define IDD_PREFS_NEXT_TRACK_TOAST      244
+#define IDD_PREFS_NOCTURNE_PLAYBACK     245
+#define IDD_PREFS_NOCTURNE_FONT         246
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -389,6 +391,10 @@
 #define IDC_NEXT_TOAST_POSITION         1257
 #define IDC_NEXT_TOAST_NOTE             1258
 #define IDC_KEEP_QUEUE_ON_PLAY          1259
+#define IDC_WHEEL_SEEK_ENABLED          1260
+#define IDC_WHEEL_SEEK_NOTE             1261
+#define IDC_NOCTURNE_FONT_NOTE          1262
+#define IDC_NOCTURNE_FONT_BUTTON        1263
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -398,7 +404,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1260
+#define _APS_NEXT_CONTROL_VALUE         1264
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

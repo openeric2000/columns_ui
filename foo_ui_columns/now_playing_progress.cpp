@@ -14,6 +14,9 @@
 
 namespace cui::now_playing_progress {
 
+fbh::ConfigBool wheel_seek_enabled(
+    GUID{0x2f6c91d4, 0x8a37, 0x4b05, {0x9e, 0x42, 0xc7, 0x1d, 0x5b, 0x08, 0xa3, 0xf6}}, true);
+
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -275,6 +278,9 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     case WM_MOUSEWHEEL:
+        // 設定裡關掉時不處理，交給預設處理（轉給父視窗）
+        if (!wheel_seek_enabled.get())
+            break;
         // get_msg_hook.cpp 會把滾輪訊息轉給滑鼠底下的視窗，所以不用先點進度條取得焦點
         on_mouse_wheel(wp);
         return 0;

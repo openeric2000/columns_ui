@@ -12,6 +12,10 @@
 
 namespace cui::now_playing_progress {
 
+// 在進度條上滾滑鼠滾輪可以前後跳轉（2026-11-05，預設開；設定在 Preferences → Tools → Nocturne）
+// 一格 5 秒，按住 Shift 一格 30 秒，向上滾＝快進；關閉時滾輪訊息交給預設處理，進度條不反應
+extern fbh::ConfigBool wheel_seek_enabled;
+
 // 在 parent（分割面板視窗）底下建立進度條視窗（先不顯示）；失敗傳回 nullptr
 HWND create(HWND parent);
 
