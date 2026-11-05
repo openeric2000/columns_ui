@@ -4,7 +4,7 @@
 #include "nocturne_text.h"
 #include "playlist_item_helpers.h"
 
-// 自編版新增：Preferences → Display → Columns UI →「下一首提示」分頁（2026-11-02）
+// 自編版新增：「下一首提示」設定（2026-11-02 做在 Columns UI 的分頁裡；2026-11-05 起搬到 Preferences → Tools → Nocturne，見檔案後半）
 // 設定都存在 next_track_toast 的設定變數裡，改了立刻生效；啟用開關跟 View → Layout → 下一首提示 是同一個設定
 // 對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
 
@@ -138,6 +138,51 @@ private:
 };
 
 TabNextTrackToast g_tab_next_track_toast;
+
+// Preferences → Tools → Nocturne（2026-11-05）：跟 ESLyric 一樣放在 Tools 底下的獨立頁面
+// 自編版自己新增的設定（目前是「下一首提示」與「播放佇列」）集中在這一頁，不再放在 Columns UI 的分頁裡
+// 頁面內容就是上面那個對話框，直接當頁面的視窗（不經過 Columns UI 的分頁列，因為只有一頁）
+class NocturnePreferencesInstance : public preferences_page_instance {
+public:
+    explicit NocturnePreferencesInstance(HWND parent)
+        : m_wnd(g_tab_next_track_toast.create(parent))
+        // 跟 PreferencesInstanceTabsHost 一樣：fb2k 有提供深色模式就宣告這一頁支援（對話框本身在建立時已掛上深色模式）
+        , m_has_dark_mode(fbh::create_dark_mode_obj().is_valid())
+    {
+    }
+
+    t_uint32 get_state() override { return m_has_dark_mode ? preferences_state::dark_mode_supported : 0; }
+    fb2k::hwnd_t get_wnd() override { return m_wnd; }
+    // 所有設定都是改了立刻生效，沒有「套用」要做；也沒有「重設」
+    void apply() override {}
+    void reset() override {}
+
+private:
+    HWND m_wnd{};
+    bool m_has_dark_mode{};
+};
+
+// {67EE972D-3FB3-4607-BDAF-CE86327347D0}
+constexpr GUID guid_nocturne_preferences_page
+    = {0x67ee972d, 0x3fb3, 0x4607, {0xbd, 0xaf, 0xce, 0x86, 0x32, 0x73, 0x47, 0xd0}};
+
+class NocturnePreferencesPage : public preferences_page_v3 {
+public:
+    // 頁面名稱是品牌名，中英文版相同
+    const char* get_name() override { return "Nocturne"; }
+    GUID get_guid() override { return guid_nocturne_preferences_page; }
+    GUID get_parent_guid() override { return preferences_page::guid_tools; }
+    bool reset_query() override { return false; }
+    void reset() override {}
+    bool get_help_url(pfc::string_base& p_out) override { return false; }
+
+    preferences_page_instance::ptr instantiate(fb2k::hwnd_t parent, preferences_page_callback::ptr callback) override
+    {
+        return fb2k::service_new<NocturnePreferencesInstance>(parent);
+    }
+};
+
+service_factory_single_t<NocturnePreferencesPage> g_nocturne_preferences_page;
 
 } // namespace
 

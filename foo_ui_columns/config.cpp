@@ -23,8 +23,7 @@ static PreferencesTab* g_tabs[] = {
     cui::prefs::g_get_tab_status_pane(),
     cui::prefs::g_get_tab_system_tray(),
     cui::prefs::g_get_tab_artwork(),
-    // 自編版新增：放最後面，不改變原有分頁的順序（已存的「上次開啟的分頁」是用順序記的）
-    cui::prefs::g_get_tab_next_track_toast(),
+    // 「下一首提示」分頁（自編版新增，原本放在這裡的最後面）已搬到 Preferences → Tools → Nocturne（tab_next_track_toast.cpp）
 };
 
 static PreferencesTab* g_tabs_panels[] = {

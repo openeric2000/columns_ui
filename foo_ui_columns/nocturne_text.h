@@ -21,7 +21,7 @@ inline constexpr auto stop_or_collapse_description
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view during the last seconds of a track. The corner can be "
-      "chosen in Preferences.";
+      "chosen in Preferences > Tools > Nocturne.";
 inline constexpr wchar_t next_caption[] = L"Up next";
 inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
 inline constexpr wchar_t stopped_label[] = L"Stopped";
@@ -37,7 +37,7 @@ inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
 inline constexpr wchar_t chip_panel_title[] = L"Output device";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
-// 設定頁（Preferences → Display → Columns UI → Up Next Notice）
+// 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "Up Next Notice";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
 inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
@@ -126,7 +126,8 @@ inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
     = "停止播放；已經停止而展開頁還開著（佇列有歌時停止不會自動收）時，收起展開頁，佇列保留不動。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
-inline constexpr auto next_track_toggle_description = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在設定頁選。";
+inline constexpr auto next_track_toggle_description
+    = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在 Preferences > Tools > Nocturne 選。";
 inline constexpr wchar_t next_caption[] = L"下一首";
 inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
 inline constexpr wchar_t stopped_label[] = L"已停止";
@@ -142,7 +143,7 @@ inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
 inline constexpr wchar_t chip_panel_title[] = L"輸出裝置";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
-// 設定頁（Preferences → Display → Columns UI → 下一首提示）
+// 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "下一首提示";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";
 inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
