@@ -190,6 +190,10 @@ LRESULT cui::MainWindow::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         m_buffered_paint_initialiser.reset();
         m_fallback_menu.reset();
         break;
+    case MSG_STARTUP_HOLD_TIMEOUT:
+        // 開機優化 B：等網頁回報「好了」等太久，監看執行緒已經把視窗顯示出來，這裡只做收尾
+        end_startup_hold("timeout");
+        return 0;
     case WM_CLOSE:
         if (config::advbool_close_to_system_tray_icon.get()) {
             cfg_main_window_is_hidden = true;

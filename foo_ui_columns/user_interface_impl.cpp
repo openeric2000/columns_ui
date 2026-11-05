@@ -180,6 +180,9 @@ public:
         if (!wnd)
             return;
 
+        // 第二次啟動轉送過來時視窗可能還在等網頁（開機優化 B）：先照原本的狀態顯示出來
+        main_window.end_startup_hold("activate");
+
         cfg_main_window_is_hidden = false;
 
         if (systray::is_system_tray_icon_created && !cfg_show_systray)

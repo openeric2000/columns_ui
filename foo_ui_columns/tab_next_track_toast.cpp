@@ -4,18 +4,20 @@
 #include "next_track_toast.h"
 #include "nocturne_text.h"
 #include "dark_mode_dialog.h"
+#include "main_window.h"
 #include "now_playing_progress.h"
 #include "output_chip.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
-// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），三個分頁：
+// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），四個分頁：
 // - 播放：進度條滾輪開關、播放佇列（2026-11-02 起放在「下一首提示」分頁底下，11/05 獨立出來）
 // - 下一首提示：展開頁角落的提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
+// - 啟動：主視窗等網頁面板載好再顯示（開機優化 B，2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
-// 設定視窗下方的「Reset page」會把播放、下一首提示兩個分頁還原成預設（字型分頁不動）
+// 設定視窗下方的「Reset page」會把播放、下一首提示、啟動三個分頁還原成預設（字型分頁不動）
 // 檔名沿用 tab_next_track_toast.cpp，免得動到專案檔
 
 namespace cui::prefs {
@@ -446,11 +448,40 @@ private:
     }
 };
 
+// ---- 啟動 ----
+// 開機優化 B：主視窗等網頁面板回報「好了」再顯示（邏輯在 main_window.cpp）。設定在啟動時才讀，所以改了要下次啟動才有效
+class TabNocturneStartup : public NocturneTab {
+public:
+    TabNocturneStartup() : NocturneTab({IDC_TITLE1}) {}
+
+    const char* get_name() override { return nocturne_text::startup_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_STARTUP; }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::startup_tab_title);
+        SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
+        SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
+        CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        if (LOWORD(wp) == IDC_STARTUP_HOLD && HIWORD(wp) == BN_CLICKED)
+            startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+    }
+};
+
 TabNocturnePlayback g_tab_nocturne_playback;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
+TabNocturneStartup g_tab_nocturne_startup;
 
-PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font};
+// 新增分頁請加在最後面，不要改前面的順序（最後開啟的分頁是存分頁順序）
+PreferencesTab* g_nocturne_tabs[]
+    = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font, &g_tab_nocturne_startup};
 
 // 最後開啟的分頁（存分頁順序；之後新增分頁請加在最後面，不要改前面的順序）
 cfg_int cfg_nocturne_active_tab(
@@ -471,6 +502,9 @@ constexpr GUID guid_nocturne_preferences_page
 // - 「[Nocturne] open-preferences」：舊版網頁只攔 Ctrl+P 時用的暗號，保留給還沒更新的 index.html
 constexpr std::string_view web_key_marker = "[Nocturne] key ";
 constexpr std::string_view open_preferences_marker = "[Nocturne] open-preferences";
+// - 「[Nocturne] ready」：網頁第一次載入完成（標頭、封面都套用了）。主視窗啟動時先不顯示，收到這句才顯示（開機優化 B，2026-11-06）；
+//   視窗不在等的時候（網頁重新載入、已經顯示）收到只是忽略
+constexpr std::string_view page_ready_marker = "[Nocturne] ready";
 
 class WebKeyFromConsole : public console_receiver {
 public:
@@ -483,6 +517,11 @@ public:
         if (text.find(open_preferences_marker) != std::string_view::npos) {
             // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
             fb2k::inMainThread([] { standard_commands::main_preferences(); });
+            return;
+        }
+
+        if (text.find(page_ready_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { main_window.end_startup_hold("page ready"); });
             return;
         }
 
@@ -525,6 +564,8 @@ void reset_nocturne_settings()
     next_track_toast::show_source_tag.reset();
     next_track_toast::position.reset();
     next_track_toast::size_index.reset();
+
+    startup_hold_until_ready.reset();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）
