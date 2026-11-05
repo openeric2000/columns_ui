@@ -23,6 +23,29 @@ namespace {
 
 constexpr auto check_state = [](bool checked) { return checked ? BST_CHECKED : BST_UNCHECKED; };
 
+// 秒數輸入框＋微調鈕（播放分頁用）：範圍內的值馬上生效；打到一半（空白、超出範圍）先不動，離開輸入框時整理成有效值
+void init_seconds_spin(HWND wnd, int spin_id, uint32_t min, uint32_t max, uint32_t value)
+{
+    const auto spin = GetDlgItem(wnd, spin_id);
+    SendMessage(spin, UDM_SETRANGE32, min, max);
+    SendMessage(spin, UDM_SETPOS32, 0, std::clamp(value, min, max));
+}
+
+void apply_seconds_edit(HWND wnd, int edit_id, int code, uint32_t min, uint32_t max, fbh::ConfigUint32& setting)
+{
+    BOOL translated{};
+    const auto typed = GetDlgItemInt(wnd, edit_id, &translated, FALSE);
+
+    if (code == EN_CHANGE) {
+        if (translated && typed >= min && typed <= max)
+            setting = typed;
+    } else if (code == EN_KILLFOCUS) {
+        const auto value = std::clamp(translated ? typed : setting.get(), min, max);
+        setting = value;
+        SetDlgItemInt(wnd, edit_id, value, FALSE);
+    }
+}
+
 // 三個分頁共用的骨架：建立對話框、把訊息轉給 on_message
 class NocturneTab : public PreferencesTab {
 public:
@@ -76,16 +99,33 @@ private:
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::progress_title);
         SetDlgItemText(wnd, IDC_WHEEL_SEEK_ENABLED, nocturne_text::wheel_seek_enabled);
-        SetDlgItemText(wnd, IDC_WHEEL_SEEK_NOTE, nocturne_text::wheel_seek_note);
+        SetDlgItemText(wnd, IDC_WHEEL_STEP_LABEL, nocturne_text::wheel_step_label);
+        SetDlgItemText(wnd, IDC_WHEEL_SHIFT_LABEL, nocturne_text::wheel_shift_step_label);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
         SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
 
         CheckDlgButton(wnd, IDC_WHEEL_SEEK_ENABLED, check_state(now_playing_progress::wheel_seek_enabled.get()));
         CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
+
+        init_seconds_spin(wnd, IDC_WHEEL_STEP_SPIN, now_playing_progress::wheel_step_min,
+            now_playing_progress::wheel_step_max, now_playing_progress::wheel_step_seconds.get());
+        init_seconds_spin(wnd, IDC_WHEEL_SHIFT_SPIN, now_playing_progress::wheel_shift_step_min,
+            now_playing_progress::wheel_shift_step_max, now_playing_progress::wheel_shift_step_seconds.get());
     }
 
     void on_command(HWND wnd, WPARAM wp) override
     {
+        if (LOWORD(wp) == IDC_WHEEL_STEP_SECONDS) {
+            apply_seconds_edit(wnd, IDC_WHEEL_STEP_SECONDS, HIWORD(wp), now_playing_progress::wheel_step_min,
+                now_playing_progress::wheel_step_max, now_playing_progress::wheel_step_seconds);
+            return;
+        }
+        if (LOWORD(wp) == IDC_WHEEL_SHIFT_SECONDS) {
+            apply_seconds_edit(wnd, IDC_WHEEL_SHIFT_SECONDS, HIWORD(wp), now_playing_progress::wheel_shift_step_min,
+                now_playing_progress::wheel_shift_step_max, now_playing_progress::wheel_shift_step_seconds);
+            return;
+        }
+
         if (HIWORD(wp) != BN_CLICKED)
             return;
 
@@ -443,6 +483,8 @@ service_factory_single_t<WebKeyFromConsole> g_web_key_from_console;
 void reset_nocturne_settings()
 {
     now_playing_progress::wheel_seek_enabled.reset();
+    now_playing_progress::wheel_step_seconds.reset();
+    now_playing_progress::wheel_shift_step_seconds.reset();
     playlist_item_helpers::keep_queue_on_play.reset();
 
     next_track_toast::enabled.reset();

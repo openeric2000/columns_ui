@@ -16,6 +16,10 @@ namespace cui::now_playing_progress {
 
 fbh::ConfigBool wheel_seek_enabled(
     GUID{0x2f6c91d4, 0x8a37, 0x4b05, {0x9e, 0x42, 0xc7, 0x1d, 0x5b, 0x08, 0xa3, 0xf6}}, true);
+fbh::ConfigUint32 wheel_step_seconds(
+    GUID{0x4cfd6433, 0x4d3c, 0x46ba, {0x8b, 0x5b, 0x3a, 0x01, 0xbb, 0xcd, 0x02, 0x42}}, wheel_step_default);
+fbh::ConfigUint32 wheel_shift_step_seconds(
+    GUID{0x69015040, 0x5b1e, 0x413e, {0x96, 0x85, 0x10, 0xcb, 0xb5, 0xf6, 0x55, 0x23}}, wheel_shift_step_default);
 
 namespace {
 
@@ -48,8 +52,7 @@ constexpr auto seek_hold_timeout = std::chrono::milliseconds(1500);
 // 滑鼠滾輪（2026-11-05 使用者決定）：滑鼠在進度條上滾一格（WHEEL_DELTA）跳 5 秒，按住 Shift 跳 30 秒，向上滾＝快進
 // 連續滾時紅線與圓點先走到累積的目標位置，滾輪停下來 wheel_commit_delay_ms 之後才真的送一次跳轉
 // （fb2k 每次跳轉都會重開解碼，每格都送，ASIO／DSD 可能爆音或卡頓）
-constexpr double wheel_step_seconds = 5.0;
-constexpr double wheel_shift_step_seconds = 30.0;
+// （一格幾秒是設定：wheel_step_seconds／wheel_shift_step_seconds，預設 5／30，在設定頁的「播放」分頁調）
 constexpr UINT wheel_commit_delay_ms = 250;
 constexpr UINT_PTR timer_wheel_commit = 1;
 
@@ -667,7 +670,8 @@ void ProgressBar::on_mouse_wheel(WPARAM wp)
         return;
     m_wheel_remainder -= notches * WHEEL_DELTA;
 
-    const auto step = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) ? wheel_shift_step_seconds : wheel_step_seconds;
+    const auto step = static_cast<double>(
+        (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) ? wheel_shift_step_seconds.get() : wheel_step_seconds.get());
 
     // 累積的是「相對目前位置的秒數」，不是固定的目標位置：滾輪滾的這段時間歌還在播，
     // 停下來時跳到「那一刻的位置＋累積秒數」，所以滾一格就是剛好 5 秒，不會因為等了 0.25 秒而少一點

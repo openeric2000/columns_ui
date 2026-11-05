@@ -54,8 +54,8 @@ inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing an
 inline constexpr auto playback_tab_name = "Playback";
 inline constexpr wchar_t progress_title[] = L"Progress bar";
 inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
-inline constexpr wchar_t wheel_seek_note[]
-    = L"One notch seeks 5 seconds (30 seconds while holding Shift). Scroll up to go forward.";
+inline constexpr wchar_t wheel_step_label[] = L"Seconds per notch (1-60)";
+inline constexpr wchar_t wheel_shift_step_label[] = L"Seconds per notch while holding Shift (5-300)";
 inline constexpr auto font_tab_name = "Fonts";
 inline constexpr wchar_t font_tab_title[] = L"Fonts";
 inline constexpr wchar_t font_tab_note[]
@@ -177,7 +177,8 @@ inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵�
 inline constexpr auto playback_tab_name = "播放";
 inline constexpr wchar_t progress_title[] = L"進度條";
 inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
-inline constexpr wchar_t wheel_seek_note[] = L"滾一格跳 5 秒，按住 Shift 滾一格跳 30 秒；向上滾是快進。";
+inline constexpr wchar_t wheel_step_label[] = L"每滾一格跳幾秒（1～60）";
+inline constexpr wchar_t wheel_shift_step_label[] = L"按住 Shift 每滾一格跳幾秒（5～300）";
 inline constexpr auto font_tab_name = "字型";
 inline constexpr wchar_t font_tab_title[] = L"字型";
 inline constexpr wchar_t font_tab_note[]

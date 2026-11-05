@@ -13,8 +13,17 @@
 namespace cui::now_playing_progress {
 
 // 在進度條上滾滑鼠滾輪可以前後跳轉（2026-11-05，預設開；設定在 Preferences → Tools → Nocturne）
-// 一格 5 秒，按住 Shift 一格 30 秒，向上滾＝快進；關閉時滾輪訊息交給預設處理，進度條不反應
+// 一格 5 秒，按住 Shift 一格 30 秒（11/05 起可以在設定頁調：一般 1～60 秒、Shift 5～300 秒），向上滾＝快進；
+// 關閉時滾輪訊息交給預設處理，進度條不反應
 extern fbh::ConfigBool wheel_seek_enabled;
+inline constexpr uint32_t wheel_step_default = 5;
+inline constexpr uint32_t wheel_step_min = 1;
+inline constexpr uint32_t wheel_step_max = 60;
+inline constexpr uint32_t wheel_shift_step_default = 30;
+inline constexpr uint32_t wheel_shift_step_min = 5;
+inline constexpr uint32_t wheel_shift_step_max = 300;
+extern fbh::ConfigUint32 wheel_step_seconds;
+extern fbh::ConfigUint32 wheel_shift_step_seconds;
 
 // 在 parent（分割面板視窗）底下建立進度條視窗（先不顯示）；失敗傳回 nullptr
 HWND create(HWND parent);

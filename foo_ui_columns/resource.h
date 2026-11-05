@@ -391,7 +391,6 @@
 #define IDC_NEXT_TOAST_POSITION         1257
 #define IDC_KEEP_QUEUE_ON_PLAY          1259
 #define IDC_WHEEL_SEEK_ENABLED          1260
-#define IDC_WHEEL_SEEK_NOTE             1261
 #define IDC_NOCTURNE_FONT_NOTE          1262
 #define IDC_NOCTURNE_FONT_RESTART       1263
 #define IDC_NOCTURNE_FONT_RESTART_NOTE  1264
@@ -417,6 +416,12 @@
 #define IDC_FONT_ROW_SIZE4             1294
 #define IDC_FONT_ROW_SIZE5             1295
 #define IDC_FONT_ROW_SIZE6             1296
+#define IDC_WHEEL_STEP_LABEL           1300
+#define IDC_WHEEL_STEP_SECONDS         1301
+#define IDC_WHEEL_STEP_SPIN            1302
+#define IDC_WHEEL_SHIFT_LABEL          1303
+#define IDC_WHEEL_SHIFT_SECONDS        1304
+#define IDC_WHEEL_SHIFT_SPIN           1305
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
