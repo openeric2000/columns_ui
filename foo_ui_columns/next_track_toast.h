@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 // 自編版新增：展開頁角落的「下一首」提示（2026-11-02），預設放右下，可在設定頁改成其他三個角落
 // - 歌曲最後 N 秒出現，左邊的圈逆時針倒數；停止且佇列還有歌時改顯示「已停止 · 接下來」
 // - 下一首的決定順序：佇列第一首 → 隨機／單曲循環不顯示 → 播放跟隨游標 → 播放中那首的下一列（清單循環時最後一首接第一首）
@@ -39,5 +41,13 @@ inline constexpr uint32_t size_count = 4;
 inline constexpr uint32_t size_default = 1;
 inline constexpr int size_percents[size_count] = {85, 100, 120, 140};
 extern fbh::ConfigUint32 size_index;
+
+// GDI+ 字型表的暖機（啟動時在背景執行緒做，見 next_track_toast.cpp 的 font_warm_up）有沒有做完。
+// 進程裡第一次依名稱建立 GDI+ 字型家族，GDI+ 要列舉整台電腦的字型（這台 755 個字族，219 要 0.3～1.4 秒），
+// 在主執行緒上做會把整個介面卡住，連帶網頁面板、專輯樹都晚出現（2026-11-05 啟動分析）。
+// 會在主執行緒用名稱建字型的地方（輸出裝置顯示）要等這個做完再排版。暖機沒跑成（取不到字型名稱、GDI+ 啟動失敗）也算做完，不會永遠等
+bool gdiplus_fonts_ready();
+// 暖機做完時在主執行緒呼叫 callback（已經做完就馬上呼叫）。只能在主執行緒呼叫
+void when_gdiplus_fonts_ready(std::function<void()> callback);
 
 } // namespace cui::next_track_toast

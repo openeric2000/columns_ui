@@ -542,6 +542,22 @@ namespace font_warm_up {
 ULONG_PTR token{};
 bool started{};
 std::thread worker;
+// 做完（或根本沒跑成：取不到字型名稱、GDI+ 啟動失敗）就是 true，等它的人（輸出裝置顯示）不會永遠等下去（2026-11-05）
+std::atomic<bool> done{false};
+// 等暖機的人留下的 callback，只在主執行緒碰
+std::vector<std::function<void()>> callbacks;
+
+// 在暖機的背景執行緒上呼叫：旗標立起來，再回主執行緒把等著的 callback 一起叫醒
+void finish()
+{
+    done = true;
+    fb2k::inMainThread([] {
+        auto pending = std::move(callbacks);
+        callbacks.clear();
+        for (auto& callback : pending)
+            callback();
+    });
+}
 
 void start()
 {
@@ -550,21 +566,27 @@ void start()
     try {
         face_name = fonts::get_log_font_with_fallback(fonts::labels_font_id).lfFaceName;
     } catch (...) {
+        finish();   // 沒跑成也算做完，而且要叫醒已經登記等著的人，不然它們會永遠藏著
         return;
     }
 
     const Gdiplus::GdiplusStartupInput input;
-    if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok)
+    if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok) {
+        finish();
         return;
+    }
     started = true;
 
     worker = std::thread([face_name = std::move(face_name)] {
-        const Gdiplus::FontFamily family(face_name.c_str());
-        if (family.GetLastStatus() == Gdiplus::Ok) {
-            // 順便建一個字型，把字型的度量資料也載進來
-            const Gdiplus::Font font(&family, 16.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-            (void)font;
+        {
+            const Gdiplus::FontFamily family(face_name.c_str());
+            if (family.GetLastStatus() == Gdiplus::Ok) {
+                // 順便建一個字型，把字型的度量資料也載進來
+                const Gdiplus::Font font(&family, 16.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+                (void)font;
+            }
         }
+        finish();
     });
 }
 
@@ -1506,5 +1528,18 @@ public:
 play_callback_static_factory_t<NewTrackCallback> new_track_callback;
 
 } // namespace
+
+bool gdiplus_fonts_ready()
+{
+    return font_warm_up::done;
+}
+
+void when_gdiplus_fonts_ready(std::function<void()> callback)
+{
+    if (font_warm_up::done)
+        callback();
+    else
+        font_warm_up::callbacks.push_back(std::move(callback));
+}
 
 } // namespace cui::next_track_toast

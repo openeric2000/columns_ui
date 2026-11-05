@@ -5,6 +5,7 @@
 #include "output_chip.h"
 #include "fb2k_misc.h"
 #include "font_utils.h"
+#include "next_track_toast.h"
 #include "nocturne_text.h"
 
 #pragma comment(lib, "winmm.lib")
@@ -1219,6 +1220,12 @@ RECT Chip::compute_layout()
     if (!enabled.get() || !g_state.valid || m_bar_rect.right <= m_bar_rect.left)
         return {};
 
+    // GDI+ 的字型表還在背景暖機：這時在主執行緒量文字，GDI+ 會在主執行緒上把整台電腦的字型列舉一遍
+    // （這台 755 個字族，0.3 秒以上），整個介面（網頁面板、專輯樹）都跟著晚出現（2026-11-05 啟動分析）。
+    // 先藏起來，暖機做完會重排（見 create() 裡的 when_gdiplus_fonts_ready）
+    if (!next_track_toast::gdiplus_fonts_ready())
+        return {};
+
     ensure_measure();
     ensure_time_measure();
 
@@ -1667,6 +1674,16 @@ HWND create(HWND parent)
     // 輸出設定一變就更新（回呼可能在別的執行緒，轉回主執行緒）；最後一個視窗關掉時放掉
     if (wnd && g_callback_handle.get().is_empty() && api_available()) {
         g_callback_handle = output_manager_v2::get()->addCallback([] { fb2k::inMainThread([] { refresh_all(); }); });
+    }
+
+    // GDI+ 字型表暖機做完要重排：暖機沒做完時 compute_layout() 傳回空矩形（先藏起來，不在主執行緒建字型表），
+    // 做完才第一次真正排版、顯示。只登記一次（已經做完就馬上重排，那時還沒有版面資訊，什麼也不會發生）
+    if (wnd) {
+        static const auto registered = [] {
+            next_track_toast::when_gdiplus_fonts_ready([] { refresh_all(); });
+            return true;
+        }();
+        (void)registered;
     }
 
     return wnd;
