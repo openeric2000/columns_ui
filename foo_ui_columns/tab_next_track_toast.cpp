@@ -575,7 +575,9 @@ class WebKeyFromConsole : public console_receiver {
 public:
     void print(const char* message, t_size length) override
     {
-        const std::string_view text(message, length);
+        // SDK 的 console::print(const char*) 對所有 receiver 都傳 SIZE_MAX（＝以 \0 結尾、沒給長度），
+        // 直接當長度用，字串搜尋會往記憶體後面一路讀下去（2026-11-05 實測：std::string_view::find 內部 memmove 寫爆堆疊，fb2k 啟動就崩潰）
+        const std::string_view text(message, length == SIZE_MAX ? std::strlen(message) : length);
 
         if (text.find(open_preferences_marker) != std::string_view::npos) {
             // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
