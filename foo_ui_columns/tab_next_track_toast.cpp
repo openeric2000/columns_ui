@@ -204,6 +204,8 @@ private:
     static constexpr int row_count = 7;
     // 主題檔換過、還沒重開 fb2k：切到別的分頁再回來也要記得，所以放成靜態
     inline static bool s_restart_pending = false;
+    // 各列的字族下拉有沒有填過整份清單（沒填過時下拉裡只有「目前字型」一個項目，每次開分頁都重設）
+    std::array<bool, row_count> m_family_filled{};
 
     static std::optional<size_t> region_of_row(int row)
     {
@@ -227,12 +229,12 @@ private:
             nocturne_text::font_row_tabs, nocturne_text::font_row_tree, nocturne_text::font_row_ui,
             nocturne_text::font_row_bar, nocturne_text::font_row_header};
 
+        // 字族下拉先不填：系統有 700 多個字族，7 個下拉一次填滿要 5 千多次 AddString，開分頁要卡 0.7 秒以上（2026-11-05 實測）。
+        // 平常每個下拉只放「目前的字型」一個項目，使用者按開下拉（CBN_DROPDOWN）時才把整份清單填進去
+        m_family_filled.fill(false);
+
         for (int row = 0; row < row_count; ++row) {
             SetDlgItemText(wnd, IDC_FONT_ROW_LABEL0 + row, labels[row]);
-
-            const auto family_combo = GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row);
-            for (size_t index{}; index < theme_font::font_family_count(); ++index)
-                ComboBox_AddString(family_combo, theme_font::font_family_name(index).c_str());
 
             const auto size_combo = GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row);
             for (size_t index{}; index < theme_font::size_option_count(); ++index)
@@ -243,14 +245,51 @@ private:
         update_restart_controls(wnd);
     }
 
+    // 這一列的字族下拉還沒填整份清單時，把它換成只有「目前字型」一個項目；填過了就直接選到對的位置
+    void show_current_family(HWND wnd, int row, std::optional<size_t> family) const
+    {
+        const auto combo = GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row);
+
+        if (m_family_filled[row]) {
+            ComboBox_SetCurSel(combo, family ? static_cast<int>(*family) : -1);
+            return;
+        }
+
+        ComboBox_ResetContent(combo);
+        if (family) {
+            ComboBox_AddString(combo, theme_font::font_family_name(*family).c_str());
+            ComboBox_SetCurSel(combo, 0);
+        }
+    }
+
+    // 按開下拉的當下才把整份字族清單填進去（清單位置＝字族編號），並選到目前的字型
+    void fill_family_list(HWND wnd, int row)
+    {
+        if (m_family_filled[row])
+            return;
+
+        const auto combo = GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row);
+        const auto family = theme_font::current_family_index(region_of_row(row));
+        const auto count = theme_font::font_family_count();
+
+        SetWindowRedraw(combo, FALSE);
+        ComboBox_ResetContent(combo);
+        SendMessage(combo, CB_INITSTORAGE, count, count * 40 * sizeof(wchar_t));
+        for (size_t index{}; index < count; ++index)
+            ComboBox_AddString(combo, theme_font::font_family_name(index).c_str());
+        ComboBox_SetCurSel(combo, family ? static_cast<int>(*family) : -1);
+        SetWindowRedraw(combo, TRUE);
+
+        m_family_filled[row] = true;
+    }
+
     // 把每一列的下拉選到目前實際的字族與大小（「全部區塊」那一列看第一個項目；字型不在清單裡就留空）
     void refresh_rows(HWND wnd) const
     {
         for (int row = 0; row < row_count; ++row) {
             const auto region = region_of_row(row);
 
-            const auto family = theme_font::current_family_index(region);
-            ComboBox_SetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row), family ? static_cast<int>(*family) : -1);
+            show_current_family(wnd, row, theme_font::current_family_index(region));
 
             // 主題檔區塊（播放列、專輯標頭）沒有大小，把大小下拉藏起來
             const auto size_combo = GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row);
@@ -278,11 +317,19 @@ private:
             return;
         }
 
+        const auto is_family_combo = id >= IDC_FONT_ROW_FAMILY0 && id < IDC_FONT_ROW_FAMILY0 + row_count;
+
+        // 按開字族下拉的當下才把整份清單填進去（見 on_init_dialog 的說明）
+        if (code == CBN_DROPDOWN && is_family_combo) {
+            fill_family_list(wnd, id - IDC_FONT_ROW_FAMILY0);
+            return;
+        }
+
         if (code != CBN_SELCHANGE)
             return;
 
         int row = -1;
-        if (id >= IDC_FONT_ROW_FAMILY0 && id < IDC_FONT_ROW_FAMILY0 + row_count)
+        if (is_family_combo)
             row = id - IDC_FONT_ROW_FAMILY0;
         else if (id >= IDC_FONT_ROW_SIZE0 && id < IDC_FONT_ROW_SIZE0 + row_count)
             row = id - IDC_FONT_ROW_SIZE0;
@@ -290,16 +337,26 @@ private:
         if (row < 0)
             return;
 
+        // 字族清單還沒填（下拉裡只有「目前字型」一個項目）時，下拉的選取位置不是字族編號：
+        // 改了大小就用目前的字族編號；字族下拉本身不會有選取變化，有的話也不處理
+        std::optional<size_t> family;
+        if (m_family_filled[row]) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row));
+            if (selection != CB_ERR)
+                family = static_cast<size_t>(selection);
+        } else if (!is_family_combo) {
+            family = theme_font::current_family_index(region_of_row(row));
+        }
+
         // 這一列的字型目前不在清單裡（字族下拉是空的）而且只改了大小：沒有字族可以套，不處理
-        const auto family = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row));
-        if (family == CB_ERR)
+        if (!family)
             return;
 
         auto size = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row));
         if (size == CB_ERR)
             size = static_cast<int>(theme_font::default_size_option());
 
-        const auto result = theme_font::apply_font(region_of_row(row), static_cast<size_t>(family), static_cast<size_t>(size));
+        const auto result = theme_font::apply_font(region_of_row(row), *family, static_cast<size_t>(size));
         const auto parent = GetAncestor(wnd, GA_ROOT);
 
         if (result.error) {
