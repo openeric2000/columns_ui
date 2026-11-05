@@ -144,6 +144,7 @@ private:
     void ticker_main();
     void tick();
     View sample_view();
+    double live_position(double length);
     double smooth_position(double source, bool paused);
     void apply_view(const View& view);
     void set_interval(UINT ms);
@@ -176,9 +177,9 @@ private:
     bool m_dragging{};
     double m_drag_ratio{};
 
-    // 滑鼠滾輪：還沒滿一格的滾動量（觸控板一次只給幾十單位），以及累積中、還沒送出的跳轉目標（秒）
+    // 滑鼠滾輪：還沒滿一格的滾動量（觸控板一次只給幾十單位），以及累積中、還沒送出的跳轉量（相對目前位置的秒數）
     int m_wheel_remainder{};
-    std::optional<double> m_wheel_target;
+    std::optional<double> m_wheel_offset;
 
     // 位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
     bool m_position_valid{};
@@ -502,13 +503,6 @@ View ProgressBar::sample_view()
         return view;
     }
 
-    // 滾輪累積中：顯示目標位置，等滾輪停下來才真的跳轉
-    if (m_wheel_target) {
-        view.ratio = std::clamp(*m_wheel_target / length, 0.0, 1.0);
-        view.preview_seconds = *m_wheel_target;
-        return view;
-    }
-
     const auto now = Clock::now();
     double position{};
 
@@ -533,8 +527,25 @@ View ProgressBar::sample_view()
         position = smooth_position(source, view.paused);
     }
 
+    // 滾輪累積中：顯示「目前位置加上累積的秒數」（歌還在播，所以紅線會繼續往前走），等滾輪停下來才真的跳轉
+    if (m_wheel_offset) {
+        position = std::clamp(position + *m_wheel_offset, 0.0, std::max(0.0, length - 0.1));
+        view.preview_seconds = position;
+    }
+
     view.ratio = std::clamp(position / length, 0.0, 1.0);
     return view;
+}
+
+double ProgressBar::live_position(double length)
+{
+    // 暫時拿掉滾輪的偏移量，量歌實際播到哪（含等 fb2k 跳完時的跳轉目標）；停止了就不用還原（sample_view 已把滾輪作廢）
+    const auto offset = std::exchange(m_wheel_offset, std::nullopt);
+    const auto view = sample_view();
+    if (view.seekable)
+        m_wheel_offset = offset;
+
+    return view.ratio * length;
 }
 
 void ProgressBar::apply_view(const View& view)
@@ -652,19 +663,12 @@ void ProgressBar::on_mouse_wheel(WPARAM wp)
 
     const auto step = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) ? wheel_shift_step_seconds : wheel_step_seconds;
 
-    // 起點：已經在累積就從累積的目標接著加；否則從目前顯示的位置（先量一次，免得拿到上一格的）
-    double base{};
-    if (m_wheel_target) {
-        base = *m_wheel_target;
-    } else {
-        apply_view(sample_view());
-        if (!m_view.seekable)
-            return;
-        base = m_view.ratio * length;
-    }
-
-    // 跳到最後一刻會直接結束這首，留一點（跟 seek_to 同一個規則）
-    m_wheel_target = std::clamp(base + notches * step, 0.0, std::max(0.0, length - 0.1));
+    // 累積的是「相對目前位置的秒數」，不是固定的目標位置：滾輪滾的這段時間歌還在播，
+    // 停下來時跳到「那一刻的位置＋累積秒數」，所以滾一格就是剛好 5 秒，不會因為等了 0.25 秒而少一點
+    // 偏移量夾在能走到的範圍（往回到 0、往前到曲末前 0.1 秒，跟 seek_to 同一個規則），到了邊界再往回滾馬上有反應
+    const auto live = live_position(length);
+    const auto limit = std::max(0.0, length - 0.1);
+    m_wheel_offset = std::clamp(m_wheel_offset.value_or(0.0) + notches * step, -live, limit - live);
 
     // 每滾一格就重新計時，滾輪停下來才送出跳轉
     SetTimer(m_wnd, timer_wheel_commit, wheel_commit_delay_ms, nullptr);
@@ -674,27 +678,28 @@ void ProgressBar::on_mouse_wheel(WPARAM wp)
 void ProgressBar::commit_wheel_seek()
 {
     KillTimer(m_wnd, timer_wheel_commit);
-    if (!m_wheel_target)
+    if (!m_wheel_offset)
         return;
 
-    const auto seconds = *m_wheel_target;
-    m_wheel_target.reset();
+    const auto offset = *m_wheel_offset;
+    m_wheel_offset.reset();
     m_wheel_remainder = 0;
 
-    // seek_to 會記下跳轉目標，fb2k 說跳完之前紅線停在目標，不會彈回舊位置
+    // 拿掉偏移量後量這一刻歌播到哪，加上累積的秒數；seek_to 會記下跳轉目標，fb2k 說跳完之前紅線停在目標，不會彈回舊位置
     const auto length = playback_control::get()->playback_get_length();
-    if (length > 0)
-        seek_to(seconds / length);
+    const auto view = sample_view();
+    if (length > 0 && view.seekable)
+        seek_to((view.ratio * length + offset) / length);
 
     apply_view(sample_view());
 }
 
 void ProgressBar::cancel_wheel_seek()
 {
-    if (m_wheel_target)
+    if (m_wheel_offset)
         KillTimer(m_wnd, timer_wheel_commit);
 
-    m_wheel_target.reset();
+    m_wheel_offset.reset();
     m_wheel_remainder = 0;
 }
 
