@@ -34,6 +34,15 @@ inline constexpr wchar_t chip_kind_mute[] = L"Muted";
 inline constexpr wchar_t chip_mode_exclusive[] = L"Exclusive mode";
 inline constexpr wchar_t chip_mode_asio[] = L"ASIO mode";
 inline constexpr wchar_t chip_menu_title[] = L"Output mode";
+// 設定頁「輸出裝置」區塊與裝置名稱檔的範本
+inline constexpr wchar_t chip_settings_title[] = L"Output device";
+inline constexpr wchar_t chip_show[] = L"Show the current output device in the playback bar";
+inline constexpr wchar_t chip_click[] = L"Click it to switch device (the hover panel also shows the hint)";
+inline constexpr wchar_t chip_edit_names[] = L"Edit device names...";
+inline constexpr char chip_alias_template[]
+    = "# Output device names: one per line, \"text the device name contains=name to show\".\r\n"
+      "# Lines starting with # are comments. Save the file, then hover over or click the output device display to apply.\r\n"
+      "# Example: Holo Audio=DAC (Holo Audio)\r\n";
 inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
 inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
@@ -159,6 +168,15 @@ inline constexpr wchar_t chip_kind_mute[] = L"靜音";
 inline constexpr wchar_t chip_mode_exclusive[] = L"獨占模式";
 inline constexpr wchar_t chip_mode_asio[] = L"ASIO 模式";
 inline constexpr wchar_t chip_menu_title[] = L"輸出模式";
+// 設定頁「輸出裝置」區塊與裝置名稱檔的範本
+inline constexpr wchar_t chip_settings_title[] = L"輸出裝置";
+inline constexpr wchar_t chip_show[] = L"在播放列顯示目前的輸出裝置";
+inline constexpr wchar_t chip_click[] = L"點一下可切換裝置（滑過面板的提示也一起顯示）";
+inline constexpr wchar_t chip_edit_names[] = L"編輯裝置顯示名稱…";
+inline constexpr char chip_alias_template[]
+    = "# 輸出裝置顯示名稱：每行「裝置名稱裡要有的字=要顯示的名稱」，# 開頭是註解。\r\n"
+      "# 存檔後，到播放列的輸出裝置顯示上滑過或點一下就會套用，不用重開 foobar2000。\r\n"
+      "# 例：Holo Audio=DAC (Holo Audio)\r\n";
 inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
 inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";

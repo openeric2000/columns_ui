@@ -13,6 +13,16 @@
 
 namespace cui::output_chip {
 
+// 設定頁（Preferences → Tools → Nocturne →「播放」，2026-11-05）：
+// - enabled：在播放列顯示目前輸出裝置（預設開）；關掉整個藏起來
+// - click_to_switch：點一下彈出裝置清單切換（預設開）；關掉時只留顯示，滑過面板也不寫「點一下可切換裝置」
+// 兩個值一寫入（勾選、Reset page 都算）就會重讀別名檔並重排
+extern fbh::ConfigBool enabled;
+extern fbh::ConfigBool click_to_switch;
+
+// 用預設編輯器開 profile 裡的 output-device-names.txt（沒有檔就先建一個只有說明的範本）；存檔後下次滑過或點裝置顯示就會用新名稱
+void open_alias_file();
+
 // 在 parent（分割面板視窗）底下建立裝置顯示視窗（先不顯示）；失敗傳回 nullptr
 HWND create(HWND parent);
 

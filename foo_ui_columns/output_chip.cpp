@@ -175,14 +175,39 @@ std::wstring strip_index_prefix(std::wstring text)
 // 外面、滑過面板、清單都顯示「DAC (Holo Audio)」，預設與獨占版一樣。比對不分大小寫。
 std::vector<std::pair<std::wstring, std::wstring>> g_aliases;
 
+std::wstring alias_file_path()
+{
+    const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+    std::wstring path = pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr();
+    path += L"\\output-device-names.txt";
+    return path;
+}
+
+// 上一次讀別名檔時檔案的樣子（有沒有、最後修改時間）：使用者在設定頁按「編輯裝置顯示名稱」改了檔，
+// 滑過或點裝置顯示時發現檔變了就重讀，不用重開 fb2k（2026-11-05）
+bool g_alias_file_exists{};
+FILETIME g_alias_file_time{};
+
+bool alias_file_changed()
+{
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    const auto exists = GetFileAttributesExW(alias_file_path().c_str(), GetFileExInfoStandard, &data) != 0;
+    const auto time = exists ? data.ftLastWriteTime : FILETIME{};
+    return exists != g_alias_file_exists || CompareFileTime(&time, &g_alias_file_time) != 0;
+}
+
 void load_aliases()
 {
     g_aliases.clear();
 
+    {
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        g_alias_file_exists = GetFileAttributesExW(alias_file_path().c_str(), GetFileExInfoStandard, &data) != 0;
+        g_alias_file_time = g_alias_file_exists ? data.ftLastWriteTime : FILETIME{};
+    }
+
     try {
-        const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
-        std::wstring path = pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr();
-        path += L"\\output-device-names.txt";
+        const auto path = alias_file_path();
 
         FILE* file{};
         if (_wfopen_s(&file, path.c_str(), L"rb") != 0 || !file)
@@ -296,6 +321,8 @@ struct State {
     DeviceView view;
 };
 State g_state;
+
+void refresh_all();
 
 bool api_available()
 {
@@ -453,14 +480,17 @@ private:
 
         // 第一行只寫模式（預設〔共用〕、獨占模式、ASIO、靜音輸出）：整個面板講的都是輸出裝置，不用再寫「輸出裝置」（使用者 2026-11-05）
         const std::wstring title = view.mode;
-        const std::wstring hint = nocturne_text::chip_hint;
+        // 設定頁關掉「點一下切換」時，面板就不寫「點一下可切換裝置」那一行
+        const auto show_hint = click_to_switch.get();
+        const std::wstring hint = show_hint ? nocturne_text::chip_hint : L"";
 
         const auto text_width = std::max({measure_text(title, small_px), measure_text(view.name, name_px),
             measure_text(hint, small_px)});
         const auto body_width = std::max(dip(panel_min_width), static_cast<int>(std::ceil(text_width)) + 2 * dip(panel_padding_x) + 2);
         const auto line_small = static_cast<int>(std::ceil(small_px * 1.25f));
         const auto line_name = static_cast<int>(std::ceil(name_px * 1.25f));
-        const auto body_height = dip(panel_padding_top) + line_small + dip(3) + line_name + dip(4) + line_small + dip(panel_padding_bottom);
+        const auto body_height = dip(panel_padding_top) + line_small + dip(3) + line_name
+            + (show_hint ? dip(4) + line_small : 0) + dip(panel_padding_bottom);
 
         const auto shadow = dip(panel_shadow);
         const auto width = body_width + 2 * shadow;
@@ -522,8 +552,10 @@ private:
             g.DrawString(view.mode.c_str(), -1, &small_font, Gdiplus::PointF(x, y), &format, &mode_brush);
             y += line_small + dip(3);
             g.DrawString(view.name.c_str(), -1, &name_font, Gdiplus::PointF(x, y), &format, &bright);
-            y += line_name + dip(4);
-            g.DrawString(hint.c_str(), -1, &small_font, Gdiplus::PointF(x, y), &format, &hint_brush);
+            if (show_hint) {
+                y += line_name + dip(4);
+                g.DrawString(hint.c_str(), -1, &small_font, Gdiplus::PointF(x, y), &format, &hint_brush);
+            }
         }
 
         // 位置：面板的中線對齊裝置顯示的中線，面板底邊在裝置顯示上緣再往上 panel_gap_above_chip；不超出該螢幕的工作區
@@ -1183,7 +1215,8 @@ void Chip::ensure_time_measure()
 
 RECT Chip::compute_layout()
 {
-    if (!g_state.valid || m_bar_rect.right <= m_bar_rect.left)
+    // 設定頁關掉「在播放列顯示輸出裝置」就整個藏起來（回傳空矩形的處理跟放不下時一樣）
+    if (!enabled.get() || !g_state.valid || m_bar_rect.right <= m_bar_rect.left)
         return {};
 
     ensure_measure();
@@ -1334,6 +1367,10 @@ void Chip::show_panel()
     if (!g_state.valid || !m_hot || m_menu_open)
         return;
 
+    // 別名檔被改過（使用者在設定頁按了「編輯裝置顯示名稱」）：先重讀，面板與晶片才會用新名稱
+    if (alias_file_changed())
+        refresh_all();
+
     Panel::show(m_wnd, chip_screen_rect(), g_state.view);
 }
 
@@ -1341,6 +1378,9 @@ void Chip::show_menu()
 {
     if (!api_available())
         return;
+
+    if (alias_file_changed())
+        refresh_all();
 
     Panel::hide();
 
@@ -1517,7 +1557,8 @@ LRESULT Chip::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         GetClientRect(wnd, &client);
         const RECT chip_rect{m_chip_x, 0, m_chip_x + m_chip_width, client.bottom};
         const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-        if (was_pressed && PtInRect(&chip_rect, pt))
+        // 設定頁關掉「點一下切換」時，點下去什麼都不做（只留顯示）
+        if (was_pressed && PtInRect(&chip_rect, pt) && click_to_switch.get())
             show_menu();
         else
             render();
@@ -1530,7 +1571,7 @@ LRESULT Chip::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     case WM_SETCURSOR:
-        SetCursor(LoadCursor(nullptr, IDC_HAND));
+        SetCursor(LoadCursor(nullptr, click_to_switch.get() ? IDC_HAND : IDC_ARROW));
         return TRUE;
     }
 
@@ -1657,6 +1698,46 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
 
     return DeferWindowPos(dwp, wnd, HWND_TOP, target.left, target.top, target.right - target.left,
         target.bottom - target.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+// ---- 設定頁用（2026-11-05）----
+// 開關一變（設定頁勾選、Reset page 都算）就重讀別名、重排：on_change 在設定值被寫入時呼叫
+namespace {
+void on_setting_changed()
+{
+    refresh_all();
+}
+} // namespace
+
+fbh::ConfigBool enabled(GUID{0x899df401, 0xe387, 0x406a, {0xa2, 0x7c, 0x42, 0x44, 0xd1, 0x9f, 0xb6, 0x57}}, true,
+    [](bool, bool, std::optional<uint32_t>) { on_setting_changed(); });
+fbh::ConfigBool click_to_switch(GUID{0x2f6a3a74, 0x708b, 0x49ab, {0x94, 0x62, 0xe1, 0x8e, 0xe0, 0x37, 0xc8, 0x2b}}, true,
+    [](bool, bool, std::optional<uint32_t>) { on_setting_changed(); });
+
+void open_alias_file()
+{
+    try {
+        const auto path = alias_file_path();
+
+        // 沒有檔就先建一個只有說明的範本（只有註解，不會讓任何裝置換名字）
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            FILE* file{};
+            if (_wfopen_s(&file, path.c_str(), L"wb") == 0 && file) {
+                const std::string_view bom = "\xEF\xBB\xBF";
+                const std::string_view text = nocturne_text::chip_alias_template;
+                fwrite(bom.data(), 1, bom.size(), file);
+                fwrite(text.data(), 1, text.size(), file);
+                fclose(file);
+            }
+        }
+
+        const auto result = reinterpret_cast<INT_PTR>(
+            ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+        if (result <= 32)
+            ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + path + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+    }
+    catch (...) {
+    }
 }
 
 } // namespace cui::output_chip

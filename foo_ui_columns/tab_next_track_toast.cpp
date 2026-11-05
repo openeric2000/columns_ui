@@ -5,6 +5,7 @@
 #include "nocturne_text.h"
 #include "dark_mode_dialog.h"
 #include "now_playing_progress.h"
+#include "output_chip.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 
@@ -88,7 +89,7 @@ private:
 // ---- 播放 ----
 class TabNocturnePlayback : public NocturneTab {
 public:
-    TabNocturnePlayback() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
+    TabNocturnePlayback() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
 
     const char* get_name() override { return nocturne_text::playback_tab_name; }
 
@@ -103,9 +104,15 @@ private:
         SetDlgItemText(wnd, IDC_WHEEL_SHIFT_LABEL, nocturne_text::wheel_shift_step_label);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
         SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
+        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::chip_settings_title);
+        SetDlgItemText(wnd, IDC_CHIP_ENABLED, nocturne_text::chip_show);
+        SetDlgItemText(wnd, IDC_CHIP_CLICK, nocturne_text::chip_click);
+        SetDlgItemText(wnd, IDC_CHIP_ALIASES, nocturne_text::chip_edit_names);
 
         CheckDlgButton(wnd, IDC_WHEEL_SEEK_ENABLED, check_state(now_playing_progress::wheel_seek_enabled.get()));
         CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
+        CheckDlgButton(wnd, IDC_CHIP_ENABLED, check_state(output_chip::enabled.get()));
+        CheckDlgButton(wnd, IDC_CHIP_CLICK, check_state(output_chip::click_to_switch.get()));
 
         init_seconds_spin(wnd, IDC_WHEEL_STEP_SPIN, now_playing_progress::wheel_step_min,
             now_playing_progress::wheel_step_max, now_playing_progress::wheel_step_seconds.get());
@@ -136,6 +143,12 @@ private:
             now_playing_progress::wheel_seek_enabled = is_checked;
         else if (id == IDC_KEEP_QUEUE_ON_PLAY)
             playlist_item_helpers::keep_queue_on_play = is_checked;
+        else if (id == IDC_CHIP_ENABLED)
+            output_chip::enabled = is_checked;
+        else if (id == IDC_CHIP_CLICK)
+            output_chip::click_to_switch = is_checked;
+        else if (id == IDC_CHIP_ALIASES)
+            output_chip::open_alias_file();
     }
 };
 
@@ -500,6 +513,8 @@ void reset_nocturne_settings()
     now_playing_progress::wheel_step_seconds.reset();
     now_playing_progress::wheel_shift_step_seconds.reset();
     playlist_item_helpers::keep_queue_on_play.reset();
+    output_chip::enabled.reset();
+    output_chip::click_to_switch.reset();
 
     next_track_toast::enabled.reset();
     next_track_toast::seconds.reset();
