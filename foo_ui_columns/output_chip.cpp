@@ -269,7 +269,7 @@ DeviceView describe(const GUID& output, const std::wstring& full_name)
     if (contains_no_case(output_name, L"ASIO")) {
         view.kind = L"ASIO";
         view.tone = Tone::amber;
-        view.mode = L"ASIO";
+        view.mode = nocturne_text::chip_mode_asio; // 滑過面板第一行：跟「獨占模式」「靜音輸出」一樣寫成「ASIO 模式」
         view.rank = 2;
     } else if (exclusive) {
         view.kind = nocturne_text::chip_kind_exclusive;
