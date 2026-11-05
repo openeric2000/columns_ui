@@ -888,6 +888,8 @@ private:
         Mode mode{Mode::countdown};
         double remaining{};
         double ratio{};
+        // 歌曲最後 fade_out_seconds 秒：提示邊淡出邊把倒數圈與數字走到 0（2026-11-05），不再凍結在「1」
+        bool fading{};
         NextTrack next;
     };
 
@@ -1161,14 +1163,16 @@ std::optional<Controller::Want> Controller::evaluate()
         const auto current_position = smooth_position(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
+        // 淡出期間仍回傳內容（fading），倒數圈與數字照常往 0 走；原本這段傳回空，畫面凍結在「剩 5% 的紅弧＋1」就淡掉
         const auto remaining = length - current_position;
         diag::remaining_ms = static_cast<int>(remaining * 1000);
-        if (remaining <= fade_out_seconds || remaining > count)
+        if (remaining > count)
             return {};
 
         want.mode = Mode::countdown;
-        want.remaining = remaining;
-        want.ratio = remaining / count;
+        want.fading = remaining <= fade_out_seconds;
+        want.remaining = std::max(remaining, 0.0);
+        want.ratio = want.remaining / count;
     } else {
         m_position_valid = false;
 
@@ -1311,7 +1315,8 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
 {
     const auto eased = ease(m_alpha);
     m_surface.copy_static_to_canvas();
-    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::ceil(want.remaining - 0.0001)));
+    // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
+    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
 
     // 淡入時從靠近邊緣那一側滑進來：放上面就從上往下，放下面就從下往上
     const auto corner = std::min(position.get(), position_count - 1);
@@ -1361,7 +1366,10 @@ void Controller::tick()
         return;
     }
 
-    if (!want && !m_wnd) {
+    // 淡出中（歌曲最後半秒）不能新建視窗：淡掉並收掉之後，同一首歌的 evaluate() 還會回傳 fading，不擋的話會再冒出來一次
+    const auto active = want && !want->fading;
+
+    if (!active && !m_wnd) {
         set_interval(interval_idle_ms);
         return;
     }
@@ -1369,7 +1377,7 @@ void Controller::tick()
     if (!m_last_want)
         return;
 
-    // 淡出時沿用最後一次的內容與位置
+    // 淡出時沿用最後一次的內容與位置；歌曲最後半秒（fading）的圈與數字用這一格算出的新值
     const auto& shown = want ? *want : *m_last_want;
     const auto dpi = std::max<UINT>(GetDpiForWindow(shown.owner), USER_DEFAULT_SCREEN_DPI);
     const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI;
@@ -1385,7 +1393,7 @@ void Controller::tick()
             return;
     }
 
-    if (want) {
+    if (active) {
         {
             diag::Section section("rebuild_content");
             rebuild_content(shown, layout);
