@@ -1,4 +1,5 @@
 #include "pch.h"
+#include <charconv>
 #include "config.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
@@ -392,26 +393,50 @@ cfg_int cfg_nocturne_active_tab(
 constexpr GUID guid_nocturne_preferences_page
     = {0x67ee972d, 0x3fb3, 0x4607, {0xbd, 0xaf, 0xce, 0x86, 0x32, 0x73, 0x47, 0xd0}};
 
-// 專輯標頭等網頁面板：焦點在網頁裡時（滑鼠點過面板之後），WebView2 把 Ctrl+P 當成瀏覽器的「列印」，跳出列印視窗，
-// 根本不會交給 foobar2000（2026-11-05）。網頁（index.html）自己攔下 Ctrl+P、不讓它列印，再用 fb2k.component.print
-// 往 Console 印一行暗號；這裡收到暗號就執行 File → Preferences，效果等於在別處按 Ctrl+P。
-// 暗號只是一行 Console 文字：沒有這個元件的環境（朋友版、舊版）網頁印了也無害，只是 Ctrl+P 在網頁裡什麼都不會發生。
+// 專輯標頭等網頁面板：焦點在網頁裡時（滑鼠點過面板之後），WebView2 把瀏覽器的快速鍵吃掉——Ctrl+P 變成「列印」視窗、
+// F5 重新整理、Ctrl+F 尋找……根本不會交給 foobar2000（2026-11-05）。網頁（index.html）攔下 Ctrl／Alt 組合鍵與功能鍵，
+// 再用 fb2k.component.print 往 Console 印一行暗號；這裡收到暗號就把那個鍵交給 foobar2000 的快速鍵系統，
+// 效果等於焦點在別處按同一個鍵（使用者改過的快速鍵也有效）。
+// 暗號只是一行 Console 文字：沒有這個元件的環境（朋友版、舊版）網頁印了也無害，只是這些鍵在網頁裡什麼都不會發生。
 // 不用 shell.execute：網頁面板預設沒開「執行 shell」權限（實測 canExecuteShellOperations＝false），也不該為了這個去開
+// - 「[Nocturne] key <虛擬鍵碼> <修飾鍵>」：修飾鍵 Shift＝1、Ctrl＝2、Alt＝4，跟 HOTKEYF_* 同值，所以 (鍵碼 | 修飾鍵 << 8)
+//   就是 process_keydown_simple 要的格式（Columns UI 自己處理快速鍵也是這樣，見 fb2k_misc.cpp）
+// - 「[Nocturne] open-preferences」：舊版網頁只攔 Ctrl+P 時用的暗號，保留給還沒更新的 index.html
+constexpr std::string_view web_key_marker = "[Nocturne] key ";
 constexpr std::string_view open_preferences_marker = "[Nocturne] open-preferences";
 
-class OpenPreferencesFromConsole : public console_receiver {
+class WebKeyFromConsole : public console_receiver {
 public:
     void print(const char* message, t_size length) override
     {
-        if (std::string_view(message, length).find(open_preferences_marker) == std::string_view::npos)
+        const std::string_view text(message, length);
+
+        if (text.find(open_preferences_marker) != std::string_view::npos) {
+            // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
+            fb2k::inMainThread([] { standard_commands::main_preferences(); });
+            return;
+        }
+
+        const auto position = text.find(web_key_marker);
+        if (position == std::string_view::npos)
             return;
 
-        // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
-        fb2k::inMainThread([] { standard_commands::main_preferences(); });
+        const auto numbers = text.substr(position + web_key_marker.size());
+        unsigned key{};
+        unsigned modifiers{};
+        const auto first = std::from_chars(numbers.data(), numbers.data() + numbers.size(), key);
+        if (first.ec != std::errc{} || first.ptr == numbers.data() + numbers.size() || *first.ptr != ' ')
+            return;
+        const auto second = std::from_chars(first.ptr + 1, numbers.data() + numbers.size(), modifiers);
+        if (second.ec != std::errc{} || key == 0 || key > 0xFF || modifiers > 7)
+            return;
+
+        const auto key_code = static_cast<uint32_t>(key | (modifiers << 8));
+        fb2k::inMainThread([key_code] { keyboard_shortcut_manager_v2::get()->process_keydown_simple(key_code); });
     }
 };
 
-service_factory_single_t<OpenPreferencesFromConsole> g_open_preferences_from_console;
+service_factory_single_t<WebKeyFromConsole> g_web_key_from_console;
 
 // 設定視窗的「Reset page」：播放與下一首提示兩個分頁的所有設定還原成預設。
 // 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
