@@ -63,6 +63,23 @@ constexpr float panel_name_font_dip = 14;
 const Gdiplus::Color background_colour(255, 24, 24, 24);
 const Gdiplus::Color amber_colour(255, 232, 184, 90);
 const Gdiplus::Color amber_border_colour(255, 217, 164, 65);
+// 靜音：柔和的玫瑰紅（2026-11-05 使用者要求靜音也換顏色，一樣要柔和，跟琥珀色的亮度相近）
+const Gdiplus::Color mute_colour(255, 214, 134, 134);
+const Gdiplus::Color mute_border_colour(255, 196, 112, 112);
+
+// 類型標記的色調：一般（灰白）、琥珀（ASIO、獨占：獨佔裝置）、靜音（玫瑰紅）
+enum class Tone { normal, amber, mute };
+
+Gdiplus::Color tone_text_colour(Tone tone, const Gdiplus::Color& normal)
+{
+    return tone == Tone::amber ? amber_colour : tone == Tone::mute ? mute_colour : normal;
+}
+
+Gdiplus::Color tone_border_colour(Tone tone)
+{
+    return tone == Tone::amber ? amber_border_colour : tone == Tone::mute ? mute_border_colour
+                                                                         : Gdiplus::Color(102, 241, 241, 241);
+}
 
 int dip(int value)
 {
@@ -108,9 +125,9 @@ bool contains_no_case(const std::wstring& text, std::wstring_view needle)
 
 // 一個輸出裝置在畫面上的樣子
 struct DeviceView {
-    // 外面的類型標記（ASIO、預設、獨占、靜音，其他輸出就用輸出的名字）；amber＝琥珀色（ASIO 與獨占：獨佔裝置）
+    // 外面的類型標記（ASIO、預設、獨占、靜音，其他輸出就用輸出的名字）；tone：ASIO 與獨占是琥珀色（獨佔裝置）、靜音是玫瑰紅
     std::wstring kind;
-    bool amber{};
+    Tone tone{Tone::normal};
     // 面板第一行後半段的模式說明
     std::wstring mode;
     // 裝置名：拿掉「輸出名 : 」前綴、[exclusive]、括號裡的廠牌
@@ -237,6 +254,7 @@ DeviceView describe(const GUID& output, const std::wstring& full_name)
 
     if (output == output_id_null) {
         view.kind = nocturne_text::chip_kind_mute;
+        view.tone = Tone::mute;
         view.mode = nocturne_text::chip_mode_mute;
         view.name = full_name;
         view.rank = 4;
@@ -250,12 +268,12 @@ DeviceView describe(const GUID& output, const std::wstring& full_name)
 
     if (contains_no_case(output_name, L"ASIO")) {
         view.kind = L"ASIO";
-        view.amber = true;
+        view.tone = Tone::amber;
         view.mode = L"ASIO";
         view.rank = 2;
     } else if (exclusive) {
         view.kind = nocturne_text::chip_kind_exclusive;
-        view.amber = true;
+        view.tone = Tone::amber;
         view.mode = nocturne_text::chip_mode_exclusive;
         view.rank = 1;
     } else if (output == output_id_default) {
@@ -431,7 +449,8 @@ private:
         const Gdiplus::Font small_font(family.get(), small_px, style, Gdiplus::UnitPixel);
         const Gdiplus::Font name_font(family.get(), name_px, style, Gdiplus::UnitPixel);
 
-        const std::wstring title = std::wstring(nocturne_text::chip_panel_title) + L"　·　" + view.mode;
+        // 第一行只寫模式（預設〔共用〕、獨占模式、ASIO、靜音輸出）：整個面板講的都是輸出裝置，不用再寫「輸出裝置」（使用者 2026-11-05）
+        const std::wstring title = view.mode;
         const std::wstring hint = nocturne_text::chip_hint;
 
         const auto text_width = std::max({measure_text(title, small_px), measure_text(view.name, name_px),
@@ -490,19 +509,15 @@ private:
 
             Gdiplus::StringFormat format(Gdiplus::StringFormat::GenericTypographic());
             format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
-            const Gdiplus::SolidBrush muted(Gdiplus::Color(255, 138, 138, 138));
             const Gdiplus::SolidBrush bright(Gdiplus::Color(255, 241, 241, 241));
             const Gdiplus::SolidBrush hint_brush(Gdiplus::Color(255, 154, 154, 154));
 
             auto x = body.X + dip(panel_padding_x);
             auto y = body.Y + dip(panel_padding_top);
-            // 第一行：「輸出裝置　·　」灰字，後面的模式（ASIO、獨占模式）依裝置類型上色，ASIO／獨占是琥珀色（跟外面的標記一致）
-            // 後半段的起點＝整行寬度 − 模式本身的寬度（GenericTypographic 量寬度會忽略結尾空白，不能直接量前半段）
-            const std::wstring title_prefix = std::wstring(nocturne_text::chip_panel_title) + L"　·　";
-            const auto mode_x = x + measure_text(title, small_px) - measure_text(view.mode, small_px);
-            const Gdiplus::SolidBrush mode_brush(view.amber ? amber_colour : Gdiplus::Color(255, 138, 138, 138));
-            g.DrawString(title_prefix.c_str(), -1, &small_font, Gdiplus::PointF(x, y), &format, &muted);
-            g.DrawString(view.mode.c_str(), -1, &small_font, Gdiplus::PointF(mode_x, y), &format, &mode_brush);
+            // 第一行：模式（預設〔共用〕、獨占模式、ASIO、靜音輸出），依裝置類型上色（跟外面的標記一致：
+            // ASIO／獨占琥珀色、靜音玫瑰紅、其他灰色）
+            const Gdiplus::SolidBrush mode_brush(tone_text_colour(view.tone, Gdiplus::Color(255, 138, 138, 138)));
+            g.DrawString(view.mode.c_str(), -1, &small_font, Gdiplus::PointF(x, y), &format, &mode_brush);
             y += line_small + dip(3);
             g.DrawString(view.name.c_str(), -1, &name_font, Gdiplus::PointF(x, y), &format, &bright);
             y += line_name + dip(4);
@@ -541,7 +556,7 @@ struct MenuItem {
     GUID output{};
     GUID device{};
     std::wstring kind;
-    bool amber{};
+    Tone tone{Tone::normal};
     std::wstring name;
     bool current{};
     int rank{};
@@ -799,10 +814,10 @@ private:
                 {
                     Gdiplus::GraphicsPath path;
                     add_round_rect(path, tag_rect, tag_h / 2.f);
-                    const Gdiplus::Pen pen(item.amber ? amber_border_colour : Gdiplus::Color(102, 241, 241, 241), 1.f);
+                    const Gdiplus::Pen pen(tone_border_colour(item.tone), 1.f);
                     g.DrawPath(&pen, &path);
                 }
-                const Gdiplus::SolidBrush tag_brush(item.amber ? amber_colour : Gdiplus::Color(199, 241, 241, 241));
+                const Gdiplus::SolidBrush tag_brush(tone_text_colour(item.tone, Gdiplus::Color(199, 241, 241, 241)));
                 g.DrawString(item.kind.c_str(), -1, &tag_font, tag_rect, &center, &tag_brush);
 
                 const Gdiplus::RectF name_rect(shadow + m_name_x, row_rect.Y,
@@ -1271,7 +1286,7 @@ void Chip::draw_chip(Gdiplus::Graphics& g, int height) const
     {
         Gdiplus::GraphicsPath path;
         add_round_rect(path, tag_rect, tag_h / 2.f);
-        const Gdiplus::Pen pen(view.amber ? amber_border_colour : Gdiplus::Color(102, 241, 241, 241), 1.f);
+        const Gdiplus::Pen pen(tone_border_colour(view.tone), 1.f);
         g.DrawPath(&pen, &path);
     }
 
@@ -1279,7 +1294,7 @@ void Chip::draw_chip(Gdiplus::Graphics& g, int height) const
     format.SetAlignment(Gdiplus::StringAlignmentCenter);
     format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
     format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-    const Gdiplus::SolidBrush tag_brush(view.amber ? amber_colour : Gdiplus::Color(199, 241, 241, 241));
+    const Gdiplus::SolidBrush tag_brush(tone_text_colour(view.tone, Gdiplus::Color(199, 241, 241, 241)));
     g.DrawString(view.kind.c_str(), -1, &tag_font, tag_rect, &format, &tag_brush);
 
     if (m_show_name) {
@@ -1329,7 +1344,7 @@ void Chip::show_menu()
             trim(long_name);
         }
 
-        items.push_back({output, device, view.kind, view.amber, view.name,
+        items.push_back({output, device, view.kind, view.tone, view.name,
             output == config.m_output && device == config.m_device, view.rank});
         long_names.push_back(strip_index_prefix(std::move(long_name)));
     });

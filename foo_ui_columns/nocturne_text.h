@@ -34,7 +34,6 @@ inline constexpr wchar_t chip_kind_mute[] = L"Muted";
 inline constexpr wchar_t chip_mode_exclusive[] = L"Exclusive mode";
 inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
 inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
-inline constexpr wchar_t chip_panel_title[] = L"Output device";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
@@ -152,7 +151,6 @@ inline constexpr wchar_t chip_kind_mute[] = L"靜音";
 inline constexpr wchar_t chip_mode_exclusive[] = L"獨占模式";
 inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
 inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
-inline constexpr wchar_t chip_panel_title[] = L"輸出裝置";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
