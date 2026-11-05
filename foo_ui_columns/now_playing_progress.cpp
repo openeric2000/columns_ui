@@ -123,6 +123,8 @@ struct View {
     double ratio{};
     bool paused{};
     bool playing{};
+    // 拖曳、滾輪累積、等 fb2k 跳完時，進度條顯示的位置（秒）；給底下的時間文字跟著動（見 main_menu::set_seek_preview）
+    std::optional<double> preview_seconds;
 };
 
 class ProgressBar {
@@ -228,6 +230,7 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_DESTROY:
         KillTimer(m_wnd, timer_wheel_commit);
+        main_menu::set_seek_preview({});
         std::erase(live_bars(), m_wnd);
         stop_ticker();
         if (m_high_resolution_timer) {
@@ -495,12 +498,14 @@ View ProgressBar::sample_view()
 
     if (m_dragging) {
         view.ratio = m_drag_ratio;
+        view.preview_seconds = m_drag_ratio * length;
         return view;
     }
 
     // 滾輪累積中：顯示目標位置，等滾輪停下來才真的跳轉
     if (m_wheel_target) {
         view.ratio = std::clamp(*m_wheel_target / length, 0.0, 1.0);
+        view.preview_seconds = *m_wheel_target;
         return view;
     }
 
@@ -517,6 +522,7 @@ View ProgressBar::sample_view()
 
     if (m_seek_hold) {
         position = m_seek_hold->seconds;
+        view.preview_seconds = position;
     } else {
         auto source = playback->playback_get_position();
         // 暫停中 ASIO+DSD 回報的位置會前後跳（見 menu_items.cpp），改用按下暫停時記下的位置
@@ -533,6 +539,9 @@ View ProgressBar::sample_view()
 
 void ProgressBar::apply_view(const View& view)
 {
+    // 底下的時間文字跟著預覽位置動（沒有預覽時傳空，時間回到 fb2k 回報的位置）；位置沒變時這個呼叫很快就回來
+    main_menu::set_seek_preview(view.preview_seconds);
+
     RECT client{};
     GetClientRect(m_wnd, &client);
     const auto geometry = make_geometry(client.right, client.bottom);

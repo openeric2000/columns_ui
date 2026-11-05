@@ -287,6 +287,23 @@ void set_now_playing_style(uint32_t style)
 std::atomic<int64_t> paused_position_ms{-1};
 std::atomic<int64_t> paused_length_ms{-1};
 
+// 進度條預覽的位置（毫秒），沒有預覽時為 -1（見 main_menu::set_seek_preview）；給 %cui_time_text% 用
+std::atomic<int64_t> seek_preview_ms{-1};
+
+// 跟 %playback_time% 同樣的寫法：不到一小時「M:SS」，一小時以上「H:MM:SS」
+std::string format_clock(int64_t milliseconds)
+{
+    const auto total = milliseconds / 1000;
+    const auto hours = total / 3600;
+    const auto minutes = (total % 3600) / 60;
+    const auto seconds = total % 60;
+
+    if (hours > 0)
+        return fmt::format("{}:{:02}:{:02}", hours, minutes, seconds);
+
+    return fmt::format("{}:{:02}", minutes, seconds);
+}
+
 void clear_paused_position()
 {
     if (paused_position_ms.exchange(-1) >= 0)
@@ -412,11 +429,11 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 5; }
+    t_uint32 get_field_count() override { return 6; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
-            "cui_paused_length_ms", "cui_now_playing_file"};
+            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text"};
         out = names[index];
     }
 
@@ -424,6 +441,19 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            return true;
+        }
+
+        // %cui_time_text%：進度條預覽的位置（拖曳、滾輪、等 fb2k 跳完），沒有預覽時是暫停的位置，兩者都沒有就不存在
+        // （佈局用 $if2(%cui_time_text%,%playback_time%) 取代只寫 %playback_time%）
+        if (index == 5) {
+            auto position = seek_preview_ms.load();
+            if (position < 0)
+                position = paused_position_ms.load();
+            if (position < 0)
+                return false;
+
+            out->write(titleformat_inputtypes::meta, format_clock(position).c_str());
             return true;
         }
 
@@ -737,6 +767,29 @@ std::optional<double> get_paused_position()
         return {};
 
     return static_cast<double>(position) / 1000.0;
+}
+
+void set_seek_preview(std::optional<double> seconds)
+{
+    // 只在主執行緒呼叫，所以「上次通知時顯示的整秒」與時間戳不用 atomic；毫秒值給標題格式（可能在別的執行緒）讀，用 atomic
+    static int64_t shown_second = -1;
+    static ULONGLONG last_refresh_tick = 0;
+
+    const auto position_ms = seconds ? std::llround(std::max(0.0, *seconds) * 1000.0) : int64_t{-1};
+    commands::seek_preview_ms = position_ms;
+
+    const auto second = position_ms < 0 ? int64_t{-1} : position_ms / 1000;
+    if (second == shown_second)
+        return;
+
+    // 拖得很快時略過太密的通知，下一次呼叫（進度條每格都會呼叫）會補上；結束預覽（回到 -1）一律馬上通知
+    const auto now = GetTickCount64();
+    if (second >= 0 && now - last_refresh_tick < 30)
+        return;
+
+    shown_second = second;
+    last_refresh_tick = now;
+    commands::refresh_now_playing_track();
 }
 
 } // namespace cui::main_menu

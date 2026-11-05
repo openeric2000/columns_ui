@@ -54,4 +54,9 @@ uint32_t get_now_playing_style();
 // 有些輸出方式暫停中回報的位置會前後跳，要顯示暫停中的位置請用這個，不要讀 playback_get_position
 std::optional<double> get_paused_position();
 
+// 自編版新增（2026-11-05）：拖曳進度條、滾輪累積、等 fb2k 跳完的這段時間，進度條預覽的位置（秒）；沒有預覽時傳空
+// 設定後標題格式欄位 %cui_time_text% 會顯示這個位置（暫停中沒有預覽時顯示暫停位置），底下的時間才會跟著動；
+// 只有顯示的整秒變了才通知 ESLyric 重算（拖曳時最多約每 30 ms 一次）。要在主執行緒呼叫
+void set_seek_preview(std::optional<double> seconds);
+
 } // namespace cui::main_menu
