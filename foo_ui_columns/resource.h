@@ -394,7 +394,30 @@
 #define IDC_WHEEL_SEEK_ENABLED          1260
 #define IDC_WHEEL_SEEK_NOTE             1261
 #define IDC_NOCTURNE_FONT_NOTE          1262
-#define IDC_NOCTURNE_FONT_BUTTON        1263
+#define IDC_NOCTURNE_FONT_RESTART       1263
+#define IDC_NOCTURNE_FONT_RESTART_NOTE  1264
+#define IDC_NOCTURNE_FONT_FOOT          1265
+#define IDC_FONT_ROW_LABEL0            1270
+#define IDC_FONT_ROW_LABEL1            1271
+#define IDC_FONT_ROW_LABEL2            1272
+#define IDC_FONT_ROW_LABEL3            1273
+#define IDC_FONT_ROW_LABEL4            1274
+#define IDC_FONT_ROW_LABEL5            1275
+#define IDC_FONT_ROW_LABEL6            1276
+#define IDC_FONT_ROW_FAMILY0           1280
+#define IDC_FONT_ROW_FAMILY1           1281
+#define IDC_FONT_ROW_FAMILY2           1282
+#define IDC_FONT_ROW_FAMILY3           1283
+#define IDC_FONT_ROW_FAMILY4           1284
+#define IDC_FONT_ROW_FAMILY5           1285
+#define IDC_FONT_ROW_FAMILY6           1286
+#define IDC_FONT_ROW_SIZE0             1290
+#define IDC_FONT_ROW_SIZE1             1291
+#define IDC_FONT_ROW_SIZE2             1292
+#define IDC_FONT_ROW_SIZE3             1293
+#define IDC_FONT_ROW_SIZE4             1294
+#define IDC_FONT_ROW_SIZE5             1295
+#define IDC_FONT_ROW_SIZE6             1296
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -404,7 +427,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1264
+#define _APS_NEXT_CONTROL_VALUE         1300
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

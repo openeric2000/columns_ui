@@ -2,6 +2,7 @@
 #include "config.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "dark_mode_dialog.h"
 #include "now_playing_progress.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
@@ -189,6 +190,9 @@ private:
 };
 
 // ---- 字型 ----
+// 區塊表（方案 A，2026-11-05 使用者選的）：第 0 列「全部區塊」＋六個區塊各一列，每列「標籤、字族下拉、大小下拉」。
+// 選了就馬上套用（跟這一頁其他設定一樣沒有套用鈕）：前四個區塊（Columns UI 字型項目）即時生效；
+// 播放列與展開頁、專輯標頭寫進主題檔，要重開 fb2k 才生效，只能換字族（沒有大小下拉）。分區塊的邏輯在 theme_font.cpp
 class TabNocturneFont : public NocturneTab {
 public:
     TabNocturneFont() : NocturneTab({IDC_TITLE1}) {}
@@ -196,22 +200,124 @@ public:
     const char* get_name() override { return nocturne_text::font_tab_name; }
 
 private:
+    // 第 0 列是「全部區塊」，第 1～6 列是各區塊（區塊編號＝列號 − 1）
+    static constexpr int row_count = 7;
+    // 主題檔換過、還沒重開 fb2k：切到別的分頁再回來也要記得，所以放成靜態
+    inline static bool s_restart_pending = false;
+
+    static std::optional<size_t> region_of_row(int row)
+    {
+        return row == 0 ? std::nullopt : std::optional<size_t>(static_cast<size_t>(row - 1));
+    }
+
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FONT; }
 
     void on_init_dialog(HWND wnd) override
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::font_tab_title);
+        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_NOTE, nocturne_text::font_tab_note);
 
-        const std::wstring note = std::wstring(nocturne_text::font_tab_note) + L"\r\n\r\n"
-            + nocturne_text::theme_font_lyrics_note;
-        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_NOTE, note.c_str());
-        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_BUTTON, nocturne_text::font_tab_button);
+        const std::wstring foot
+            = std::wstring(nocturne_text::font_tab_foot) + L"\r\n\r\n" + nocturne_text::theme_font_lyrics_note;
+        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_FOOT, foot.c_str());
+        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_RESTART_NOTE, nocturne_text::font_restart_note);
+        SetDlgItemText(wnd, IDC_NOCTURNE_FONT_RESTART, nocturne_text::font_restart_button);
+
+        const wchar_t* labels[row_count]{nocturne_text::font_row_all, nocturne_text::font_row_playlist,
+            nocturne_text::font_row_tabs, nocturne_text::font_row_tree, nocturne_text::font_row_ui,
+            nocturne_text::font_row_bar, nocturne_text::font_row_header};
+
+        for (int row = 0; row < row_count; ++row) {
+            SetDlgItemText(wnd, IDC_FONT_ROW_LABEL0 + row, labels[row]);
+
+            const auto family_combo = GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row);
+            for (size_t index{}; index < theme_font::font_family_count(); ++index)
+                ComboBox_AddString(family_combo, theme_font::font_family_name(index).c_str());
+
+            const auto size_combo = GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row);
+            for (size_t index{}; index < theme_font::size_option_count(); ++index)
+                ComboBox_AddString(size_combo, theme_font::size_option_label(index));
+        }
+
+        refresh_rows(wnd);
+        update_restart_controls(wnd);
+    }
+
+    // 把每一列的下拉選到目前實際的字族與大小（「全部區塊」那一列看第一個項目；字型不在清單裡就留空）
+    void refresh_rows(HWND wnd) const
+    {
+        for (int row = 0; row < row_count; ++row) {
+            const auto region = region_of_row(row);
+
+            const auto family = theme_font::current_family_index(region);
+            ComboBox_SetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row), family ? static_cast<int>(*family) : -1);
+
+            // 主題檔區塊（播放列、專輯標頭）沒有大小，把大小下拉藏起來
+            const auto size_combo = GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row);
+            const auto has_size = !region || theme_font::font_region_has_size(*region);
+            ShowWindow(size_combo, has_size ? SW_SHOW : SW_HIDE);
+            if (has_size)
+                ComboBox_SetCurSel(size_combo, static_cast<int>(theme_font::current_size_index(region)));
+        }
+    }
+
+    void update_restart_controls(HWND wnd) const
+    {
+        const auto show = s_restart_pending ? SW_SHOW : SW_HIDE;
+        ShowWindow(GetDlgItem(wnd, IDC_NOCTURNE_FONT_RESTART_NOTE), show);
+        ShowWindow(GetDlgItem(wnd, IDC_NOCTURNE_FONT_RESTART), show);
     }
 
     void on_command(HWND wnd, WPARAM wp) override
     {
-        if (LOWORD(wp) == IDC_NOCTURNE_FONT_BUTTON && HIWORD(wp) == BN_CLICKED)
-            theme_font::open_theme_font_dialog(GetAncestor(wnd, GA_ROOT));
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_NOCTURNE_FONT_RESTART && code == BN_CLICKED) {
+            standard_commands::main_restart();
+            return;
+        }
+
+        if (code != CBN_SELCHANGE)
+            return;
+
+        int row = -1;
+        if (id >= IDC_FONT_ROW_FAMILY0 && id < IDC_FONT_ROW_FAMILY0 + row_count)
+            row = id - IDC_FONT_ROW_FAMILY0;
+        else if (id >= IDC_FONT_ROW_SIZE0 && id < IDC_FONT_ROW_SIZE0 + row_count)
+            row = id - IDC_FONT_ROW_SIZE0;
+
+        if (row < 0)
+            return;
+
+        // 這一列的字型目前不在清單裡（字族下拉是空的）而且只改了大小：沒有字族可以套，不處理
+        const auto family = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_FAMILY0 + row));
+        if (family == CB_ERR)
+            return;
+
+        auto size = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_FONT_ROW_SIZE0 + row));
+        if (size == CB_ERR)
+            size = static_cast<int>(theme_font::default_size_option());
+
+        const auto result = theme_font::apply_font(region_of_row(row), static_cast<size_t>(family), static_cast<size_t>(size));
+        const auto parent = GetAncestor(wnd, GA_ROOT);
+
+        if (result.error) {
+            dark::modal_info_box(parent, nocturne_text::theme_font_title, result.error->c_str(), uih::InfoBoxType::Error,
+                uih::InfoBoxModalType::OK);
+        } else if (!result.failures.empty()) {
+            auto message = fmt::format(nocturne_text::failures_message, result.failures);
+            message.erase(0, message.find_first_not_of('\n'));
+            dark::modal_info_box(parent, nocturne_text::theme_font_title, message.c_str(), uih::InfoBoxType::Warning,
+                uih::InfoBoxModalType::OK);
+        }
+
+        if (result.theme_file_changed)
+            s_restart_pending = true;
+
+        // 改「全部區塊」會動到每一列；改單一區塊也順便重讀，確保畫面跟實際一致
+        refresh_rows(wnd);
+        update_restart_controls(wnd);
     }
 };
 

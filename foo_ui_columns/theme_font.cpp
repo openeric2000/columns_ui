@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <span>
 
 #include "theme_font.h"
 
@@ -113,10 +114,9 @@ std::wstring get_current_family_name()
     return description.wss ? description.wss->family_name : std::wstring{};
 }
 
-// 依目前的字級找最接近的整體大小，對不上就用「標準」
-size_t get_current_size_option_index()
+// 依某個字型項目目前的字級找最接近的整體大小，對不上就用「標準」
+size_t get_current_size_option_index(const ThemeFontItem& item)
 {
-    const auto& item = theme_font_items[size_reference_item_index];
     const auto entry = g_font_manager_data.find_by_id(item.id);
     const auto scale = gsl::narrow_cast<float>(g_font_manager_data.resolve_font_description(entry).point_size_tenths)
         / (item.default_point_size * 10.0f);
@@ -130,11 +130,20 @@ size_t get_current_size_option_index()
     return gsl::narrow<size_t>(std::distance(size_options.begin(), iter));
 }
 
-void apply_columns_ui_fonts(const uih::direct_write::FontFamily& family, const uih::direct_write::Font& font, float scale)
+// 主題對話框用：照「Playlist view: Items」目前的字級判斷整體大小
+size_t get_current_size_option_index()
+{
+    return get_current_size_option_index(theme_font_items[size_reference_item_index]);
+}
+
+// 把字型套到 items 這幾個 Columns UI 字型項目（整體大小＝預設字級 × scale）
+void apply_columns_ui_fonts(std::span<const ThemeFontItem* const> items, const uih::direct_write::FontFamily& family,
+    const uih::direct_write::Font& font, float scale)
 {
     const auto context = uih::direct_write::Context::s_create();
 
-    for (const auto& item : theme_font_items) {
+    for (const auto* item_ptr : items) {
+        const auto& item = *item_ptr;
         const auto entry = g_font_manager_data.find_by_id(item.id);
 
         entry->font_mode = fonts::FontMode::Custom;
@@ -332,7 +341,9 @@ void open_theme_font_dialog(HWND parent_wnd)
             return;
         }
 
-        apply_columns_ui_fonts(family, *font, size_option.scale);
+        std::array<const ThemeFontItem*, theme_font_items.size()> all_items{};
+        std::ranges::transform(theme_font_items, all_items.begin(), [](const ThemeFontItem& item) { return &item; });
+        apply_columns_ui_fonts(all_items, family, *font, size_option.scale);
         file_family_name = mmh::to_utf8(get_english_family_name(family));
     } catch (const std::exception& ex) {
         const auto message = fmt::format(nocturne_text::error_change_failed, ex.what());
@@ -376,6 +387,249 @@ void open_theme_font_dialog(HWND parent_wnd)
             failures.empty() ? uih::InfoBoxType::Information : uih::InfoBoxType::Warning,
             uih::InfoBoxModalType::YesNo))
         standard_commands::main_restart();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 分區塊換字型（字型分頁用，見 theme_font.h）
+// ---------------------------------------------------------------------------------------------------------------
+namespace {
+
+constexpr size_t no_index = static_cast<size_t>(-1);
+
+// 一個區塊對應的 Columns UI 字型項目（theme_font_items 的索引，最多兩個）與主題檔（theme_files 的索引）
+struct Region {
+    std::array<size_t, 2> item_indexes;
+    size_t file_index;
+};
+
+constexpr std::array regions{
+    Region{{3, no_index}, no_index}, // 播放清單：Playlist view: Items
+    Region{{2, no_index}, no_index}, // 分頁標籤：Playlist tabs
+    Region{{4, no_index}, no_index}, // 資料夾樹：Album list
+    Region{{0, 1}, no_index}, // 其餘介面文字：Common (list items)、Common (labels)
+    Region{{no_index, no_index}, 0}, // 播放列與展開頁：main.xml 的 txt 樣式
+    Region{{no_index, no_index}, 1}, // 專輯標頭：index.html 的 --font
+};
+
+// 系統的字族清單。有意不釋放：裡面是 DirectWrite 的 COM 物件，在 DLL 卸載時才解構可能已經來不及
+const std::vector<uih::direct_write::FontFamily>& cached_families()
+{
+    static const auto* families = [] {
+        auto* result = new std::vector<uih::direct_write::FontFamily>();
+        try {
+            *result = uih::direct_write::Context::s_create()->get_font_families();
+        }
+        CATCH_LOG()
+        std::erase_if(*result, [](const auto& family) { return family.is_symbol_font; });
+        return result;
+    }();
+
+    return *families;
+}
+
+// 每個字族的英文名（寫進主題檔用的），跟 cached_families 同一個順序；取不到的是空字串
+const std::vector<std::string>& cached_english_names()
+{
+    static const auto* names = [] {
+        auto* result = new std::vector<std::string>();
+        for (const auto& family : cached_families()) {
+            try {
+                result->push_back(mmh::to_utf8(get_english_family_name(family)));
+            } catch (...) {
+                result->emplace_back();
+            }
+        }
+        return result;
+    }();
+
+    return *names;
+}
+
+std::filesystem::path get_profile_path()
+{
+    return mmh::to_utf16(::filesystem::g_get_native_path(core_api::get_profile_path()).c_str());
+}
+
+// 讀主題檔裡目前的字型名（跟 update_theme_file 用同一個樣式），並還原 escape_family_name 的跳脫
+std::optional<std::string> read_theme_file_family(const ThemeFile& file)
+{
+    std::ifstream stream(get_profile_path() / file.relative_path, std::ios::binary);
+    if (!stream)
+        return {};
+
+    const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+
+    std::smatch match;
+    if (!std::regex_search(content, match, std::regex(file.pattern)))
+        return {};
+
+    std::string name = match[1].str();
+    if (file.is_css) {
+        std::string result;
+        for (size_t i = 0; i < name.size(); ++i) {
+            if (name[i] == '\\' && i + 1 < name.size())
+                ++i;
+            result += name[i];
+        }
+        return result;
+    }
+
+    for (const auto& [from, to] : {std::pair<std::string_view, char>{"&quot;", '"'}, {"&lt;", '<'}, {"&amp;", '&'}}) {
+        for (size_t position = name.find(from); position != std::string::npos; position = name.find(from, position + 1))
+            name.replace(position, from.size(), 1, to);
+    }
+    return name;
+}
+
+} // namespace
+
+size_t font_family_count()
+{
+    return cached_families().size();
+}
+
+const std::wstring& font_family_name(size_t index)
+{
+    return cached_families().at(index).name;
+}
+
+size_t size_option_count()
+{
+    return size_options.size();
+}
+
+const wchar_t* size_option_label(size_t index)
+{
+    return size_options.at(index).label;
+}
+
+size_t default_size_option()
+{
+    return default_size_option_index;
+}
+
+size_t font_region_count()
+{
+    return regions.size();
+}
+
+bool font_region_has_size(size_t region)
+{
+    return regions.at(region).item_indexes[0] != no_index;
+}
+
+std::optional<size_t> current_family_index(std::optional<size_t> region)
+{
+    const auto& families = cached_families();
+
+    try {
+        // 主題檔區塊：讀檔裡的英文名，跟每個字族的英文名比對
+        if (region && regions.at(*region).item_indexes[0] == no_index) {
+            const auto current = read_theme_file_family(theme_files[regions[*region].file_index]);
+            if (!current)
+                return {};
+
+            const auto& english_names = cached_english_names();
+            for (size_t index{}; index < families.size(); ++index) {
+                if (english_names[index] == *current)
+                    return index;
+            }
+            return {};
+        }
+
+        // Columns UI 字型項目：「全部」看第一個項目（Common list items），跟主題對話框一樣
+        const auto item_index = region ? regions.at(*region).item_indexes[0] : size_t{0};
+        const auto description = g_font_manager_data.resolve_font_description(
+            g_font_manager_data.find_by_id(theme_font_items[item_index].id));
+        const std::wstring name = !description.typographic_family_name.empty()
+            ? description.typographic_family_name
+            : (description.wss ? description.wss->family_name : std::wstring{});
+
+        for (size_t index{}; index < families.size(); ++index) {
+            if (families[index].name == name)
+                return index;
+        }
+    }
+    CATCH_LOG()
+
+    return {};
+}
+
+size_t current_size_index(std::optional<size_t> region)
+{
+    if (region && regions.at(*region).item_indexes[0] == no_index)
+        return default_size_option_index;
+
+    const auto item_index = region ? regions[*region].item_indexes[0] : size_reference_item_index;
+    try {
+        return get_current_size_option_index(theme_font_items[item_index]);
+    }
+    CATCH_LOG()
+
+    return default_size_option_index;
+}
+
+FontApplyResult apply_font(std::optional<size_t> region, size_t family_index, size_t size_index)
+{
+    FontApplyResult result;
+    const auto& families = cached_families();
+
+    if (family_index >= families.size() || size_index >= size_options.size()) {
+        result.error = nocturne_text::error_no_usable_style;
+        return result;
+    }
+
+    const auto& family = families[family_index];
+
+    try {
+        const auto family_fonts = family.fonts();
+        const auto font = find_regular_font(family_fonts);
+
+        if (!font) {
+            result.error = nocturne_text::error_no_usable_style;
+            return result;
+        }
+
+        std::vector<const ThemeFontItem*> items;
+        std::vector<const ThemeFile*> files;
+
+        if (!region) {
+            for (const auto& item : theme_font_items)
+                items.push_back(&item);
+            for (const auto& file : theme_files)
+                files.push_back(&file);
+        } else {
+            const auto& definition = regions.at(*region);
+            for (const auto item_index : definition.item_indexes) {
+                if (item_index != no_index)
+                    items.push_back(&theme_font_items[item_index]);
+            }
+            if (definition.file_index != no_index)
+                files.push_back(&theme_files[definition.file_index]);
+        }
+
+        if (!items.empty())
+            apply_columns_ui_fonts(items, family, *font, size_options[size_index].scale);
+
+        if (!files.empty()) {
+            const auto english_name = mmh::to_utf8(get_english_family_name(family));
+            const auto profile_path = get_profile_path();
+
+            for (const auto* file : files) {
+                const auto path = profile_path / file->relative_path;
+                const auto update = update_theme_file(path, *file, english_name);
+
+                result.theme_file_changed = result.theme_file_changed || update.changed;
+
+                if (update.error)
+                    result.failures += fmt::format(nocturne_text::failure_item, mmh::to_utf8(path.native()), *update.error);
+            }
+        }
+    } catch (const std::exception& ex) {
+        result.error = fmt::format(nocturne_text::error_change_failed, ex.what());
+    }
+
+    return result;
 }
 
 } // namespace cui::theme_font

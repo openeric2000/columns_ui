@@ -57,9 +57,20 @@ inline constexpr wchar_t wheel_seek_note[]
 inline constexpr auto font_tab_name = "Fonts";
 inline constexpr wchar_t font_tab_title[] = L"Fonts";
 inline constexpr wchar_t font_tab_note[]
-    = L"Changes the font of the lists, tabs, folder tree, now playing bar, now playing view and album header at once, "
-      L"and sets the overall list size.";
-inline constexpr wchar_t font_tab_button[] = L"Theme Font…";
+    = L"Change the font of each part separately, or all parts at once with the first row. The lists, tabs, folder tree "
+      L"and other interface text also take a size. These apply at once.";
+inline constexpr wchar_t font_row_all[] = L"All parts";
+inline constexpr wchar_t font_row_playlist[] = L"Playlist";
+inline constexpr wchar_t font_row_tabs[] = L"Playlist tabs";
+inline constexpr wchar_t font_row_tree[] = L"Folder tree";
+inline constexpr wchar_t font_row_ui[] = L"Other interface text";
+inline constexpr wchar_t font_row_bar[] = L"Now playing bar and view";
+inline constexpr wchar_t font_row_header[] = L"Album header";
+inline constexpr wchar_t font_tab_foot[]
+    = L"The now playing bar, the now playing view and the album header only take a font (no size) and need a restart "
+      L"of foobar2000 to show it.";
+inline constexpr wchar_t font_restart_note[] = L"Changed fonts will show after foobar2000 restarts.";
+inline constexpr wchar_t font_restart_button[] = L"Restart now";
 inline constexpr wchar_t next_toast_note[]
     // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉
     = L"Hidden when the track is shorter than twice the countdown, when the order is Random or Repeat (track), or when "
@@ -173,8 +184,18 @@ inline constexpr wchar_t wheel_seek_note[] = L"滾一格跳 5 秒，按住 Shift
 inline constexpr auto font_tab_name = "字型";
 inline constexpr wchar_t font_tab_title[] = L"字型";
 inline constexpr wchar_t font_tab_note[]
-    = L"一次換掉清單、分頁、資料夾樹、播放列、展開頁與上方專輯標頭的字型，並可調整清單的整體大小。";
-inline constexpr wchar_t font_tab_button[] = L"主題字型…";
+    = L"每個區塊可以各自換字型，也可以用第一列一次全換。清單、分頁、資料夾樹與其餘介面文字還能調大小，改了馬上生效。";
+inline constexpr wchar_t font_row_all[] = L"全部區塊";
+inline constexpr wchar_t font_row_playlist[] = L"播放清單";
+inline constexpr wchar_t font_row_tabs[] = L"分頁標籤";
+inline constexpr wchar_t font_row_tree[] = L"資料夾樹";
+inline constexpr wchar_t font_row_ui[] = L"其餘介面文字";
+inline constexpr wchar_t font_row_bar[] = L"播放列與展開頁";
+inline constexpr wchar_t font_row_header[] = L"專輯標頭";
+inline constexpr wchar_t font_tab_foot[]
+    = L"播放列、展開頁與專輯標頭只能換字型、不能調大小，要重開 foobar2000 才會換。";
+inline constexpr wchar_t font_restart_note[] = L"換過字型的部分要重開 foobar2000 才會生效。";
+inline constexpr wchar_t font_restart_button[] = L"立即重開";
 inline constexpr wchar_t next_toast_note[]
     = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
       L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"
