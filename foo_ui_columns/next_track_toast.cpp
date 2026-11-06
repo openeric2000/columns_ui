@@ -573,12 +573,53 @@ private:
     std::unique_ptr<Gdiplus::Bitmap> m_static;
 };
 
+// 卡片可以點（2026-11-07）：點下去等於按「下一首」（已停止的「接下來」卡片則是開始播放）。
+// 實作在 Controller 之後（要讀它的狀態）；視窗訊息這邊只轉過去
+bool toast_hit_test(LPARAM screen_point);
+void toast_set_hover(HWND wnd, bool inside);
+void toast_activate();
+
 LRESULT CALLBACK toast_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    static bool pressed = false;
+
     switch (msg) {
     case WM_NCHITTEST:
-        // 不擋滑鼠，點到的是底下的展開頁
-        return HTTRANSPARENT;
+        // 還在淡入初期（幾乎看不見）、圓角外面都不接，點到的是底下的展開頁
+        return toast_hit_test(lp) ? HTCLIENT : HTTRANSPARENT;
+    case WM_SETCURSOR:
+        if (LOWORD(lp) == HTCLIENT) {
+            SetCursor(LoadCursor(nullptr, IDC_HAND));
+            return TRUE;
+        }
+        break;
+    case WM_MOUSEMOVE:
+        toast_set_hover(wnd, true);
+        return 0;
+    case WM_MOUSELEAVE:
+        toast_set_hover(wnd, false);
+        return 0;
+    case WM_LBUTTONDOWN:
+        pressed = true;
+        SetCapture(wnd);
+        return 0;
+    case WM_LBUTTONUP: {
+        const auto was_pressed = pressed;
+        pressed = false;
+        if (GetCapture() == wnd)
+            ReleaseCapture();
+
+        // 按下與放開都要在卡片上才算點擊（按下後拖出去再放開不算）
+        RECT client{};
+        GetClientRect(wnd, &client);
+        const POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        if (was_pressed && PtInRect(&client, point))
+            toast_activate();
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        pressed = false;
+        break;
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_ERASEBKGND:
@@ -625,6 +666,10 @@ public:
     void invalidate_next() { m_next_valid = false; }
     void on_new_track();
     void on_cover_loaded(uint64_t generation, std::shared_ptr<Gdiplus::Bitmap> cover);
+    // 卡片可以點（見 toast_wndproc）
+    bool hit_test(const POINT& screen_point) const;
+    void set_hover(HWND wnd, bool inside);
+    void activate();
 
 private:
     enum class Mode { countdown, stopped };
@@ -653,6 +698,9 @@ private:
     HWND m_timer_wnd{};
     HWND m_wnd{};
     HWND m_owner{};
+    // 滑鼠停在卡片上（畫面微亮）；圓角半徑（像素，點擊判斷用，每次畫時更新）
+    bool m_hover{};
+    int m_corner_radius{};
     UINT m_interval{};
     // 倒數期間是否已把系統計時精度調成 1 ms（要成對還原）
     bool m_high_resolution_timer{};
@@ -693,6 +741,82 @@ Controller& controller()
 {
     static Controller instance;
     return instance;
+}
+
+// 淡入到這個程度以上才接受點擊（剛冒出來幾乎看不見時，點到的是底下的東西）
+constexpr double clickable_alpha = 0.5;
+
+bool Controller::hit_test(const POINT& screen_point) const
+{
+    if (!m_wnd || m_alpha < clickable_alpha)
+        return false;
+
+    RECT rect{};
+    if (!GetWindowRect(m_wnd, &rect))
+        return false;
+
+    const auto x = static_cast<int>(screen_point.x - rect.left);
+    const auto y = static_cast<int>(screen_point.y - rect.top);
+    const auto width = static_cast<int>(rect.right - rect.left);
+    const auto height = static_cast<int>(rect.bottom - rect.top);
+
+    if (x < 0 || y < 0 || x >= width || y >= height)
+        return false;
+
+    // 四個圓角外面不算（圓角外的像素本來就是全透明）
+    const auto r = std::min({m_corner_radius, width / 2, height / 2});
+    const auto cx = std::max(r, std::min(x, width - 1 - r));
+    const auto cy = std::max(r, std::min(y, height - 1 - r));
+    const auto dx = x - cx;
+    const auto dy = y - cy;
+    return dx * dx + dy * dy <= r * r;
+}
+
+void Controller::set_hover(HWND wnd, bool inside)
+{
+    if (inside && !m_hover) {
+        // 要自己登記「滑鼠離開」，不然離開時不會收到通知
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
+        TrackMouseEvent(&track);
+    }
+    m_hover = inside;
+}
+
+// 點卡片：播放中＝跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）；已停止＝開始播放
+void Controller::activate()
+{
+    if (!m_content_valid)
+        return;
+
+    const auto stopped = m_content.stopped;
+
+    // 不在自己的視窗訊息裡直接換歌：換歌會馬上收掉這個視窗（on_new_track），改排到下一輪主執行緒訊息再做
+    fb2k::inMainThread([stopped] {
+        if (!g_alive)
+            return;
+
+        try {
+            play_control::get()->start(stopped ? play_control::track_command_play : play_control::track_command_next);
+        }
+        CATCH_LOG()
+    });
+}
+
+bool toast_hit_test(LPARAM screen_point)
+{
+    return g_alive && controller().hit_test(POINT{GET_X_LPARAM(screen_point), GET_Y_LPARAM(screen_point)});
+}
+
+void toast_set_hover(HWND wnd, bool inside)
+{
+    if (g_alive)
+        controller().set_hover(wnd, inside);
+}
+
+void toast_activate()
+{
+    if (g_alive)
+        controller().activate();
 }
 
 LRESULT CALLBACK timer_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -792,6 +916,7 @@ void Controller::destroy_window()
         m_wnd = nullptr;
     }
     m_owner = nullptr;
+    m_hover = false;
     m_surface.reset();
     m_content_valid = false;
     m_static_dirty = true;
@@ -929,7 +1054,8 @@ bool Controller::ensure_window(HWND owner, const Layout& layout)
     if (m_wnd)
         return true;
 
-    m_wnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, toast_class_name,
+    // 不再加 WS_EX_TRANSPARENT：卡片要能點（穿不穿透由 WM_NCHITTEST 決定）
+    m_wnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, toast_class_name,
         L"", WS_POPUP, 0, 0, layout.width, layout.height, owner, nullptr, core_api::get_my_instance(), nullptr);
 
     if (!m_wnd)
@@ -1067,6 +1193,18 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
     m_surface.copy_static_to_canvas();
     // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
     draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
+
+    m_corner_radius = layout.radius;
+    if (m_hover) {
+        // 滑鼠停在卡片上：整張卡片微亮一層，讓人知道可以點
+        Gdiplus::Graphics g(&m_surface.canvas());
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        Gdiplus::GraphicsPath card;
+        add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, static_cast<float>(layout.width) - 1, static_cast<float>(layout.height) - 1),
+            static_cast<float>(layout.radius));
+        Gdiplus::SolidBrush wash(rgba(24, 255, 255, 255));
+        g.FillPath(&wash, &card);
+    }
 
     // 淡入時從靠近邊緣那一側滑進來：放上面就從上往下，放下面就從下往上
     const auto corner = std::min(position.get(), position_count - 1);
