@@ -47,8 +47,8 @@ inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
 inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
 // 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
-inline constexpr wchar_t volume_icon_only[]
-    = L"Collapse the volume bar to an icon (slider pops up on hover; needs a main.xml without the volume bar)";
+inline constexpr wchar_t volume_title[] = L"Volume";
+inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an icon";
 inline constexpr wchar_t volume_muted[] = L"Muted";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
@@ -65,8 +65,9 @@ inline constexpr wchar_t next_toast_size_label[] = L"Size";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"Small (85%)", L"Standard", L"Large (120%)", L"Extra large (140%)"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
-// 設定頁的分頁：播放、下一首提示、字型
+// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
 inline constexpr auto playback_tab_name = "Playback";
+inline constexpr auto queue_tab_name = "Queue";
 inline constexpr wchar_t progress_title[] = L"Progress bar";
 inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
 inline constexpr wchar_t wheel_step_label[] = L"Seconds per notch (1-60)";
@@ -194,7 +195,8 @@ inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
 inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
 // 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
-inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示，滑過往上彈出滑桿（要搭配沒有音量條的 main.xml）";
+inline constexpr wchar_t volume_title[] = L"音量";
+inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示";
 inline constexpr wchar_t volume_muted[] = L"靜音";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
@@ -211,8 +213,9 @@ inline constexpr wchar_t next_toast_size_label[] = L"大小";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"小（85%）", L"標準", L"大（120%）", L"特大（140%）"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
 inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
-// 設定頁的分頁：播放、下一首提示、字型
+// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
 inline constexpr auto playback_tab_name = "播放";
+inline constexpr auto queue_tab_name = "播放佇列";
 inline constexpr wchar_t progress_title[] = L"進度條";
 inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
 inline constexpr wchar_t wheel_step_label[] = L"每滾一格跳幾秒（1～60）";
