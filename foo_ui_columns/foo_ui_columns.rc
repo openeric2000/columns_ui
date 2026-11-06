@@ -860,7 +860,7 @@ BEGIN
     CONTROL         "Click to switch",IDC_CHIP_CLICK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,160,313,10
     PUSHBUTTON      "Edit device names...",IDC_CHIP_ALIASES,7,178,120,14,WS_TABSTOP
     LTEXT           "Volume",IDC_TITLE3,7,208,313,17
-    CONTROL         "Collapse the volume bar to an icon",IDC_VOLUME_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,234,313,10
+    CONTROL         "Collapse the volume bar to an icon (recommended at 125%+ Windows scaling)",IDC_VOLUME_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,234,313,10
 END
 
 IDD_PREFS_NOCTURNE_QUEUE DIALOGEX 0, 0, 327, 272
