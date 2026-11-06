@@ -1042,7 +1042,17 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
 // 設定頁的開關：寫入（勾選、Reset page 都算）時重排圖示，輸出裝置顯示的位置也跟著變（右邊那串的寬度不同），
 // 並通知 ESLyric 重算 %cui_volume_icon%（main.xml 的音量條、dB、靜音鈕依它顯示或隱藏）。
 // 通知排到主執行緒再做（設定值載入時也可能呼叫這個回呼，那時服務還沒就緒）
-fbh::ConfigBool enabled(GUID{0x7c3d9e12, 0x5b84, 0x4f6a, {0x91, 0x2e, 0xa4, 0x08, 0x6d, 0xf3, 0x5c, 0x7b}}, false,
+//
+// 預設值：公開版（build_columns_ui.ps1 -Public 會定義 NOCTURNE_PUBLIC_BUILD）預設勾著，也就是音量條預設收成圖示；
+// 個人版維持不勾。公開版的更新版 ZIP 不含 Columns UI 設定檔，所以要靠編譯進去的預設值，讓舊版使用者更新後也進圖示模式；
+// 設定檔裡沒有這個條目就吃預設值，取消勾選會存成 false 而保留，設定頁的「Reset page」呼叫 reset() 也會回到這個預設值
+#ifdef NOCTURNE_PUBLIC_BUILD
+constexpr bool enabled_default = true;
+#else
+constexpr bool enabled_default = false;
+#endif
+
+fbh::ConfigBool enabled(GUID{0x7c3d9e12, 0x5b84, 0x4f6a, {0x91, 0x2e, 0xa4, 0x08, 0x6d, 0xf3, 0x5c, 0x7b}}, enabled_default,
     [](bool, bool, std::optional<uint32_t>) {
         refresh_layouts();
         output_chip::refresh_layouts();
