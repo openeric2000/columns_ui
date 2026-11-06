@@ -2,11 +2,6 @@
 
 #include <shlwapi.h>
 #include <timeapi.h>
-#include <cctype>
-#include <cstdarg>
-#include <cstdio>
-#include <cstring>
-#include <mutex>
 #include <thread>
 
 #include "next_track_toast.h"
@@ -61,286 +56,6 @@ constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
 
 std::atomic<bool> g_alive{false};
-
-// ===== 診斷（2026-11-02，暫時的，找到原因後整段拿掉）=====
-// 使用者回報：歌播到剩 10 秒、提示要出現時，播放列右下的播放時間停住一兩秒，提示晚了 3～4 秒才出現（剩 7、6 秒），很難重現。
-// 提示靠主執行緒的計時器驅動（閒置時每 150 ms 一次），晚這麼久代表主執行緒當時被卡住，但不知道是誰卡的。
-// 這裡只在「卡住」時寫檔，平常不寫：
-// - 計時器與上一次相隔太久，或 tick 裡某一段做太久：記下是哪一段、當時剩幾秒、下一首與目前這首放在哪種磁碟
-// - 提示第一次出現時記下當時剩幾秒（正常是 10，晚了就看得出來）
-// - 另開一條監看執行緒：主執行緒超過 hang_sample_ms 沒進計時器，就暫停它一瞬間、複製堆疊、馬上讓它繼續，
-//   事後把堆疊裡落在程式碼區的位址換成「模組名稱＋位移」，看是哪個元件卡住（掃堆疊猜的，不是精確的呼叫堆疊）
-// 檔案：<profile>\nocturne_toast_diag.log，超過 512 KB 就從頭寫
-namespace diag {
-
-constexpr int64_t gap_log_ms = 400;
-constexpr double section_log_ms = 30;
-constexpr int64_t hang_sample_ms = 700;
-constexpr int64_t hang_resample_ms = 1500;
-constexpr int hang_samples_per_stall = 3;
-constexpr int hang_samples_per_session = 30;
-constexpr size_t stack_copy_bytes = 64 * 1024;
-constexpr int max_stack_lines = 40;
-constexpr LONGLONG log_max_bytes = 512 * 1024;
-
-// 主執行緒最近一次進 tick 的時間（steady 時鐘，毫秒），監看執行緒用它判斷主執行緒是不是卡住
-std::atomic<int64_t> last_tick_ms{0};
-// 寫進紀錄的背景資訊：最近一次算出的剩餘毫秒（-1＝不在倒數）、下一首與目前這首放在哪
-// （磁碟代號；N＝網路路徑；?＝其他；-＝不知道）
-std::atomic<int> remaining_ms{-1};
-std::atomic<char> next_where{'-'};
-std::atomic<char> current_where{'-'};
-std::mutex log_mutex;
-HANDLE ui_thread{};
-HANDLE stop_event{};
-std::thread watchdog;
-
-int64_t now_ms()
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count();
-}
-
-char where_of(const metadb_handle_ptr& handle)
-{
-    if (handle.is_empty())
-        return '-';
-
-    const char* path = handle->get_path();
-    if (std::strncmp(path, "file://\\\\", 9) == 0)
-        return 'N';
-    if (std::strncmp(path, "file://", 7) == 0 && path[7] && path[8] == ':')
-        return static_cast<char>(std::toupper(static_cast<unsigned char>(path[7])));
-    return '?';
-}
-
-std::string state_text()
-{
-    char buffer[96];
-    std::snprintf(buffer, sizeof(buffer), "remaining=%d ms next=%c current=%c", remaining_ms.load(), next_where.load(),
-        current_where.load());
-    return buffer;
-}
-
-std::wstring log_path()
-{
-    static const auto path = [] {
-        const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
-        return std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
-            + L"\\nocturne_toast_diag.log";
-    }();
-    return path;
-}
-
-void write_line(const std::string& text)
-{
-    SYSTEMTIME time{};
-    GetLocalTime(&time);
-    char head[32];
-    std::snprintf(head, sizeof(head), "%02d:%02d:%02d.%03d  ", time.wHour, time.wMinute, time.wSecond,
-        time.wMilliseconds);
-
-    std::string line = head;
-    for (const auto character : text) {
-        if (character == '\n')
-            line += '\r';
-        line += character;
-    }
-    line += "\r\n";
-
-    std::lock_guard lock(log_mutex);
-    const auto path = log_path();
-    wil::unique_hfile file(CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
-    LARGE_INTEGER size{};
-    if (file && GetFileSizeEx(file.get(), &size) && size.QuadPart > log_max_bytes) {
-        file.reset();
-        file.reset(CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL, nullptr));
-    }
-    if (!file)
-        return;
-
-    DWORD written{};
-    WriteFile(file.get(), line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
-}
-
-void note(const char* format, ...)
-{
-    char buffer[512];
-    va_list arguments;
-    va_start(arguments, format);
-    std::vsnprintf(buffer, sizeof(buffer), format, arguments);
-    va_end(arguments);
-    write_line(buffer);
-}
-
-// 計時一段程式，超過 section_log_ms 才寫紀錄
-class Section {
-public:
-    explicit Section(const char* name) : m_name(name), m_start(Clock::now()) {}
-    Section(const Section&) = delete;
-    Section& operator=(const Section&) = delete;
-
-    ~Section()
-    {
-        const auto ms = std::chrono::duration<double, std::milli>(Clock::now() - m_start).count();
-        if (ms >= section_log_ms)
-            note("SLOW %s %.0f ms  %s", m_name, ms, state_text().c_str());
-    }
-
-private:
-    const char* m_name;
-    Clock::time_point m_start;
-};
-
-// 每次進 tick 呼叫：記下時間給監看執行緒，與上一次相隔太久就寫紀錄
-void on_tick()
-{
-    const auto now = now_ms();
-    const auto previous = last_tick_ms.exchange(now);
-    if (previous && now - previous > gap_log_ms)
-        note("TICK GAP %lld ms  %s", static_cast<long long>(now - previous), state_text().c_str());
-}
-
-// 位址若落在某個模組的程式碼區，傳回「模組名稱+位移」，否則傳回空字串
-std::string module_offset(uintptr_t address)
-{
-    if (address < 0x10000 || address > 0x00007FFFFFFEFFFFull)
-        return {};
-
-    MEMORY_BASIC_INFORMATION info{};
-    if (!VirtualQuery(reinterpret_cast<const void*>(address), &info, sizeof(info)) || info.State != MEM_COMMIT
-        || info.Type != MEM_IMAGE)
-        return {};
-
-    constexpr DWORD executable = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-    if (!(info.Protect & executable))
-        return {};
-
-    wchar_t path[MAX_PATH]{};
-    if (!GetModuleFileNameW(static_cast<HMODULE>(info.AllocationBase), path, MAX_PATH))
-        return {};
-
-    const pfc::stringcvt::string_utf8_from_wide name(PathFindFileNameW(path));
-    char buffer[MAX_PATH * 2];
-    std::snprintf(buffer, sizeof(buffer), "%s+0x%llx", name.get_ptr(),
-        static_cast<unsigned long long>(address - reinterpret_cast<uintptr_t>(info.AllocationBase)));
-    return buffer;
-}
-
-// 暫停主執行緒一瞬間，只做不會用到鎖的事（讀暫存器、複製堆疊），馬上讓它繼續；傳回複製到的位元組數
-size_t capture_stack(CONTEXT& thread_context, BYTE* buffer, size_t size)
-{
-    if (SuspendThread(ui_thread) == static_cast<DWORD>(-1))
-        return 0;
-
-    thread_context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-    SIZE_T copied = 0;
-    MEMORY_BASIC_INFORMATION info{};
-    // 一次讀太多超過堆疊邊界會整段失敗（獨立測試：64 KB 讀到 0 位元組），所以只讀到這段記憶體區域的結尾
-    if (GetThreadContext(ui_thread, &thread_context)
-        && VirtualQuery(reinterpret_cast<const void*>(thread_context.Rsp), &info, sizeof(info))) {
-        const auto region_end = reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
-        const auto available = region_end > thread_context.Rsp ? region_end - thread_context.Rsp : 0;
-        ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(thread_context.Rsp), buffer,
-            std::min<size_t>(size, available), &copied);
-    }
-
-    ResumeThread(ui_thread);
-    return copied;
-}
-
-void report_stack(const CONTEXT& thread_context, const BYTE* stack, size_t size, int64_t stalled_ms, int sample)
-{
-    std::string text = "HANG stalled=" + std::to_string(stalled_ms) + " ms sample=" + std::to_string(sample) + "  "
-        + state_text() + "\n  rip=" + module_offset(thread_context.Rip);
-
-    std::string previous;
-    int lines = 0;
-    for (size_t offset = 0; offset + sizeof(uintptr_t) <= size && lines < max_stack_lines; offset += sizeof(uintptr_t)) {
-        uintptr_t value{};
-        std::memcpy(&value, stack + offset, sizeof(value));
-        auto where = module_offset(value);
-        if (where.empty() || where == previous)
-            continue;
-
-        char prefix[24];
-        std::snprintf(prefix, sizeof(prefix), "\n  +0x%zx ", offset);
-        text += prefix + where;
-        previous = std::move(where);
-        ++lines;
-    }
-
-    write_line(text);
-}
-
-void watchdog_main()
-{
-    std::vector<BYTE> stack(stack_copy_bytes);
-    int64_t tracked_tick = 0;
-    int64_t next_sample_at = hang_sample_ms;
-    int samples_in_stall = 0;
-    int samples = 0;
-
-    while (WaitForSingleObject(stop_event, 100) == WAIT_TIMEOUT) {
-        const auto last = last_tick_ms.load();
-        if (last == 0)
-            continue;
-
-        // 主執行緒又進過 tick＝上一次卡住結束了，重新計
-        if (last != tracked_tick) {
-            tracked_tick = last;
-            next_sample_at = hang_sample_ms;
-            samples_in_stall = 0;
-        }
-
-        const auto stalled = now_ms() - last;
-        if (stalled < next_sample_at || samples_in_stall >= hang_samples_per_stall || samples >= hang_samples_per_session)
-            continue;
-
-        CONTEXT thread_context{};
-        const auto copied = capture_stack(thread_context, stack.data(), stack.size());
-        ++samples;
-        ++samples_in_stall;
-        next_sample_at += hang_resample_ms;
-
-        if (copied > 0)
-            report_stack(thread_context, stack.data(), copied, stalled, samples);
-    }
-}
-
-// 在主執行緒呼叫
-void start()
-{
-    if (watchdog.joinable())
-        return;
-
-    ui_thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, GetCurrentThreadId());
-    stop_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!ui_thread || !stop_event) {
-        if (ui_thread)
-            CloseHandle(std::exchange(ui_thread, nullptr));
-        if (stop_event)
-            CloseHandle(std::exchange(stop_event, nullptr));
-        return;
-    }
-
-    note("DIAG START");
-    watchdog = std::thread(watchdog_main);
-}
-
-void stop()
-{
-    if (!watchdog.joinable())
-        return;
-
-    SetEvent(stop_event);
-    watchdog.join();
-    CloseHandle(std::exchange(ui_thread, nullptr));
-    CloseHandle(std::exchange(stop_event, nullptr));
-}
-
-} // namespace diag
 
 // 版面（DIP，乘上主視窗的縮放比例才是實際像素）
 // 2026-11-02 219（125%）版：實際約 620×120，預設放右下；離左右邊 60（右邊對齊播放列「0.00 dB」文字的右緣）、離上緣 115、離下緣 50；169 之後再調
@@ -484,7 +199,6 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
 
 std::wstring format_track_text(const metadb_handle_ptr& handle, const char* script)
 {
-    diag::Section section("format_title");
     service_ptr_t<titleformat_object> object;
     titleformat_compiler::get()->compile_safe(object, script);
 
@@ -1018,13 +732,10 @@ void Controller::start()
     m_timer_wnd = CreateWindowEx(0, timer_class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
         core_api::get_my_instance(), nullptr);
     set_interval(interval_idle_ms);
-    diag::start();
 }
 
 void Controller::stop()
 {
-    diag::stop();
-
     if (m_timer_wnd) {
         KillTimer(m_timer_wnd, timer_id);
         DestroyWindow(m_timer_wnd);
@@ -1099,11 +810,7 @@ void Controller::update_next(const metadb_handle_ptr& now_playing)
     if (m_next_valid && m_next_for == now_playing && now - m_next_time < next_refresh_interval)
         return;
 
-    {
-        diag::Section section("resolve_next");
-        m_next = resolve_next(now_playing);
-    }
-    diag::next_where = m_next ? diag::where_of(m_next->handle) : '-';
+    m_next = resolve_next(now_playing);
     m_next_for = now_playing;
     m_next_time = now;
     m_next_valid = true;
@@ -1142,7 +849,6 @@ double Controller::smooth_position(double source, bool paused)
 
 std::optional<Controller::Want> Controller::evaluate()
 {
-    diag::remaining_ms = -1;
     m_stage_unavailable = false;
 
     if (!enabled.get())
@@ -1152,12 +858,9 @@ std::optional<Controller::Want> Controller::evaluate()
         return {};
 
     Want want;
-    {
-        diag::Section section("stage");
-        if (!FlatSplitterPanel::s_get_now_playing_stage(want.stage, want.owner)) {
-            m_stage_unavailable = true;
-            return {};
-        }
+    if (!FlatSplitterPanel::s_get_now_playing_stage(want.stage, want.owner)) {
+        m_stage_unavailable = true;
+        return {};
     }
 
     if (IsIconic(want.owner) || !IsWindowVisible(want.owner))
@@ -1168,12 +871,10 @@ std::optional<Controller::Want> Controller::evaluate()
     metadb_handle_ptr now_playing;
 
     if (playback->is_playing()) {
-        std::optional<diag::Section> playback_section(std::in_place, "playback");
         if (!playback->get_now_playing(now_playing)) {
             m_position_valid = false;
             return {};
         }
-        diag::current_where = diag::where_of(now_playing);
 
         const auto length = playback->playback_get_length();
         // 長度未知（串流）或太短（不到 2N 秒）不顯示，免得一開始就出現
@@ -1190,15 +891,12 @@ std::optional<Controller::Want> Controller::evaluate()
                 source_position = *paused_position;
         }
 
-        playback_section.reset();
-
         // 再把暫停→繼續瞬間位置往前跳的小誤差吸收掉，圈與數字才不會在狂按暫停時一直跳
         const auto current_position = smooth_position(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
         // 淡出期間仍回傳內容（fading），倒數圈與數字照常往 0 走；原本這段傳回空，畫面凍結在「剩 5% 的紅弧＋1」就淡掉
         const auto remaining = length - current_position;
-        diag::remaining_ms = static_cast<int>(remaining * 1000);
         if (remaining > count)
             return {};
 
@@ -1340,7 +1038,6 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
     }
 
     m_static_dirty = false;
-    diag::Section section("draw_static");
     draw_static_layer(m_surface.static_layer(), layout, m_content, m_cover.get());
 }
 
@@ -1374,8 +1071,6 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
 
 void Controller::tick()
 {
-    diag::on_tick();
-
     const auto now = Clock::now();
     const auto elapsed = std::min(std::chrono::duration<double>(now - m_last_tick).count(), max_step_seconds);
     m_last_tick = now;
@@ -1422,17 +1117,11 @@ void Controller::tick()
     // 不然淡入的第一格就已經有兩成多亮度（錄影量到 21～27%）
     const auto creating = !m_wnd;
 
-    {
-        diag::Section section("ensure_window");
-        if (!ensure_window(shown.owner, layout) || !m_surface.ensure(layout.width, layout.height))
-            return;
-    }
+    if (!ensure_window(shown.owner, layout) || !m_surface.ensure(layout.width, layout.height))
+        return;
 
     if (active) {
-        {
-            diag::Section section("rebuild_content");
-            rebuild_content(shown, layout);
-        }
+        rebuild_content(shown, layout);
         if (!creating)
             m_alpha = std::min(1.0, m_alpha + elapsed / fade_in_seconds);
     } else {
@@ -1448,22 +1137,11 @@ void Controller::tick()
     if (!m_content_valid)
         return;
 
-    {
-        diag::Section section("render");
-        render_and_present(shown, layout, scale);
-    }
+    render_and_present(shown, layout, scale);
     set_interval(interval_active_ms);
 
-    if (creating) {
+    if (creating)
         m_last_tick = Clock::now();
-
-        // 倒數提示第一次出現：正常剩餘約等於設定的秒數，晚了就看得出來
-        if (want && want->mode == Mode::countdown) {
-            const auto count = static_cast<int>(std::clamp(seconds.get(), min_seconds, max_seconds));
-            diag::note("TOAST SHOWN remaining=%.2f s (countdown %d s, late by %.2f s)  %s", want->remaining, count,
-                count - want->remaining, diag::state_text().c_str());
-        }
-    }
 }
 
 class NextTrackToastInitQuit : public initquit {
