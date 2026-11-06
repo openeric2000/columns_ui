@@ -128,6 +128,7 @@
 #define IDD_PREFS_NOCTURNE_FONT         246
 #define IDD_PREFS_NOCTURNE_STARTUP      247
 #define IDD_PREFS_NOCTURNE_QUEUE        248
+#define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -432,6 +433,8 @@
 #define IDC_VOLUME_ICON                1323
 #define IDC_STARTUP_HOLD               1330
 #define IDC_STARTUP_HOLD_NOTE          1331
+#define IDC_ABOUT_NAME                 1340
+#define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1
 
 // Next default values for new objects

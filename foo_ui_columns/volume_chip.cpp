@@ -168,6 +168,90 @@ bool is_muted(float db)
     return db <= -99.9f;
 }
 
+// ---- 自動判斷要不要進圖示模式（2026-11-06）----
+// 設定頁的勾選項只能「強制開」；預設看版面檔 main.xml：還有 ESLyric 的音量條（<volume>）就維持原樣，沒有就自動進入圖示模式。
+// 這樣公開版的更新版只要換 DLL 與 main.xml，使用者不用去勾選項，也不會出現「換了沒音量條的 main.xml、設定卻沒開」而整個沒有音量控制。
+// 版面檔位置固定在 profile\eslyric-data\layout\fb2k-modern\main.xml（所有環境都是這個名稱）；找不到或讀不到就當作有音量條（維持原樣）。
+// 註解（<!-- -->）裡提到 <volume> 不算。檔案最後修改時間變了才重讀，而且最多每秒檢查一次
+std::wstring layout_file_path()
+{
+    const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+    return std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
+        + L"\\eslyric-data\\layout\\fb2k-modern\\main.xml";
+}
+
+bool xml_has_volume_element(std::string text)
+{
+    for (auto open = text.find("<!--"); open != std::string::npos; open = text.find("<!--")) {
+        const auto close = text.find("-->", open + 4);
+        text.erase(open, close == std::string::npos ? std::string::npos : close + 3 - open);
+    }
+
+    for (auto pos = text.find("<volume"); pos != std::string::npos; pos = text.find("<volume", pos + 1)) {
+        const auto next = pos + 7;
+        if (next >= text.size())
+            return true;
+        const auto c = text[next];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '/' || c == '>')
+            return true;
+    }
+    return false;
+}
+
+struct LayoutProbe {
+    bool valid{};
+    bool no_volume_bar{};
+    FILETIME stamp{};
+    ULONGLONG checked_at{};
+};
+LayoutProbe g_layout_probe;
+
+bool layout_has_no_volume_bar()
+{
+    const auto now = GetTickCount64();
+    if (g_layout_probe.valid && now - g_layout_probe.checked_at < 1000)
+        return g_layout_probe.no_volume_bar;
+    g_layout_probe.checked_at = now;
+
+    try {
+        const auto path = layout_file_path();
+        WIN32_FILE_ATTRIBUTE_DATA info{};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info)) {
+            g_layout_probe.valid = true;
+            g_layout_probe.no_volume_bar = false;
+            return false;
+        }
+        if (g_layout_probe.valid && CompareFileTime(&info.ftLastWriteTime, &g_layout_probe.stamp) == 0)
+            return g_layout_probe.no_volume_bar;
+
+        std::string text;
+        FILE* file{};
+        if (_wfopen_s(&file, path.c_str(), L"rb") == 0 && file) {
+            char buffer[8192];
+            size_t read{};
+            while ((read = fread(buffer, 1, sizeof(buffer), file)) > 0 && text.size() < (size_t{4} << 20))
+                text.append(buffer, read);
+            fclose(file);
+            g_layout_probe.no_volume_bar = !xml_has_volume_element(std::move(text));
+        } else {
+            g_layout_probe.no_volume_bar = false;
+        }
+        g_layout_probe.stamp = info.ftLastWriteTime;
+        g_layout_probe.valid = true;
+    }
+    catch (...) {
+        g_layout_probe.valid = true;
+        g_layout_probe.no_volume_bar = false;
+    }
+    return g_layout_probe.no_volume_bar;
+}
+
+// 圖示模式：設定頁強制開，或版面檔已經沒有音量條
+bool icon_mode()
+{
+    return enabled.get() || layout_has_no_volume_bar();
+}
+
 // 滾輪調音量：高解析滾輪一格不到 120，累積到一格才動
 void nudge_volume(int wheel_delta)
 {
@@ -642,7 +726,7 @@ public:
 
     void show_popup()
     {
-        if (!enabled.get() || !m_wnd || !IsWindowVisible(m_wnd))
+        if (!icon_mode() || !m_wnd || !IsWindowVisible(m_wnd))
             return;
 
         RECT rect{};
@@ -665,8 +749,8 @@ public:
 private:
     RECT compute_layout()
     {
-        // 設定頁沒開「音量條收成圖示」就整個藏起來（各環境照舊用 main.xml 的音量條）
-        if (!enabled.get() || m_bar_rect.right <= m_bar_rect.left)
+        // 不是圖示模式（設定頁沒強制開、而且 main.xml 還有音量條）就整個藏起來，各環境照舊用 main.xml 的音量條
+        if (!icon_mode() || m_bar_rect.right <= m_bar_rect.left)
             return {};
 
         // GDI+ 的字型表還在背景暖機：這時在主執行緒建字型，會讓整個介面晚出現（跟輸出裝置顯示同一個問題），先藏起來，
@@ -886,7 +970,7 @@ play_callback_static_factory_t<VolumePlayCallback> volume_play_callback;
 
 int time_col_right_dip()
 {
-    return enabled.get() ? cluster_icon_only : cluster_with_volume_bar;
+    return icon_mode() ? cluster_icon_only : cluster_with_volume_bar;
 }
 
 void refresh_layouts()

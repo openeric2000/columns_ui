@@ -15,11 +15,13 @@
 
 namespace cui::volume_chip {
 
-// 設定頁：音量條收成圖示（預設關）。一寫入（勾選、Reset page 都算）就重排圖示與輸出裝置顯示
+// 設定頁：音量條收成圖示（「強制開」，預設關）。一寫入（勾選、Reset page 都算）就重排圖示與輸出裝置顯示。
+// 不勾也會自動進入圖示模式：只要版面檔（profile\eslyric-data\layout\fb2k-modern\main.xml）已經沒有 ESLyric 的音量條（<volume>），
+// 所以公開版的更新版只換 DLL 與 main.xml 就能用，不必使用者去勾（2026-11-06 使用者問「更新版沒辦法做嗎」）
 extern fbh::ConfigBool enabled;
 
 // 播放列右邊那串（停止、靜音、音量條、dB）的寬度＝時間欄右緣離播放列右緣幾 DIP；輸出裝置顯示照它排位置。
-// 沒開：433（main.xml 原本的音量條 140＋dB 148 都在）；開了：144（只剩停止、靜音與右留白）
+// 不是圖示模式：433（main.xml 原本的音量條 140＋dB 148 都在）；圖示模式：144（只剩停止、靜音與右留白）
 int time_col_right_dip();
 
 // 重排所有圖示視窗（設定改了、GDI+ 字型暖機做完時用）

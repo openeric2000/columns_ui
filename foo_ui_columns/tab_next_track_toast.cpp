@@ -12,12 +12,13 @@
 #include "theme_font.h"
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
-// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
+// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），六個分頁：
 // - 播放：進度條滾輪、輸出裝置顯示、音量條收成圖示
 // - 播放佇列：播放別首歌時保留播放佇列（2026-11-02 起放在「下一首提示」分頁底下，11/05 併進「播放」，11/06 獨立成分頁）
 // - 下一首提示：展開頁角落的提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
 // - 啟動：主視窗等網頁面板載好再顯示（開機優化 B，2026-11-06）
+// - 關於：只放產品名稱與版本號（2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
 // 設定視窗下方的「Reset page」會把播放、下一首提示、啟動三個分頁還原成預設（字型分頁不動）
 // 檔名沿用 tab_next_track_toast.cpp，免得動到專案檔
@@ -500,17 +501,40 @@ private:
     }
 };
 
+// ---- 關於（2026-11-06，使用者要求加回來但「不要寫太厚、主要就寫版本號」）----
+// 只放產品名稱與版本號；版本號在 nocturne_text.h 的 nocturne_version。11/05 做過的「關於」分頁有版本與必要元件檢查，使用者說不要，這次刻意只留版本號
+class TabNocturneAbout : public NocturneTab {
+public:
+    TabNocturneAbout() : NocturneTab({IDC_TITLE1}) {}
+
+    const char* get_name() override { return nocturne_text::about_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_ABOUT; }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::about_tab_title);
+        SetDlgItemText(wnd, IDC_ABOUT_NAME, nocturne_text::about_product_name);
+        const std::wstring version = std::wstring(nocturne_text::about_version_prefix) + nocturne_text::nocturne_version;
+        SetDlgItemText(wnd, IDC_ABOUT_VERSION, version.c_str());
+    }
+
+    void on_command(HWND, WPARAM) override {}
+};
+
 TabNocturnePlayback g_tab_nocturne_playback;
 TabNocturneQueue g_tab_nocturne_queue;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
 TabNocturneStartup g_tab_nocturne_startup;
+TabNocturneAbout g_tab_nocturne_about;
 
-// 分頁順序：播放、播放佇列、下一首提示、字型、啟動。
+// 分頁順序：播放、播放佇列、下一首提示、字型、啟動、關於。
 // 存的「最後開啟的分頁」是這個順序的編號，所以在中間插入分頁（2026-11-06 播放佇列插在播放後面）之後，
 // 已經用過的人更新後第一次開設定頁可能停在不同的分頁，無傷大雅；之後新增分頁盡量加在最後面
 PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_nocturne_queue, &g_tab_next_track_toast,
-    &g_tab_nocturne_font, &g_tab_nocturne_startup};
+    &g_tab_nocturne_font, &g_tab_nocturne_startup, &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(

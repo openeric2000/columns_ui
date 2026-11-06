@@ -7,6 +7,10 @@
 
 namespace cui::nocturne_text {
 
+// 產品名稱與版本號（設定頁「關於」分頁顯示；中英文版共用，發布新版時只改這一行版本號）
+inline constexpr wchar_t about_product_name[] = L"Nocturne for foobar2000";
+inline constexpr wchar_t nocturne_version[] = L"1.30";
+
 #ifdef NOCTURNE_LANG_EN
 
 // 選單（View/Layout）
@@ -75,6 +79,10 @@ inline constexpr wchar_t wheel_shift_step_label[] = L"Seconds per notch while ho
 inline constexpr auto font_tab_name = "Fonts";
 inline constexpr wchar_t font_tab_title[] = L"Fonts";
 // 「啟動」分頁（開機優化 B）
+// 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
+inline constexpr auto about_tab_name = "About";
+inline constexpr wchar_t about_tab_title[] = L"About";
+inline constexpr wchar_t about_version_prefix[] = L"Version ";
 inline constexpr auto startup_tab_name = "Startup";
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
@@ -223,6 +231,10 @@ inline constexpr wchar_t wheel_shift_step_label[] = L"按住 Shift 每滾一格�
 inline constexpr auto font_tab_name = "字型";
 inline constexpr wchar_t font_tab_title[] = L"字型";
 // 「啟動」分頁（開機優化 B）
+// 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
+inline constexpr auto about_tab_name = "關於";
+inline constexpr wchar_t about_tab_title[] = L"關於";
+inline constexpr wchar_t about_version_prefix[] = L"版本 ";
 inline constexpr auto startup_tab_name = "啟動";
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
