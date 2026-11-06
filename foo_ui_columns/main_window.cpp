@@ -350,6 +350,13 @@ void cui::MainWindow::set_window_placement(WINDOWPLACEMENT placement, bool is_in
         begin_startup_hold();
 
     SetWindowPlacement(m_wnd, &placement);
+
+    // 太晚才建立視窗的情況（begin_startup_hold 沒有進入等待）：視窗已經顯示在隱形狀態，現在才接淡入
+    if (m_startup_late_fade_pending) {
+        m_startup_late_fade_pending = false;
+        begin_startup_fade();
+    }
+
     resize_child_windows();
 
     if (active_window_to_set)
@@ -380,10 +387,20 @@ bool cui::MainWindow::begin_startup_hold()
     const auto age_ms = process_age_ms();
     const auto wait_ms = age_ms < startup_hold_timeout_ms ? startup_hold_timeout_ms - age_ms : 0;
 
-    if (wait_ms < startup_hold_min_ms)
-        return false;
-
     const BOOL cloak = TRUE;
+
+    if (wait_ms < startup_hold_min_ms) {
+        // 太晚了（HDD 冷啟動時視窗約 10 秒才建立）：不等網頁，等也只是讓空殼更晚出現。
+        // 但還是淡入：先隱形，視窗顯示出來之後由呼叫端馬上接淡入，空殼柔和地出現，內容之後才陸續補進來。
+        // 不進入等待狀態（沒有逾時監看），所以網頁回報「好了」時 end_startup_hold 會直接略過，不會再淡入第二次
+        if (SUCCEEDED(DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak)))) {
+            m_startup_late_fade_pending = true;
+            console::print(fmt::format("Columns UI – main window created late (process age {} ms): fading in without waiting.",
+                age_ms)
+                               .c_str());
+        }
+        return false;
+    }
 
     // 這個系統不給隱形就算了，照舊顯示（不能讓視窗永遠看不到）
     if (FAILED(DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak))))
