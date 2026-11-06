@@ -3,6 +3,7 @@
 #include "menu_items.h"
 #include "now_playing_progress.h"
 #include "output_chip.h"
+#include "volume_chip.h"
 
 namespace cui::panels::splitter {
 
@@ -374,8 +375,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_now_playing_progress_wnd = now_playing_progress::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_output_chip_wnd)
         m_output_chip_wnd = output_chip::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_volume_chip_wnd)
+        m_volume_chip_wnd = volume_chip::create(get_wnd());
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 2);
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 3);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -407,6 +410,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = now_playing_progress::defer_layout(dwp, m_now_playing_progress_wnd, now_playing_bar_rect);
         if (m_output_chip_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = output_chip::defer_layout(dwp, m_output_chip_wnd, now_playing_bar_rect);
+        if (m_volume_chip_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = volume_chip::defer_layout(dwp, m_volume_chip_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -434,11 +439,17 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_output_chip_wnd = output_chip::create(get_wnd());
         if (m_output_chip_wnd)
             output_chip::layout(m_output_chip_wnd, now_playing_bar_rect);
+        if (!m_volume_chip_wnd)
+            m_volume_chip_wnd = volume_chip::create(get_wnd());
+        if (m_volume_chip_wnd)
+            volume_chip::layout(m_volume_chip_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
         if (m_output_chip_wnd)
             DestroyWindow(std::exchange(m_output_chip_wnd, nullptr));
+        if (m_volume_chip_wnd)
+            DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
     }
 
     if (now_playing_side && now_playing_side->m_wnd) {

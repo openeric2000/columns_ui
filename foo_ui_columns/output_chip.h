@@ -32,4 +32,7 @@ void layout(HWND wnd, const RECT& bar_rect);
 // 同 layout，但加進呼叫端的 DeferWindowPos 批次（要放在把播放列容器放到最上層的那一筆「之後」）
 HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);
 
+// 排版常數變了（volume_chip 的「音量條收成圖示」開關改了右邊那串的寬度）：重排所有裝置顯示
+void refresh_layouts();
+
 } // namespace cui::output_chip

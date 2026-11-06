@@ -7,6 +7,7 @@
 #include "main_window.h"
 #include "now_playing_progress.h"
 #include "output_chip.h"
+#include "volume_chip.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 
@@ -110,7 +111,9 @@ private:
         SetDlgItemText(wnd, IDC_CHIP_ENABLED, nocturne_text::chip_show);
         SetDlgItemText(wnd, IDC_CHIP_CLICK, nocturne_text::chip_click);
         SetDlgItemText(wnd, IDC_CHIP_ALIASES, nocturne_text::chip_edit_names);
+        SetDlgItemText(wnd, IDC_VOLUME_ICON, nocturne_text::volume_icon_only);
 
+        CheckDlgButton(wnd, IDC_VOLUME_ICON, check_state(volume_chip::enabled.get()));
         CheckDlgButton(wnd, IDC_WHEEL_SEEK_ENABLED, check_state(now_playing_progress::wheel_seek_enabled.get()));
         CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
         CheckDlgButton(wnd, IDC_CHIP_ENABLED, check_state(output_chip::enabled.get()));
@@ -149,6 +152,8 @@ private:
             output_chip::enabled = is_checked;
         else if (id == IDC_CHIP_CLICK)
             output_chip::click_to_switch = is_checked;
+        else if (id == IDC_VOLUME_ICON)
+            volume_chip::enabled = is_checked;
         else if (id == IDC_CHIP_ALIASES)
             output_chip::open_alias_file();
     }
@@ -556,6 +561,7 @@ void reset_nocturne_settings()
     playlist_item_helpers::keep_queue_on_play.reset();
     output_chip::enabled.reset();
     output_chip::click_to_switch.reset();
+    volume_chip::enabled.reset();
 
     next_track_toast::enabled.reset();
     next_track_toast::seconds.reset();

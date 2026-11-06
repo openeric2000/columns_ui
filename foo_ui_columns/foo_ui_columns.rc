@@ -861,6 +861,7 @@ BEGIN
     CONTROL         "Show the current output device",IDC_CHIP_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,196,313,10
     CONTROL         "Click to switch",IDC_CHIP_CLICK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,212,313,10
     PUSHBUTTON      "Edit device names...",IDC_CHIP_ALIASES,7,230,120,14,WS_TABSTOP
+    CONTROL         "Collapse the volume bar to an icon",IDC_VOLUME_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,252,313,10
 END
 
 IDD_PREFS_NOCTURNE_STARTUP DIALOGEX 0, 0, 327, 272

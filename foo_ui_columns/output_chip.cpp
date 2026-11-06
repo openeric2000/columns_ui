@@ -7,6 +7,7 @@
 #include "font_utils.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "volume_chip.h"
 
 #pragma comment(lib, "winmm.lib")
 
@@ -43,7 +44,8 @@ constexpr int min_name_width = 40;
 // 裝置顯示的右緣貼在「時間文字」的左邊（空 time_gap＋自己的內距）；文字寬度用目前曲長的格式估：已播放時間的格式不會比曲長的更長，
 // 所以最長的檔案（11:52:32，約 152 DIP）也不會碰到（分「不到一小時」「一小時以上」兩種寬度）。沒在播放時時間欄是空的，寬度當 0，裝置顯示就縮到停止鈕旁邊。換歌、開始、停止時重排。
 // main.xml 時間欄右邊那一串的寬度、時間字級改了，這裡要跟著改（169、公開版的 main.xml 還沒量，用前要先量）
-constexpr int time_col_right_from_bar_right = 433;
+// 2026-11-06：這個 433 現在由 volume_chip::time_col_right_dip() 提供——設定頁開了「音量條收成圖示」（main.xml 拿掉音量條與 dB）
+// 時是 144，沒開還是 433
 constexpr int time_right_margin = 16;
 constexpr float time_font_dip = 16;
 constexpr int time_gap = 6;
@@ -1231,7 +1233,7 @@ RECT Chip::compute_layout()
 
     const auto bar_width = m_bar_rect.right - m_bar_rect.left;
     // 兩個端點：沒在播放（時間欄是空的）時縮到停止鈕旁邊，播放中推到最長時間文字的左邊
-    const auto time_right = m_bar_rect.right - dip(time_col_right_from_bar_right) - dip(time_right_margin);
+    const auto time_right = m_bar_rect.right - dip(volume_chip::time_col_right_dip()) - dip(time_right_margin);
     const auto right_stopped = time_right - dip(time_gap);
     const auto time_width = g_long_track ? m_time_text_width_long : m_time_text_width_short;
     const auto right_playing = time_right - static_cast<int>(std::ceil(time_width)) - dip(time_gap);
@@ -1715,6 +1717,12 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
 
     return DeferWindowPos(dwp, wnd, HWND_TOP, target.left, target.top, target.right - target.left,
         target.bottom - target.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+// 排版常數變了（例如 volume_chip 的開關改了右邊那串的寬度）：重排所有裝置顯示
+void refresh_layouts()
+{
+    refresh_all();
 }
 
 // ---- 設定頁用（2026-11-05）----

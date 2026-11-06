@@ -428,6 +428,7 @@
 #define IDC_CHIP_ENABLED               1320
 #define IDC_CHIP_CLICK                 1321
 #define IDC_CHIP_ALIASES               1322
+#define IDC_VOLUME_ICON                1323
 #define IDC_STARTUP_HOLD               1330
 #define IDC_STARTUP_HOLD_NOTE          1331
 #define IDC_STATIC                      -1

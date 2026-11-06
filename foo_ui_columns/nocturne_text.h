@@ -46,6 +46,10 @@ inline constexpr char chip_alias_template[]
 inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
 inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
+// 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
+inline constexpr wchar_t volume_icon_only[]
+    = L"Collapse the volume bar to an icon (slider pops up on hover; needs a main.xml without the volume bar)";
+inline constexpr wchar_t volume_muted[] = L"Muted";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "Up Next Notice";
@@ -189,6 +193,9 @@ inline constexpr char chip_alias_template[]
 inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
 inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
+// 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
+inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示，滑過往上彈出滑桿（要搭配沒有音量條的 main.xml）";
+inline constexpr wchar_t volume_muted[] = L"靜音";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "下一首提示";
