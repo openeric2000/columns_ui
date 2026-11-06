@@ -124,6 +124,11 @@
 #define IDD_LAYOUT_PROPERTIES           242
 #define IDD_THEME_FONT                  243
 #define IDD_PREFS_NEXT_TRACK_TOAST      244
+#define IDD_PREFS_NOCTURNE_PLAYBACK     245
+#define IDD_PREFS_NOCTURNE_FONT         246
+#define IDD_PREFS_NOCTURNE_STARTUP      247
+#define IDD_PREFS_NOCTURNE_QUEUE        248
+#define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -387,8 +392,49 @@
 #define IDC_NEXT_TOAST_SHOW_TAG         1255
 #define IDC_NEXT_TOAST_POSITION_LABEL   1256
 #define IDC_NEXT_TOAST_POSITION         1257
-#define IDC_NEXT_TOAST_NOTE             1258
 #define IDC_KEEP_QUEUE_ON_PLAY          1259
+#define IDC_WHEEL_SEEK_ENABLED          1260
+#define IDC_NOCTURNE_FONT_NOTE          1262
+#define IDC_NOCTURNE_FONT_RESTART       1263
+#define IDC_NOCTURNE_FONT_RESTART_NOTE  1264
+#define IDC_NOCTURNE_FONT_FOOT          1265
+#define IDC_FONT_ROW_LABEL0            1270
+#define IDC_FONT_ROW_LABEL1            1271
+#define IDC_FONT_ROW_LABEL2            1272
+#define IDC_FONT_ROW_LABEL3            1273
+#define IDC_FONT_ROW_LABEL4            1274
+#define IDC_FONT_ROW_LABEL5            1275
+#define IDC_FONT_ROW_LABEL6            1276
+#define IDC_FONT_ROW_FAMILY0           1280
+#define IDC_FONT_ROW_FAMILY1           1281
+#define IDC_FONT_ROW_FAMILY2           1282
+#define IDC_FONT_ROW_FAMILY3           1283
+#define IDC_FONT_ROW_FAMILY4           1284
+#define IDC_FONT_ROW_FAMILY5           1285
+#define IDC_FONT_ROW_FAMILY6           1286
+#define IDC_FONT_ROW_SIZE0             1290
+#define IDC_FONT_ROW_SIZE1             1291
+#define IDC_FONT_ROW_SIZE2             1292
+#define IDC_FONT_ROW_SIZE3             1293
+#define IDC_FONT_ROW_SIZE4             1294
+#define IDC_FONT_ROW_SIZE5             1295
+#define IDC_FONT_ROW_SIZE6             1296
+#define IDC_WHEEL_STEP_LABEL           1300
+#define IDC_WHEEL_STEP_SECONDS         1301
+#define IDC_WHEEL_STEP_SPIN            1302
+#define IDC_WHEEL_SHIFT_LABEL          1303
+#define IDC_WHEEL_SHIFT_SECONDS        1304
+#define IDC_WHEEL_SHIFT_SPIN           1305
+#define IDC_NEXT_TOAST_SIZE_LABEL      1310
+#define IDC_NEXT_TOAST_SIZE            1311
+#define IDC_CHIP_ENABLED               1320
+#define IDC_CHIP_CLICK                 1321
+#define IDC_CHIP_ALIASES               1322
+#define IDC_VOLUME_ICON                1323
+#define IDC_STARTUP_HOLD               1330
+#define IDC_STARTUP_HOLD_NOTE          1331
+#define IDC_ABOUT_NAME                 1340
+#define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -398,7 +444,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        223
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1260
+#define _APS_NEXT_CONTROL_VALUE         1300
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

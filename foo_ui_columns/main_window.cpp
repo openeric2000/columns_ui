@@ -39,6 +39,9 @@ fbh::ConfigBool lock_main_window_size({0x588b1480, 0x7b00, 0x4e02, {0xbb, 0x9f, 
         main_menu::commands::on_lock_window_size_changed();
     });
 
+fbh::ConfigBool startup_hold_until_ready(
+    GUID{0x9ecf8ef3, 0xa15d, 0x4afc, {0x91, 0x24, 0xa1, 0x38, 0xfe, 0x72, 0x4a, 0x40}}, true);
+
 } // namespace cui
 
 cui::rebar::RebarWindow* g_rebar_window = nullptr;
@@ -179,6 +182,11 @@ HWND cui::MainWindow::initialise(user_interface::HookProc_t hook, bool is_hidden
 
 void cui::MainWindow::shutdown()
 {
+    // 還在等網頁就結束：先讓監看執行緒收掉，它手上有視窗代號
+    m_startup_hold_active = false;
+    stop_startup_hold_watchdog();
+    stop_startup_fade();
+
     DestroyWindow(m_wnd);
     UnregisterClass(main_window_class_name, core_api::get_my_instance());
     m_wnd = nullptr;
@@ -337,11 +345,213 @@ void cui::MainWindow::set_window_placement(WINDOWPLACEMENT placement, bool is_in
         }
     }
 
+    // 開機優化 B：先隱形再顯示，視窗一出現就已經是隱形的，不會閃一下空殼
+    if (is_initial && should_hold_startup_show(placement, is_hidden))
+        begin_startup_hold();
+
     SetWindowPlacement(m_wnd, &placement);
     resize_child_windows();
 
     if (active_window_to_set)
         SetActiveWindow(active_window_to_set);
+}
+
+namespace {
+
+// 行程啟動到現在過了幾毫秒（取不到就當剛啟動）
+DWORD process_age_ms()
+{
+    FILETIME created{}, exited{}, kernel{}, user{}, now{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+        return 0;
+
+    GetSystemTimeAsFileTime(&now);
+    const auto to_ticks = [](const FILETIME& ft) {
+        return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    };
+    const auto age_ms = (to_ticks(now) - to_ticks(created)) / 10000; // FILETIME 單位是 100 奈秒
+    return age_ms > MAXDWORD ? MAXDWORD : static_cast<DWORD>(age_ms);
+}
+
+} // namespace
+
+bool cui::MainWindow::begin_startup_hold()
+{
+    const auto age_ms = process_age_ms();
+    const auto wait_ms = age_ms < startup_hold_timeout_ms ? startup_hold_timeout_ms - age_ms : 0;
+
+    if (wait_ms < startup_hold_min_ms)
+        return false;
+
+    const BOOL cloak = TRUE;
+
+    // 這個系統不給隱形就算了，照舊顯示（不能讓視窗永遠看不到）
+    if (FAILED(DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak))))
+        return false;
+
+    m_startup_hold_active = true;
+    m_startup_hold_timed_out = false;
+    m_startup_hold_started_ms = GetTickCount64();
+
+    try {
+        start_startup_hold_watchdog(wait_ms);
+    } catch (...) {
+        // 沒有監看就沒有逾時保險，寧可不隱形
+        m_startup_hold_active = false;
+        const BOOL uncloak = FALSE;
+        DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+        return false;
+    }
+    return true;
+}
+
+void cui::MainWindow::start_startup_hold_watchdog(DWORD wait_ms)
+{
+    m_startup_hold_cancel.reset(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+    THROW_LAST_ERROR_IF_NULL(m_startup_hold_cancel.get());
+
+    m_startup_hold_watchdog = std::thread([wnd = m_wnd, cancel = m_startup_hold_cancel.get(), wait_ms,
+                                              timed_out = &m_startup_hold_timed_out] {
+        if (WaitForSingleObject(cancel, wait_ms) != WAIT_TIMEOUT)
+            return;
+
+        *timed_out = true;
+        const BOOL uncloak = FALSE;
+        DwmSetWindowAttribute(wnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+        PostMessage(wnd, MSG_STARTUP_HOLD_TIMEOUT, 0, 0);
+    });
+}
+
+void cui::MainWindow::stop_startup_hold_watchdog()
+{
+    if (m_startup_hold_cancel)
+        SetEvent(m_startup_hold_cancel.get());
+
+    if (m_startup_hold_watchdog.joinable())
+        m_startup_hold_watchdog.join();
+
+    m_startup_hold_cancel.reset();
+}
+
+bool cui::MainWindow::should_hold_startup_show(const WINDOWPLACEMENT& placement, bool is_hidden)
+{
+    // 啟動時要縮到系統匣／最小化、上次是最小化關閉的：本來就不會顯示視窗，沒有空殼可言，照舊
+    if (is_hidden || !startup_hold_until_ready.get())
+        return false;
+
+    if (placement.showCmd != SW_SHOWNORMAL && placement.showCmd != SW_SHOWMAXIMIZED)
+        return false;
+
+    // 沒載入網頁面板元件就不會有人回報「好了」，不必白等逾時
+    return GetModuleHandle(L"foo_webview2.dll") != nullptr;
+}
+
+void cui::MainWindow::end_startup_hold(const char* reason, bool fade)
+{
+    if (!m_startup_hold_active)
+        return;
+
+    m_startup_hold_active = false;
+    stop_startup_hold_watchdog();
+
+    if (!m_wnd || m_is_destroying)
+        return;
+
+    // 逾時的監看執行緒已經把視窗顯示出來了，再淡入視窗會先消失一下，所以只在還隱形著的時候淡入
+    if (fade && !m_startup_hold_timed_out)
+        begin_startup_fade();
+    else {
+        const BOOL cloak = FALSE;
+        DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+    }
+
+    // 留在 Console 方便事後查：是網頁回報（page ready）還是逾時（timeout）讓視窗出現的、等了多久
+    console::print(fmt::format("Columns UI – main window revealed ({}{}) after {} ms; process age {} ms.", reason,
+        fade && !m_startup_hold_timed_out ? ", fade" : "", GetTickCount64() - m_startup_hold_started_ms,
+        process_age_ms())
+                       .c_str());
+}
+
+void cui::MainWindow::begin_startup_fade()
+{
+    // 淡到哪裡為止：使用者有開 Columns UI 自己的視窗透明度就停在他設的值，不然是完全不透明
+    const auto target = static_cast<BYTE>(
+        main_window::config_get_transparency_enabled() ? main_window::config_get_transparency_level() : 255);
+
+    // 先在還隱形的時候把視窗變成全透明的分層視窗，再解除隱形，這樣解除的那一刻畫面上什麼都沒有
+    const auto ex_styles = GetWindowLongPtr(m_wnd, GWL_EXSTYLE);
+    if (!(ex_styles & WS_EX_LAYERED)) {
+        SetWindowLongPtr(m_wnd, GWL_EXSTYLE, ex_styles | WS_EX_LAYERED);
+        m_startup_fade_added_layered = true;
+    }
+    SetLayeredWindowAttributes(m_wnd, 0, 0, LWA_ALPHA);
+
+    const BOOL uncloak = FALSE;
+    DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
+
+    try {
+        m_startup_fade_cancel.reset(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+        THROW_LAST_ERROR_IF_NULL(m_startup_fade_cancel.get());
+
+        m_startup_fade = std::thread([wnd = m_wnd, cancel = m_startup_fade_cancel.get(), target] {
+            // 一般計時器精度約 15 毫秒，淡入要細一點才不會一格一格跳
+            timeBeginPeriod(1);
+
+            const auto start = std::chrono::steady_clock::now();
+            for (;;) {
+                const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
+                const auto t = std::clamp(elapsed.count() / startup_fade_ms, 0.0, 1.0);
+                // 跟輸出裝置面板縮回去同一條曲線：兩頭都慢的 smootherstep，比較柔和
+                const auto eased = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                SetLayeredWindowAttributes(wnd, 0, static_cast<BYTE>(std::lround(target * eased)), LWA_ALPHA);
+
+                if (t >= 1.0)
+                    break;
+
+                // 被中斷（關閉程式等）：直接到最後的透明度
+                if (WaitForSingleObject(cancel, 8) != WAIT_TIMEOUT) {
+                    SetLayeredWindowAttributes(wnd, 0, target, LWA_ALPHA);
+                    break;
+                }
+            }
+
+            timeEndPeriod(1);
+            PostMessage(wnd, MSG_STARTUP_FADE_DONE, 0, 0);
+        });
+    } catch (...) {
+        // 淡入起不來就直接完整顯示
+        SetLayeredWindowAttributes(m_wnd, 0, target, LWA_ALPHA);
+        finish_startup_fade();
+    }
+}
+
+void cui::MainWindow::stop_startup_fade()
+{
+    if (m_startup_fade_cancel)
+        SetEvent(m_startup_fade_cancel.get());
+
+    if (m_startup_fade.joinable())
+        m_startup_fade.join();
+
+    m_startup_fade_cancel.reset();
+}
+
+void cui::MainWindow::finish_startup_fade()
+{
+    stop_startup_fade();
+
+    if (!m_startup_fade_added_layered || !m_wnd || m_is_destroying)
+        return;
+
+    m_startup_fade_added_layered = false;
+
+    // 分層樣式是淡入自己加的：做完拿掉，視窗變回一般視窗（使用者開了視窗透明度就留著）
+    if (main_window::config_get_transparency_enabled())
+        return;
+
+    const auto ex_styles = GetWindowLongPtr(m_wnd, GWL_EXSTYLE);
+    SetWindowLongPtr(m_wnd, GWL_EXSTYLE, ex_styles & ~static_cast<LONG_PTR>(WS_EX_LAYERED));
+    RedrawWindow(m_wnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 void cui::MainWindow::queue_taskbar_button_update(bool update)

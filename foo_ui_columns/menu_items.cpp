@@ -15,6 +15,7 @@
 #include "theme_font.h"
 #include "nocturne_text.h"
 #include "next_track_toast.h"
+#include "volume_chip.h"
 
 namespace cui::main_menu {
 
@@ -287,6 +288,23 @@ void set_now_playing_style(uint32_t style)
 std::atomic<int64_t> paused_position_ms{-1};
 std::atomic<int64_t> paused_length_ms{-1};
 
+// 進度條預覽的位置（毫秒），沒有預覽時為 -1（見 main_menu::set_seek_preview）；給 %cui_time_text% 用
+std::atomic<int64_t> seek_preview_ms{-1};
+
+// 跟 %playback_time% 同樣的寫法：不到一小時「M:SS」，一小時以上「H:MM:SS」
+std::string format_clock(int64_t milliseconds)
+{
+    const auto total = milliseconds / 1000;
+    const auto hours = total / 3600;
+    const auto minutes = (total % 3600) / 60;
+    const auto seconds = total % 60;
+
+    if (hours > 0)
+        return fmt::format("{}:{:02}:{:02}", hours, minutes, seconds);
+
+    return fmt::format("{}:{:02}", minutes, seconds);
+}
+
 void clear_paused_position()
 {
     if (paused_position_ms.exchange(-1) >= 0)
@@ -412,11 +430,11 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 5; }
+    t_uint32 get_field_count() override { return 7; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
-            "cui_paused_length_ms", "cui_now_playing_file"};
+            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon"};
         out = names[index];
     }
 
@@ -424,6 +442,30 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            return true;
+        }
+
+        // %cui_volume_icon%：設定頁勾了「音量條收成圖示」時為 1，沒勾時不存在（2026-11-06）。ESLyric 佈局用
+        // visibility="$if(%cui_volume_icon%,0,1)" 隱藏 ESLyric 的音量條、dB 與靜音鈕（這時改由 Columns UI 畫喇叭圖示與彈出滑桿），
+        // 隱藏的元件不占版面，右邊那串自然縮成 144。只是一個設定值，別的執行緒直接讀
+        if (index == 6) {
+            if (!volume_chip::enabled.get())
+                return false;
+
+            out->write(titleformat_inputtypes::meta, "1");
+            return true;
+        }
+
+        // %cui_time_text%：進度條預覽的位置（拖曳、滾輪、等 fb2k 跳完），沒有預覽時是暫停的位置，兩者都沒有就不存在
+        // （佈局用 $if2(%cui_time_text%,%playback_time%) 取代只寫 %playback_time%）
+        if (index == 5) {
+            auto position = seek_preview_ms.load();
+            if (position < 0)
+                position = paused_position_ms.load();
+            if (position < 0)
+                return false;
+
+            out->write(titleformat_inputtypes::meta, format_clock(position).c_str());
             return true;
         }
 
@@ -737,6 +779,43 @@ std::optional<double> get_paused_position()
         return {};
 
     return static_cast<double>(position) / 1000.0;
+}
+
+void set_seek_preview(std::optional<double> seconds)
+{
+    // 只在主執行緒呼叫，所以「上次通知時顯示的整秒」與時間戳不用 atomic；毫秒值給標題格式（可能在別的執行緒）讀，用 atomic
+    static int64_t shown_second = -1;
+    static ULONGLONG last_refresh_tick = 0;
+
+    const auto position_ms = seconds ? std::llround(std::max(0.0, *seconds) * 1000.0) : int64_t{-1};
+    commands::seek_preview_ms = position_ms;
+
+    const auto second = position_ms < 0 ? int64_t{-1} : position_ms / 1000;
+    if (second == shown_second)
+        return;
+
+    // 拖得很快時略過太密的通知，下一次呼叫（進度條每格都會呼叫）會補上；結束預覽（回到 -1）一律馬上通知
+    const auto now = GetTickCount64();
+    if (second >= 0 && now - last_refresh_tick < 30)
+        return;
+
+    shown_second = second;
+    last_refresh_tick = now;
+    commands::refresh_now_playing_track();
+}
+
+void refresh_layout_fields()
+{
+    // 正在播放：對播放中的曲目送 dispatch_refresh（跟切換展開頁樣式同一招）。沒在播放時 get_now_playing 會失敗，
+    // 改對播放清單反白的那首送，讓停止狀態下切換設定也有機會讓 ESLyric 重算 visibility
+    metadb_handle_ptr track;
+    if (playback_control::get()->get_now_playing(track)) {
+        metadb_io::get()->dispatch_refresh(track);
+        return;
+    }
+
+    if (playlist_manager::get()->activeplaylist_get_focus_item_handle(track) && track.is_valid())
+        metadb_io::get()->dispatch_refresh(track);
 }
 
 } // namespace cui::main_menu

@@ -39,11 +39,14 @@ private:
 
 class PreferencesInstanceTabsHost : public preferences_page_instance {
 public:
+    // reset_callback（自編版新增）：有給的話，foobar2000 設定視窗的「Reset page」按鈕會啟用，按下去呼叫它把這一頁的設定還原成預設
     PreferencesInstanceTabsHost(std::function<void(const PreferencesInstanceTabsHost*)> destroy_callback,
-        HWND parent_window, std::span<PreferencesTab*> tabs, cfg_int& active_tab)
+        HWND parent_window, std::span<PreferencesTab*> tabs, cfg_int& active_tab,
+        std::function<void()> reset_callback = nullptr)
         : m_tabs(tabs)
         , m_active_tab(active_tab)
         , m_destroy_callback(destroy_callback)
+        , m_reset_callback(std::move(reset_callback))
     {
         auto on_message_ = [this](auto&&... args) { return on_message(std::forward<decltype(args)>(args)...); };
 
@@ -53,10 +56,23 @@ public:
 
     ~PreferencesInstanceTabsHost() { m_destroy_callback(this); }
 
-    t_uint32 get_state() override { return m_has_dark_mode ? preferences_state::dark_mode_supported : 0; }
+    t_uint32 get_state() override
+    {
+        return (m_has_dark_mode ? preferences_state::dark_mode_supported : 0)
+            | (m_reset_callback ? preferences_state::resettable : 0);
+    }
     fb2k::hwnd_t get_wnd() override { return m_wnd; }
     void apply() override {}
-    void reset() override {}
+    void reset() override
+    {
+        if (!m_reset_callback)
+            return;
+
+        m_reset_callback();
+        // 把目前分頁重建一次，勾選項與下拉才會顯示還原後的值
+        if (m_child)
+            make_child();
+    }
 
     void on_active_tab_change();
 
@@ -81,17 +97,19 @@ private:
     std::span<PreferencesTab*> m_tabs;
     cfg_int& m_active_tab;
     std::function<void(const PreferencesInstanceTabsHost*)> m_destroy_callback;
+    std::function<void()> m_reset_callback;
 };
 
 class PreferencesTabsHost : public preferences_page_v3 {
 public:
-    PreferencesTabsHost(
-        const char* p_name, std::span<PreferencesTab*> tabs, GUID p_guid, GUID p_parent_guid, cfg_int& p_active_tab)
+    PreferencesTabsHost(const char* p_name, std::span<PreferencesTab*> tabs, GUID p_guid, GUID p_parent_guid,
+        cfg_int& p_active_tab, std::function<void()> reset_callback = nullptr)
         : m_name(p_name)
         , m_guid(p_guid)
         , m_parent_guid(p_parent_guid)
         , m_tabs(tabs)
         , m_active_tab(p_active_tab)
+        , m_reset_callback(std::move(reset_callback))
     {
     }
 
@@ -118,7 +136,7 @@ public:
     {
         auto instance = fb2k::service_new<PreferencesInstanceTabsHost>(
             [this](const PreferencesInstanceTabsHost* instance) { std::erase(m_instances, instance); }, parent, m_tabs,
-            m_active_tab);
+            m_active_tab, m_reset_callback);
         m_instances.emplace_back(instance.get_ptr());
         return instance;
     }
@@ -129,5 +147,6 @@ private:
     const GUID m_parent_guid{};
     std::span<PreferencesTab*> m_tabs;
     cfg_int& m_active_tab;
+    std::function<void()> m_reset_callback;
     std::vector<PreferencesInstanceTabsHost*> m_instances;
 };

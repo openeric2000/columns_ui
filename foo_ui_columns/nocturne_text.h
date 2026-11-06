@@ -7,6 +7,10 @@
 
 namespace cui::nocturne_text {
 
+// 產品名稱與版本號（設定頁「關於」分頁顯示；中英文版共用，發布新版時只改這一行版本號）
+inline constexpr wchar_t about_product_name[] = L"Nocturne for foobar2000";
+inline constexpr wchar_t nocturne_version[] = L"1.30";
+
 #ifdef NOCTURNE_LANG_EN
 
 // 選單（View/Layout）
@@ -21,13 +25,37 @@ inline constexpr auto stop_or_collapse_description
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view during the last seconds of a track. The corner can be "
-      "chosen in Preferences.";
+      "chosen in Preferences > Tools > Nocturne.";
 inline constexpr wchar_t next_caption[] = L"Up next";
 inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
 inline constexpr wchar_t stopped_label[] = L"Stopped";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
-// 設定頁（Preferences → Display → Columns UI → Up Next Notice）
+// 播放列的輸出裝置顯示（output_chip.cpp）
+inline constexpr wchar_t chip_kind_default[] = L"Default";
+inline constexpr wchar_t chip_kind_exclusive[] = L"Exclusive";
+inline constexpr wchar_t chip_kind_mute[] = L"Muted";
+inline constexpr wchar_t chip_mode_exclusive[] = L"Exclusive mode";
+inline constexpr wchar_t chip_mode_asio[] = L"ASIO mode";
+inline constexpr wchar_t chip_menu_title[] = L"Output mode";
+// 設定頁「輸出裝置」區塊與裝置名稱檔的範本
+inline constexpr wchar_t chip_settings_title[] = L"Output device";
+inline constexpr wchar_t chip_show[] = L"Show the current output device in the playback bar";
+inline constexpr wchar_t chip_click[] = L"Click it to switch device (the hover panel also shows the hint)";
+inline constexpr wchar_t chip_edit_names[] = L"Edit device names...";
+inline constexpr char chip_alias_template[]
+    = "# Output device names: one per line, \"text the device name contains=name to show\".\r\n"
+      "# Lines starting with # are comments. Save the file, then hover over or click the output device display to apply.\r\n"
+      "# Example: Holo Audio=DAC (Holo Audio)\r\n";
+inline constexpr wchar_t chip_mode_default[] = L"Default (shared)";
+inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
+inline constexpr wchar_t chip_hint[] = L"Click to switch device";
+// 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
+inline constexpr wchar_t volume_title[] = L"Volume";
+inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an icon (recommended at 125%+ Windows scaling)";
+inline constexpr wchar_t volume_muted[] = L"Muted";
+inline constexpr wchar_t chip_unknown[] = L"Unknown device";
+// 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "Up Next Notice";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
 inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
@@ -37,15 +65,47 @@ inline constexpr wchar_t next_toast_show_cover[] = L"Show the cover of the next 
 inline constexpr wchar_t next_toast_show_tag[] = L"Show where the next track comes from (Queue / Playlist)";
 inline constexpr wchar_t next_toast_position_label[] = L"Position";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bottom right", L"Top left", L"Bottom left"};
+inline constexpr wchar_t next_toast_size_label[] = L"Size";
+inline constexpr wchar_t next_toast_size_names[4][24] = {L"Small (85%)", L"Standard", L"Large (120%)", L"Extra large (140%)"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
-inline constexpr wchar_t next_toast_note[]
-    // 說明文字框在 .rc 裡固定高 48（約 7 行），英文要在 6 行內，太長會被截掉並蓋到下面的「Playback queue」
-    = L"Hidden when the track is shorter than twice the countdown, when the order is Random or Repeat (track), or when "
-      L"there is no next track. While stopped with queued tracks, it shows the first one as \"Stopped · Up next\" over "
-      L"a dimmed view of the last page.\r\n\r\n"
-      L"The corner can be changed at any time; the left corners may overlap the cover or track details in some "
-      L"layouts. Turning this off also turns off the dimmed stopped view.";
+// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+inline constexpr auto playback_tab_name = "Playback";
+inline constexpr auto queue_tab_name = "Queue";
+inline constexpr wchar_t progress_title[] = L"Progress bar";
+inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
+inline constexpr wchar_t wheel_step_label[] = L"Seconds per notch (1-60)";
+inline constexpr wchar_t wheel_shift_step_label[] = L"Seconds per notch while holding Shift (5-300)";
+inline constexpr auto font_tab_name = "Fonts";
+inline constexpr wchar_t font_tab_title[] = L"Fonts";
+// 「啟動」分頁（開機優化 B）
+// 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
+inline constexpr auto about_tab_name = "About";
+inline constexpr wchar_t about_tab_title[] = L"About";
+inline constexpr wchar_t about_version_prefix[] = L"Version ";
+inline constexpr auto startup_tab_name = "Startup";
+inline constexpr wchar_t startup_tab_title[] = L"Startup";
+inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
+inline constexpr wchar_t startup_hold_note[]
+    = L"The main window stays hidden for the first second or two while the panels load, so you never see empty panels. "
+      L"It fades in gently as soon as the web panel (the album header) is ready, or appears right away after 3 seconds "
+      L"at most. Nothing is waited for if the web panel component is not installed. Turn this off to show the window "
+      L"the moment it is created. Takes effect the next time foobar2000 starts.";
+inline constexpr wchar_t font_tab_note[]
+    = L"Change the font of each part separately, or all parts at once with the first row. The lists, tabs, folder tree "
+      L"and other interface text also take a size. These apply at once.";
+inline constexpr wchar_t font_row_all[] = L"All parts";
+inline constexpr wchar_t font_row_playlist[] = L"Playlist";
+inline constexpr wchar_t font_row_tabs[] = L"Playlist tabs";
+inline constexpr wchar_t font_row_tree[] = L"Folder tree";
+inline constexpr wchar_t font_row_ui[] = L"Other interface text";
+inline constexpr wchar_t font_row_bar[] = L"Now playing bar and view";
+inline constexpr wchar_t font_row_header[] = L"Album header";
+inline constexpr wchar_t font_tab_foot[]
+    = L"The now playing bar, the now playing view and the album header only take a font (no size) and need a restart "
+      L"of foobar2000 to show it.";
+inline constexpr wchar_t font_restart_note[] = L"Changed fonts will show after foobar2000 restarts.";
+inline constexpr wchar_t font_restart_button[] = L"Restart now";
 inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
@@ -116,13 +176,38 @@ inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
     = "停止播放；已經停止而展開頁還開著（佇列有歌時停止不會自動收）時，收起展開頁，佇列保留不動。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
-inline constexpr auto next_track_toggle_description = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在設定頁選。";
+inline constexpr auto next_track_toggle_description
+    = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在 Preferences > Tools > Nocturne 選。";
 inline constexpr wchar_t next_caption[] = L"下一首";
 inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
 inline constexpr wchar_t stopped_label[] = L"已停止";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
-// 設定頁（Preferences → Display → Columns UI → 下一首提示）
+// 播放列的輸出裝置顯示（output_chip.cpp）
+inline constexpr wchar_t chip_kind_default[] = L"預設";
+inline constexpr wchar_t chip_kind_exclusive[] = L"獨占";
+inline constexpr wchar_t chip_kind_mute[] = L"靜音";
+inline constexpr wchar_t chip_mode_exclusive[] = L"獨占模式";
+inline constexpr wchar_t chip_mode_asio[] = L"ASIO 模式";
+inline constexpr wchar_t chip_menu_title[] = L"輸出模式";
+// 設定頁「輸出裝置」區塊與裝置名稱檔的範本
+inline constexpr wchar_t chip_settings_title[] = L"輸出裝置";
+inline constexpr wchar_t chip_show[] = L"在播放列顯示目前的輸出裝置";
+inline constexpr wchar_t chip_click[] = L"點一下可切換裝置（滑過面板的提示也一起顯示）";
+inline constexpr wchar_t chip_edit_names[] = L"編輯裝置顯示名稱…";
+inline constexpr char chip_alias_template[]
+    = "# 輸出裝置顯示名稱：每行「裝置名稱裡要有的字=要顯示的名稱」，# 開頭是註解。\r\n"
+      "# 存檔後，到播放列的輸出裝置顯示上滑過或點一下就會套用，不用重開 foobar2000。\r\n"
+      "# 例：Holo Audio=DAC (Holo Audio)\r\n";
+inline constexpr wchar_t chip_mode_default[] = L"預設（共用）";
+inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
+inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
+// 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
+inline constexpr wchar_t volume_title[] = L"音量";
+inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示（Windows 顯示縮放 125% 以上建議開啟）";
+inline constexpr wchar_t volume_muted[] = L"靜音";
+inline constexpr wchar_t chip_unknown[] = L"未知裝置";
+// 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "下一首提示";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";
 inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
@@ -132,12 +217,43 @@ inline constexpr wchar_t next_toast_show_cover[] = L"顯示下一首的專輯封
 inline constexpr wchar_t next_toast_show_tag[] = L"顯示下一首的來源標籤（佇列／清單）";
 inline constexpr wchar_t next_toast_position_label[] = L"位置";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
+inline constexpr wchar_t next_toast_size_label[] = L"大小";
+inline constexpr wchar_t next_toast_size_names[4][24] = {L"小（85%）", L"標準", L"大（120%）", L"特大（140%）"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
 inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
-inline constexpr wchar_t next_toast_note[]
-    = L"歌曲長度不到倒數秒數的兩倍、播放順序是隨機或單曲循環、或沒有下一首（例如已經是清單最後一首）時不顯示。"
-      L"停止播放但佇列還有歌時，會用「已停止 · 接下來」顯示佇列第一首，後面的展開頁畫面則變暗留著。\r\n\r\n"
-      L"位置隨時可以在這裡改；在某些版面中，左邊兩個角可能蓋到封面或曲目資訊。關閉這個選項時，停止時變暗的畫面也一起不顯示。";
+// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+inline constexpr auto playback_tab_name = "播放";
+inline constexpr auto queue_tab_name = "播放佇列";
+inline constexpr wchar_t progress_title[] = L"進度條";
+inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
+inline constexpr wchar_t wheel_step_label[] = L"每滾一格跳幾秒（1～60）";
+inline constexpr wchar_t wheel_shift_step_label[] = L"按住 Shift 每滾一格跳幾秒（5～300）";
+inline constexpr auto font_tab_name = "字型";
+inline constexpr wchar_t font_tab_title[] = L"字型";
+// 「啟動」分頁（開機優化 B）
+// 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
+inline constexpr auto about_tab_name = "關於";
+inline constexpr wchar_t about_tab_title[] = L"關於";
+inline constexpr wchar_t about_version_prefix[] = L"版本 ";
+inline constexpr auto startup_tab_name = "啟動";
+inline constexpr wchar_t startup_tab_title[] = L"啟動";
+inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
+inline constexpr wchar_t startup_hold_note[]
+    = L"啟動時主視窗先不顯示，等網頁面板（專輯標頭）載好再整個柔和淡入，不會先看到空殼畫面；最多等 3 秒，逾時就直接顯示（不淡入）。"
+      L"沒有安裝網頁面板元件時不會等。關掉就是視窗一建好立刻顯示。下次啟動 foobar2000 才會生效。";
+inline constexpr wchar_t font_tab_note[]
+    = L"每個區塊可以各自換字型，也可以用第一列一次全換。清單、分頁、資料夾樹與其餘介面文字還能調大小，改了馬上生效。";
+inline constexpr wchar_t font_row_all[] = L"全部區塊";
+inline constexpr wchar_t font_row_playlist[] = L"播放清單";
+inline constexpr wchar_t font_row_tabs[] = L"分頁標籤";
+inline constexpr wchar_t font_row_tree[] = L"資料夾樹";
+inline constexpr wchar_t font_row_ui[] = L"其餘介面文字";
+inline constexpr wchar_t font_row_bar[] = L"播放列與展開頁";
+inline constexpr wchar_t font_row_header[] = L"專輯標頭";
+inline constexpr wchar_t font_tab_foot[]
+    = L"播放列、展開頁與專輯標頭只能換字型、不能調大小，要重開 foobar2000 才會換。";
+inline constexpr wchar_t font_restart_note[] = L"換過字型的部分要重開 foobar2000 才會生效。";
+inline constexpr wchar_t font_restart_button[] = L"立即重開";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";

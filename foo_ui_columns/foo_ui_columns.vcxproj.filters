@@ -680,6 +680,12 @@
     <ClCompile Include="now_playing_progress.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="output_chip.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="volume_chip.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1050,6 +1056,12 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="now_playing_progress.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="output_chip.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="volume_chip.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_text.h">

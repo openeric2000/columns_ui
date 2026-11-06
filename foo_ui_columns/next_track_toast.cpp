@@ -26,6 +26,8 @@ fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
 fbh::ConfigUint32 position(
     GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_bottom_right);
+fbh::ConfigUint32 size_index(
+    GUID{0x6f1c2f68, 0x295e, 0x48fd, {0xa6, 0x40, 0x95, 0xd5, 0x21, 0x33, 0x33, 0x70}}, size_default);
 
 namespace {
 
@@ -154,7 +156,8 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
     size_t index = pfc_infinite;
 
     if (!playlists->get_playing_item_location(&playlist, &index)) {
-        // 核心記的「正在播的那一項」已經不在清單裡（例如 Album list 換過資料夾）：在播放中那份清單用檔案找同一首
+        // 核心記的「正在播的那一項」已經不在清單裡（例如 Album list 換過資料夾）：在播放中那份清單用檔案找同一首，
+        // 找不到 index 就留著 pfc_infinite（下面跟隨游標還是要看）
         playlist = playlists->get_playing_playlist();
         if (playlist == pfc_infinite)
             return {};
@@ -162,11 +165,10 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
         pfc::list_t<metadb_handle_ptr> items;
         playlists->playlist_get_all_items(playlist, items);
         index = items.find_item(now_playing);
-        if (index == pfc_infinite)
-            return {};
     }
 
-    // 播放跟隨游標：游標（反白）停在別的項目時，下一首就是它（這個行為我是照印象寫的，要實測確認）
+    // 播放跟隨游標：游標（反白）停在別的項目時，下一首就是它（2026-11-03 錄影證實：Album list 換了資料夾、
+    // 正在播的那首已不在清單裡，核心播完仍接新清單反白的那首，所以這裡不能要求找得到正在播的那首）
     if (config_object::g_get_data_bool_simple(standard_config_objects::bool_playback_follows_cursor, false)) {
         const auto focus = playlists->playlist_get_focus_item(playlist);
         if (focus != pfc_infinite && focus != index) {
@@ -177,10 +179,13 @@ std::optional<NextTrack> resolve_next(const metadb_handle_ptr& now_playing)
     }
 
     const auto count = playlists->playlist_get_item_count(playlist);
-    size_t next = index + 1;
+
+    // 找不到正在播的那首、又沒有可跟隨的反白（Album list 換了資料夾但沒點任何歌）：
+    // 2026-11-05 使用者確認核心會接新清單的第一首（預設與重複清單順序）
+    size_t next = index == pfc_infinite ? 0 : index + 1;
 
     if (next >= count) {
-        if (order != OrderKind::repeat_playlist || count == 0)
+        if (index == pfc_infinite || order != OrderKind::repeat_playlist || count == 0)
             return {};
         next = 0;
     }
@@ -251,6 +256,22 @@ namespace font_warm_up {
 ULONG_PTR token{};
 bool started{};
 std::thread worker;
+// 做完（或根本沒跑成：取不到字型名稱、GDI+ 啟動失敗）就是 true，等它的人（輸出裝置顯示）不會永遠等下去（2026-11-05）
+std::atomic<bool> done{false};
+// 等暖機的人留下的 callback，只在主執行緒碰
+std::vector<std::function<void()>> callbacks;
+
+// 在暖機的背景執行緒上呼叫：旗標立起來，再回主執行緒把等著的 callback 一起叫醒
+void finish()
+{
+    done = true;
+    fb2k::inMainThread([] {
+        auto pending = std::move(callbacks);
+        callbacks.clear();
+        for (auto& callback : pending)
+            callback();
+    });
+}
 
 void start()
 {
@@ -259,21 +280,27 @@ void start()
     try {
         face_name = fonts::get_log_font_with_fallback(fonts::labels_font_id).lfFaceName;
     } catch (...) {
+        finish();   // 沒跑成也算做完，而且要叫醒已經登記等著的人，不然它們會永遠藏著
         return;
     }
 
     const Gdiplus::GdiplusStartupInput input;
-    if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok)
+    if (Gdiplus::GdiplusStartup(&token, &input, nullptr) != Gdiplus::Ok) {
+        finish();
         return;
+    }
     started = true;
 
     worker = std::thread([face_name = std::move(face_name)] {
-        const Gdiplus::FontFamily family(face_name.c_str());
-        if (family.GetLastStatus() == Gdiplus::Ok) {
-            // 順便建一個字型，把字型的度量資料也載進來
-            const Gdiplus::Font font(&family, 16.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-            (void)font;
+        {
+            const Gdiplus::FontFamily family(face_name.c_str());
+            if (family.GetLastStatus() == Gdiplus::Ok) {
+                // 順便建一個字型，把字型的度量資料也載進來
+                const Gdiplus::Font font(&family, 16.f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+                (void)font;
+            }
         }
+        finish();
     });
 }
 
@@ -336,6 +363,15 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         } else {
             Gdiplus::SolidBrush placeholder(rgba(255, 43, 43, 43));
             g.FillPath(&placeholder, &cover_path);
+
+            // 沒封面：畫跟專輯標頭（index.html 的 .cover svg）同款的雙圓圖示
+            // 外圓半徑 9、內圓半徑 2.5、線寬 1.5（都是 24 格的座標），圖示寬度佔方塊的 34%
+            const auto unit = box.Width * 0.34f / 24.f;
+            const auto centre_x = box.X + box.Width / 2.f;
+            const auto centre_y = box.Y + box.Height / 2.f;
+            Gdiplus::Pen icon_pen(rgba(255, 150, 150, 150), 1.5f * unit);
+            g.DrawEllipse(&icon_pen, centre_x - 9.f * unit, centre_y - 9.f * unit, 18.f * unit, 18.f * unit);
+            g.DrawEllipse(&icon_pen, centre_x - 2.5f * unit, centre_y - 2.5f * unit, 5.f * unit, 5.f * unit);
         }
         x += static_cast<float>(layout.cover + layout.gap);
     }
@@ -599,6 +635,8 @@ private:
         Mode mode{Mode::countdown};
         double remaining{};
         double ratio{};
+        // 歌曲最後 fade_out_seconds 秒：提示邊淡出邊把倒數圈與數字走到 0（2026-11-05），不再凍結在「1」
+        bool fading{};
         NextTrack next;
     };
 
@@ -857,13 +895,15 @@ std::optional<Controller::Want> Controller::evaluate()
         const auto current_position = smooth_position(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
+        // 淡出期間仍回傳內容（fading），倒數圈與數字照常往 0 走；原本這段傳回空，畫面凍結在「剩 5% 的紅弧＋1」就淡掉
         const auto remaining = length - current_position;
-        if (remaining <= fade_out_seconds || remaining > count)
+        if (remaining > count)
             return {};
 
         want.mode = Mode::countdown;
-        want.remaining = remaining;
-        want.ratio = remaining / count;
+        want.fading = remaining <= fade_out_seconds;
+        want.remaining = std::max(remaining, 0.0);
+        want.ratio = want.remaining / count;
     } else {
         m_position_valid = false;
 
@@ -1005,7 +1045,8 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
 {
     const auto eased = ease(m_alpha);
     m_surface.copy_static_to_canvas();
-    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::ceil(want.remaining - 0.0001)));
+    // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
+    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
 
     // 淡入時從靠近邊緣那一側滑進來：放上面就從上往下，放下面就從下往上
     const auto corner = std::min(position.get(), position_count - 1);
@@ -1053,7 +1094,10 @@ void Controller::tick()
         return;
     }
 
-    if (!want && !m_wnd) {
+    // 淡出中（歌曲最後半秒）不能新建視窗：淡掉並收掉之後，同一首歌的 evaluate() 還會回傳 fading，不擋的話會再冒出來一次
+    const auto active = want && !want->fading;
+
+    if (!active && !m_wnd) {
         set_interval(interval_idle_ms);
         return;
     }
@@ -1061,10 +1105,12 @@ void Controller::tick()
     if (!m_last_want)
         return;
 
-    // 淡出時沿用最後一次的內容與位置
+    // 淡出時沿用最後一次的內容與位置；歌曲最後半秒（fading）的圈與數字用這一格算出的新值
     const auto& shown = want ? *want : *m_last_want;
     const auto dpi = std::max<UINT>(GetDpiForWindow(shown.owner), USER_DEFAULT_SCREEN_DPI);
-    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI;
+    // 使用者在設定頁選的大小（小／標準／大／特大）乘上螢幕縮放，整張卡片一起照比例變
+    const auto user_percent = size_percents[std::min(size_index.get(), size_count - 1)];
+    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * user_percent / 100.0;
     const Layout layout(scale);
 
     // 第一次出現的這一格要建視窗、畫圖，會花一段時間；這一格先停在全透明，時間從下一格才開始算，
@@ -1074,7 +1120,7 @@ void Controller::tick()
     if (!ensure_window(shown.owner, layout) || !m_surface.ensure(layout.width, layout.height))
         return;
 
-    if (want) {
+    if (active) {
         rebuild_content(shown, layout);
         if (!creating)
             m_alpha = std::min(1.0, m_alpha + elapsed / fade_in_seconds);
@@ -1160,5 +1206,18 @@ public:
 play_callback_static_factory_t<NewTrackCallback> new_track_callback;
 
 } // namespace
+
+bool gdiplus_fonts_ready()
+{
+    return font_warm_up::done;
+}
+
+void when_gdiplus_fonts_ready(std::function<void()> callback)
+{
+    if (font_warm_up::done)
+        callback();
+    else
+        font_warm_up::callbacks.push_back(std::move(callback));
+}
 
 } // namespace cui::next_track_toast
