@@ -950,37 +950,57 @@ void Controller::start_cover_load(const metadb_handle_ptr& track, int size_px)
     std::thread([track, size_px, generation] {
         std::shared_ptr<Gdiplus::Bitmap> result;
 
-        try {
-            abort_callback_dummy abort;
-            pfc::list_single_ref_t<metadb_handle_ptr> items(track);
-            pfc::list_single_ref_t<GUID> ids(album_art_ids::cover_front);
-            const auto instance = album_art_manager_v2::get()->open(items, ids, abort);
+        // 從一個封面來源（真正的封面，或 fb2k 的「沒封面佔位圖」）取出正面封面，縮成方形；取不到回空
+        const auto load_front = [size_px](const album_art_extractor_instance_v2::ptr& instance,
+                                    abort_callback& abort) -> std::shared_ptr<Gdiplus::Bitmap> {
+            try {
+                album_art_data_ptr data;
+                if (!instance->query(album_art_ids::cover_front, data, abort) || !data.is_valid() || data->get_size() == 0)
+                    return nullptr;
 
-            album_art_data_ptr data;
-            if (instance->query(album_art_ids::cover_front, data, abort) && data.is_valid() && data->get_size() > 0) {
                 wil::com_ptr<IStream> stream;
                 stream.attach(SHCreateMemStream(static_cast<const BYTE*>(data->get_ptr()), gsl::narrow<UINT>(data->get_size())));
 
-                if (stream) {
-                    Gdiplus::Bitmap source(stream.get());
-                    const auto width = static_cast<int>(source.GetWidth());
-                    const auto height = static_cast<int>(source.GetHeight());
+                if (!stream)
+                    return nullptr;
 
-                    if (source.GetLastStatus() == Gdiplus::Ok && width > 0 && height > 0) {
-                        auto scaled = std::make_shared<Gdiplus::Bitmap>(size_px, size_px, PixelFormat32bppPARGB);
-                        Gdiplus::Graphics g(scaled.get());
-                        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-                        g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-                        // 取中間的正方形
-                        const auto side = std::min(width, height);
-                        g.DrawImage(&source, Gdiplus::Rect(0, 0, size_px, size_px), (width - side) / 2,
-                            (height - side) / 2, side, side, Gdiplus::UnitPixel);
-                        result = std::move(scaled);
-                    }
-                }
+                Gdiplus::Bitmap source(stream.get());
+                const auto width = static_cast<int>(source.GetWidth());
+                const auto height = static_cast<int>(source.GetHeight());
+
+                if (source.GetLastStatus() != Gdiplus::Ok || width <= 0 || height <= 0)
+                    return nullptr;
+
+                auto scaled = std::make_shared<Gdiplus::Bitmap>(size_px, size_px, PixelFormat32bppPARGB);
+                Gdiplus::Graphics g(scaled.get());
+                g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+                // 取中間的正方形
+                const auto side = std::min(width, height);
+                g.DrawImage(&source, Gdiplus::Rect(0, 0, size_px, size_px), (width - side) / 2, (height - side) / 2, side,
+                    side, Gdiplus::UnitPixel);
+                return scaled;
+            } catch (...) {
+                return nullptr;
             }
+        };
+
+        abort_callback_dummy abort;
+
+        try {
+            pfc::list_single_ref_t<metadb_handle_ptr> items(track);
+            pfc::list_single_ref_t<GUID> ids(album_art_ids::cover_front);
+            result = load_front(album_art_manager_v2::get()->open(items, ids, abort), abort);
+        } catch (...) {
         }
-        catch (...) {
+
+        // 沒封面：用 fb2k 自己的「Stub image」（Preferences 的 Album art 頁設定，展開頁與標頭沒封面時顯示的同一張），
+        // 讓提示卡片跟其他地方一致；沒設就維持畫雙圓圖示
+        if (!result) {
+            try {
+                result = load_front(album_art_manager_v2::get()->open_stub(abort), abort);
+            } catch (...) {
+            }
         }
 
         fb2k::inMainThread([result, generation] {
