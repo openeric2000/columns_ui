@@ -15,6 +15,7 @@
 #include "theme_font.h"
 #include "nocturne_text.h"
 #include "next_track_toast.h"
+#include "volume_chip.h"
 
 namespace cui::main_menu {
 
@@ -429,11 +430,11 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 6; }
+    t_uint32 get_field_count() override { return 7; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
-            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text"};
+            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon"};
         out = names[index];
     }
 
@@ -441,6 +442,17 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            return true;
+        }
+
+        // %cui_volume_icon%：設定頁勾了「音量條收成圖示」時為 1，沒勾時不存在（2026-11-06）。ESLyric 佈局用
+        // visibility="$if(%cui_volume_icon%,0,1)" 隱藏 ESLyric 的音量條、dB 與靜音鈕（這時改由 Columns UI 畫喇叭圖示與彈出滑桿），
+        // 隱藏的元件不占版面，右邊那串自然縮成 144。只是一個設定值，別的執行緒直接讀
+        if (index == 6) {
+            if (!volume_chip::enabled.get())
+                return false;
+
+            out->write(titleformat_inputtypes::meta, "1");
             return true;
         }
 
@@ -790,6 +802,20 @@ void set_seek_preview(std::optional<double> seconds)
     shown_second = second;
     last_refresh_tick = now;
     commands::refresh_now_playing_track();
+}
+
+void refresh_layout_fields()
+{
+    // 正在播放：對播放中的曲目送 dispatch_refresh（跟切換展開頁樣式同一招）。沒在播放時 get_now_playing 會失敗，
+    // 改對播放清單反白的那首送，讓停止狀態下切換設定也有機會讓 ESLyric 重算 visibility
+    metadb_handle_ptr track;
+    if (playback_control::get()->get_now_playing(track)) {
+        metadb_io::get()->dispatch_refresh(track);
+        return;
+    }
+
+    if (playlist_manager::get()->activeplaylist_get_focus_item_handle(track) && track.is_valid())
+        metadb_io::get()->dispatch_refresh(track);
 }
 
 } // namespace cui::main_menu

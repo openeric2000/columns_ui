@@ -59,4 +59,9 @@ std::optional<double> get_paused_position();
 // 只有顯示的整秒變了才通知 ESLyric 重算（拖曳時最多約每 30 ms 一次）。要在主執行緒呼叫
 void set_seek_preview(std::optional<double> seconds);
 
+// 自編版新增（2026-11-06）：自訂標題格式欄位（例如 %cui_volume_icon%）的值變了，通知 ESLyric 重算標題格式與 visibility。
+// ESLyric 的 visibility 不會隨時重算，要對曲目送一次 dispatch_refresh：正在播放就送播放中的曲目，沒在播放就送播放清單反白的那首。
+// 要在主執行緒呼叫
+void refresh_layout_fields();
+
 } // namespace cui::main_menu

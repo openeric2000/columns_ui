@@ -2,6 +2,7 @@
 
 #include "volume_chip.h"
 #include "font_utils.h"
+#include "menu_items.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
 #include "output_chip.h"
@@ -1038,11 +1039,14 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
         target.bottom - target.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
-// 設定頁的開關：寫入（勾選、Reset page 都算）時重排圖示，輸出裝置顯示的位置也跟著變（右邊那串的寬度不同）
+// 設定頁的開關：寫入（勾選、Reset page 都算）時重排圖示，輸出裝置顯示的位置也跟著變（右邊那串的寬度不同），
+// 並通知 ESLyric 重算 %cui_volume_icon%（main.xml 的音量條、dB、靜音鈕依它顯示或隱藏）。
+// 通知排到主執行緒再做（設定值載入時也可能呼叫這個回呼，那時服務還沒就緒）
 fbh::ConfigBool enabled(GUID{0x7c3d9e12, 0x5b84, 0x4f6a, {0x91, 0x2e, 0xa4, 0x08, 0x6d, 0xf3, 0x5c, 0x7b}}, false,
     [](bool, bool, std::optional<uint32_t>) {
         refresh_layouts();
         output_chip::refresh_layouts();
+        fb2k::inMainThread([] { main_menu::refresh_layout_fields(); });
     });
 
 } // namespace cui::volume_chip
