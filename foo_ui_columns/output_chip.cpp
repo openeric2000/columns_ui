@@ -1068,10 +1068,20 @@ public:
     void refresh_layout()
     {
         const auto old_rel = m_current_rel;
+        const auto old_target = m_target_rel;
+        const auto was_sliding = m_sliding;
         const auto had_position = m_rel_valid && IsWindowVisible(m_wnd);
 
         m_sliding = false;
         (void)compute_layout();
+
+        // 滑動途中又收到同一個目標（按播放時先排了一次、新曲目事件又來一次）：照原來的動畫滑完，不要從目前位置重來
+        // （重來會讓動畫中途又加速一次）。目標變了（預測錯了曲長版本）才換成新的動畫
+        if (was_sliding && m_target_rel == old_target) {
+            m_sliding = true;
+            apply_layout();
+            return;
+        }
 
         if (had_position && old_rel != m_target_rel) {
             m_slide_back = m_target_rel > old_rel;
@@ -1614,7 +1624,7 @@ class ChipPlayCallback : public play_callback_static {
 public:
     unsigned get_flags() override
     {
-        return flag_on_playback_new_track | flag_on_playback_stop;
+        return flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_stop;
     }
 
     void on_playback_new_track(metadb_handle_ptr track) override
@@ -1623,8 +1633,20 @@ public:
         g_long_track = track.is_valid() && track->get_length() >= 3600.0;
         relayout();
     }
-    // 開始播放時曲長還不知道，等 on_playback_new_track 才排版，才不會先動一次、曲長出來又動一次
-    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
+    // 按下播放就先把裝置顯示往左推開（2026-11-06，使用者回報按播放瞬間時間文字疊在裝置名稱上）：
+    // 時間文字在新曲目事件（開檔完成）那一格就出現，原本裝置顯示也等到那時才開始滑，要約 0.07 秒才滑出時間文字的位置，這段時間兩者重疊；
+    // 改成按下播放就先滑，開檔的時間（本地 FLAC 幾十毫秒、DSD 與 ASIO 更久）就是領先量。
+    // 開始時曲長還不知道，一小時以上與不到一小時的時間文字寬度不同（使用者 2026-11-05 指示不要先動一次、曲長出來又動一次），
+    // 所以先預測要播哪一首：佇列第一首，沒有就用播放清單反白的那首；預測不到沿用上一次的值。預測錯了新曲目事件會再修一次
+    void on_playback_starting(play_control::t_track_command command, bool paused) override
+    {
+        if (g_playing)
+            return;
+
+        g_playing = true;
+        g_long_track = predict_long_track();
+        relayout();
+    }
     void on_playback_stop(play_control::t_stop_reason reason) override
     {
         g_playing = false;
@@ -1639,6 +1661,30 @@ public:
     void on_volume_change(float new_value) override {}
 
 private:
+    // 要播的曲目有沒有一小時以上：佇列第一首，沒有就是播放清單反白的那首；問不到就沿用上一次的值
+    static bool predict_long_track()
+    {
+        try {
+            const auto playlists = playlist_manager::get();
+            metadb_handle_ptr handle;
+
+            if (playlists->queue_get_count() > 0) {
+                pfc::list_t<t_playback_queue_item> queue;
+                playlists->queue_get_contents(queue);
+                if (queue.get_count() > 0)
+                    handle = queue[0].m_handle;
+            }
+            if (handle.is_empty())
+                playlists->activeplaylist_get_focus_item_handle(handle);
+
+            if (handle.is_valid())
+                return handle->get_length() >= 3600.0;
+        }
+        catch (...) {
+        }
+        return g_long_track;
+    }
+
     static void relayout()
     {
         for (const auto chip : live_chips())
