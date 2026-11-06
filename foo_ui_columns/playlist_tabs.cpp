@@ -11,8 +11,8 @@ namespace cui::panels::playlist_tabs {
 
 namespace {
 
-// 自編版新增：底線式分頁的底線顏色（主題紅，跟專輯標頭播放鍵、ESLyric 進度條同色）
-constexpr COLORREF underline_tab_accent_colour = RGB(247, 11, 11);
+// 自編版新增：底線式分頁的底線顏色（主題紅 #e5262b，跟專輯標頭播放鍵、進度條同色；原本是 247,11,11，2026-11-07 調柔）
+constexpr COLORREF underline_tab_accent_colour = RGB(229, 38, 43);
 // 自編版新增：底線式分頁的左右、上下留白（DIP）
 constexpr int underline_tab_padding_x = 14;
 constexpr int underline_tab_padding_y = 5;

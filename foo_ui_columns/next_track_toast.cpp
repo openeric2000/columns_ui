@@ -478,7 +478,7 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
     }
 
     // 從 12 點鐘方向順時針畫剩餘的弧，剩餘變少時弧的末端往逆時針退
-    Gdiplus::Pen arc(rgba(255, 247, 11, 11), layout.stroke);
+    Gdiplus::Pen arc(rgba(255, 229, 38, 43), layout.stroke); // 主題紅 #e5262b
     arc.SetStartCap(Gdiplus::LineCapRound);
     arc.SetEndCap(Gdiplus::LineCapRound);
 

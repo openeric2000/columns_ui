@@ -58,7 +58,8 @@ constexpr UINT_PTR timer_wheel_commit = 1;
 
 const Gdiplus::Color background_colour(255, 24, 24, 24);
 const Gdiplus::Color track_colour(255, 61, 61, 61);
-const Gdiplus::Color played_colour(255, 247, 11, 11);
+// 主題紅（2026-11-07 從 247,11,11 調柔成 229,38,43 = #e5262b；全主題一起換，見待做清單 v1.4 第 6 個）
+const Gdiplus::Color played_colour(255, 229, 38, 43);
 
 // 每跳轉完成一次（任何來源：這個進度條、別的進度條、快速鍵）加一，進度條用它判斷自己發的跳轉完成了沒
 std::atomic<uint64_t> seek_generation{0};
