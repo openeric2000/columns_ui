@@ -18,6 +18,7 @@
 #include "migrate.h"
 #include "legacy_artwork_config.h"
 #include "menu_items.h"
+#include "nocturne_timing.h"
 #include "rebar.h"
 #include "win32.h"
 
@@ -512,7 +513,8 @@ void cui::MainWindow::begin_startup_fade()
 
         m_startup_fade = std::thread([wnd = m_wnd, cancel = m_startup_fade_cancel.get(), target] {
             // 一般計時器精度約 15 毫秒，淡入要細一點才不會一格一格跳
-            timeBeginPeriod(1);
+            nocturne_timing::TimerResolution resolution;
+            resolution.request(true);
 
             const auto start = std::chrono::steady_clock::now();
             for (;;) {
@@ -532,7 +534,7 @@ void cui::MainWindow::begin_startup_fade()
                 }
             }
 
-            timeEndPeriod(1);
+            resolution.request(false);
             PostMessage(wnd, MSG_STARTUP_FADE_DONE, 0, 0);
         });
     } catch (...) {

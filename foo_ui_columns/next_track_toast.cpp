@@ -8,6 +8,7 @@
 #include "font_utils.h"
 #include "menu_items.h"
 #include "nocturne_text.h"
+#include "nocturne_timing.h"
 #include "playlist_item_helpers.h"
 #include "splitter.h"
 
@@ -46,11 +47,6 @@ constexpr double fade_out_seconds = 0.5;
 constexpr double max_step_seconds = 0.04;
 // 換曲後這段時間不顯示提示，避免換曲瞬間播放位置還沒更新而誤判
 constexpr auto suppress_after_new_track = std::chrono::milliseconds(1500);
-// 倒數圈用的播放位置要保持連續：暫停→繼續時 fb2k 回報的位置會往前跳約 0.2～0.3 秒（ASIO+DSD，錄影量到進度條紅線跳 2 px、
-// 圈內數字早翻一格），狂按暫停就一直小卡。單次不超過這個秒數的跳動當成回報誤差吸收掉，更大的（跳轉、換曲）照實顯示
-constexpr double max_absorb_seconds = 0.6;
-// 吸收掉的偏差用這個時間常數慢慢歸零，免得每次暫停繼續都累積落後
-constexpr double offset_decay_seconds = 0.7;
 // 提示淡入時從上方多少 DIP 滑下來
 constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
@@ -686,7 +682,6 @@ private:
     };
 
     std::optional<Want> evaluate();
-    double smooth_position(double source, bool paused);
     void update_next(const metadb_handle_ptr& now_playing);
     bool ensure_window(HWND owner, const Layout& layout);
     void destroy_window();
@@ -701,9 +696,8 @@ private:
     // 滑鼠停在卡片上（畫面微亮）；圓角半徑（像素，點擊判斷用，每次畫時更新）
     bool m_hover{};
     int m_corner_radius{};
-    UINT m_interval{};
-    // 倒數期間是否已把系統計時精度調成 1 ms（要成對還原）
-    bool m_high_resolution_timer{};
+    // 掛在 m_timer_wnd 上的雙頻計時器（動畫 16 ms／閒置 150 ms），動畫期間才把系統計時精度調成 1 ms
+    nocturne_timing::WindowTimer m_timer;
     double m_alpha{};
     Clock::time_point m_last_tick{Clock::now()};
     // 換曲後到這個時間點之前不顯示
@@ -711,12 +705,8 @@ private:
     // 這一輪 evaluate() 是因為展開頁已經不在（收合、動畫中、截圖視窗還蓋著）而沒有東西要顯示；
     // 這種情況提示要直接收掉，不能淡出（見 tick）
     bool m_stage_unavailable{};
-    // 播放位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
-    bool m_position_valid{};
-    bool m_position_paused{};
-    double m_position_source{};
-    double m_position_offset{};
-    Clock::time_point m_position_time{};
+    // 倒數圈用的播放位置要保持連續：吸收暫停→繼續時 fb2k 回報的小誤差（跟進度條共用同一套）
+    nocturne_timing::PositionSmoother m_smoother;
 
     std::optional<NextTrack> m_next;
     metadb_handle_ptr m_next_for;
@@ -855,45 +845,25 @@ void Controller::start()
 
     m_timer_wnd = CreateWindowEx(0, timer_class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
         core_api::get_my_instance(), nullptr);
+    m_timer.start(m_timer_wnd, timer_id);
     set_interval(interval_idle_ms);
 }
 
 void Controller::stop()
 {
+    m_timer.stop();
     if (m_timer_wnd) {
-        KillTimer(m_timer_wnd, timer_id);
         DestroyWindow(m_timer_wnd);
         m_timer_wnd = nullptr;
     }
     destroy_window();
-
-    if (m_high_resolution_timer) {
-        timeEndPeriod(1);
-        m_high_resolution_timer = false;
-    }
 }
 
 void Controller::set_interval(UINT ms)
 {
-    if (!m_timer_wnd)
-        return;
-
     // 只有顯示動畫的期間才把系統計時精度調成 1 ms：預設 15.6 ms 的精度下，16 ms 的計時器常常要等到 31 ms 才觸發，
     // 動畫實測只剩 33～41 Hz；閒置時還原，不影響耗電
-    const auto want_high_resolution = ms == interval_active_ms;
-    if (want_high_resolution != m_high_resolution_timer) {
-        if (want_high_resolution)
-            timeBeginPeriod(1);
-        else
-            timeEndPeriod(1);
-        m_high_resolution_timer = want_high_resolution;
-    }
-
-    if (m_interval == ms)
-        return;
-
-    m_interval = ms;
-    SetTimer(m_timer_wnd, timer_id, ms, nullptr);
+    m_timer.set_interval(ms, ms == interval_active_ms);
 }
 
 // 換曲了：提示講的下一首已經在播，舊的提示不用淡出，直接收掉；錄影量到原本換曲後舊提示還會殘留 0.2～0.3 秒
@@ -901,7 +871,7 @@ void Controller::on_new_track()
 {
     m_suppress_until = Clock::now() + suppress_after_new_track;
     m_next_valid = false;
-    m_position_valid = false;
+    m_smoother.reset();
 
     if (m_wnd) {
         destroy_window();
@@ -941,37 +911,6 @@ void Controller::update_next(const metadb_handle_ptr& now_playing)
     m_next_valid = true;
 }
 
-// 讓倒數用的播放位置保持連續。顯示位置＝來源位置＋偏差；每次比較「來源位置實際前進多少」與「這段時間理應前進多少
-// （播放中＝經過的時間，暫停中＝0）」，差距在 max_absorb_seconds 以內就算回報誤差，記進偏差讓顯示位置不跳，
-// 差距更大（跳轉）就重設偏差照實顯示；偏差再以 offset_decay_seconds 慢慢歸零
-double Controller::smooth_position(double source, bool paused)
-{
-    const auto now = Clock::now();
-
-    if (m_position_valid) {
-        const auto dt = std::chrono::duration<double>(now - m_position_time).count();
-        const auto expected = (paused && m_position_paused) ? 0.0 : dt;
-        const auto residual = (source - m_position_source) - expected;
-
-        if (std::abs(residual) <= max_absorb_seconds)
-            m_position_offset -= residual;
-        else
-            m_position_offset = 0;
-
-        // 暫停中偏差要原地不動，不然顯示位置會在暫停時慢慢往前爬
-        if (!paused)
-            m_position_offset *= std::exp(-dt / offset_decay_seconds);
-    } else {
-        m_position_offset = 0;
-    }
-
-    m_position_valid = true;
-    m_position_paused = paused;
-    m_position_source = source;
-    m_position_time = now;
-    return source + m_position_offset;
-}
-
 std::optional<Controller::Want> Controller::evaluate()
 {
     m_stage_unavailable = false;
@@ -997,14 +936,14 @@ std::optional<Controller::Want> Controller::evaluate()
 
     if (playback->is_playing()) {
         if (!playback->get_now_playing(now_playing)) {
-            m_position_valid = false;
+            m_smoother.reset();
             return {};
         }
 
         const auto length = playback->playback_get_length();
         // 長度未知（串流）或太短（不到 2N 秒）不顯示，免得一開始就出現
         if (length <= 0 || length < 2.0 * count) {
-            m_position_valid = false;
+            m_smoother.reset();
             return {};
         }
 
@@ -1017,7 +956,7 @@ std::optional<Controller::Want> Controller::evaluate()
         }
 
         // 再把暫停→繼續瞬間位置往前跳的小誤差吸收掉，圈與數字才不會在狂按暫停時一直跳
-        const auto current_position = smooth_position(source_position, paused);
+        const auto current_position = m_smoother.filter(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
         // 淡出期間仍回傳內容（fading），倒數圈與數字照常往 0 走；原本這段傳回空，畫面凍結在「剩 5% 的紅弧＋1」就淡掉
@@ -1030,7 +969,7 @@ std::optional<Controller::Want> Controller::evaluate()
         want.remaining = std::max(remaining, 0.0);
         want.ratio = want.remaining / count;
     } else {
-        m_position_valid = false;
+        m_smoother.reset();
 
         if (playlist_manager::get()->queue_get_count() == 0)
             return {};

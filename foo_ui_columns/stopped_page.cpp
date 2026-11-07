@@ -5,6 +5,7 @@
 #include "font_utils.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "nocturne_timing.h"
 #include "splitter.h"
 
 #pragma comment(lib, "winmm.lib")
@@ -256,9 +257,8 @@ private:
 
     HWND m_timer_wnd{};
     HWND m_wnd{};
-    UINT m_interval{};
-    // 淡入淡出期間是否已把系統計時精度調成 1 ms（要成對還原）
-    bool m_high_resolution_timer{};
+    // 掛在 m_timer_wnd 上的雙頻計時器（淡入淡出 16 ms／閒置 150 ms），動畫期間才把系統計時精度調成 1 ms
+    nocturne_timing::WindowTimer m_timer;
     double m_alpha{};
     Clock::time_point m_last_tick{Clock::now()};
     Surface m_surface;
@@ -311,46 +311,26 @@ void Controller::start()
 
     m_timer_wnd = CreateWindowEx(
         0, timer_class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, core_api::get_my_instance(), nullptr);
+    m_timer.start(m_timer_wnd, timer_id);
     set_interval(interval_idle_ms);
 }
 
 void Controller::stop()
 {
+    m_timer.stop();
     if (m_timer_wnd) {
-        KillTimer(m_timer_wnd, timer_id);
         DestroyWindow(m_timer_wnd);
         m_timer_wnd = nullptr;
     }
 
     destroy_window();
     m_page.reset();
-
-    if (m_high_resolution_timer) {
-        timeEndPeriod(1);
-        m_high_resolution_timer = false;
-    }
 }
 
 void Controller::set_interval(UINT ms)
 {
-    if (!m_timer_wnd)
-        return;
-
     // 只有淡入淡出的期間才把系統計時精度調成 1 ms，閒置時還原（理由同下一首提示）
-    const auto want_high_resolution = ms == interval_active_ms;
-    if (want_high_resolution != m_high_resolution_timer) {
-        if (want_high_resolution)
-            timeBeginPeriod(1);
-        else
-            timeEndPeriod(1);
-        m_high_resolution_timer = want_high_resolution;
-    }
-
-    if (m_interval == ms)
-        return;
-
-    m_interval = ms;
-    SetTimer(m_timer_wnd, timer_id, ms, nullptr);
+    m_timer.set_interval(ms, ms == interval_active_ms);
 }
 
 // 換曲了：手上的圖是上一首的展開頁，不能拿來當這一首的最後一頁

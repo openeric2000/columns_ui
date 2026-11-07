@@ -1067,6 +1067,9 @@
     <ClInclude Include="nocturne_text.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="nocturne_timing.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="permutation_utils.h">
       <Filter>Utilities</Filter>
     </ClInclude>
