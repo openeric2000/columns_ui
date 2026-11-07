@@ -1845,6 +1845,13 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
         // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，
         // 吞掉就變成每隔一下沒反應（2026-11-02 錄影：74 下點擊只有 43 次切換）。代價是誤雙擊會開了又關
         return DefSubclassProc(wnd, WM_LBUTTONDOWN, wp, lp);
+    case WM_KEYDOWN:
+        // ESLyric 自己不會把按鍵交給 foobar2000 的快速鍵系統：焦點停在歌詞列或展開播放頁時，使用者綁的快速鍵（例如
+        // Ctrl+F＝搜尋專輯清單）完全沒反應（2026-11-07 實測，連 Ctrl+Shift+F 也不行）。所以在這裡先問快速鍵系統，
+        // 有綁定就執行、不再交給 ESLyric；沒綁定的鍵照舊交給它
+        if (uie::window::g_process_keydown_keyboard_shortcuts(wp))
+            return 0;
+        break;
     case WM_NCDESTROY:
         RemoveWindowSubclass(wnd, s_now_playing_bar_subclass_proc, id);
         break;
