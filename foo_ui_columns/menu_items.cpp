@@ -260,11 +260,17 @@ public:
 
 play_callback_static_factory_t<NowPlayingViewPlayCallback> now_playing_view_play_callback;
 
-// 自編版新增：展開頁樣式，1 置中（預設）、2 靠左＋VU 表、3 靠左＋資訊卡，ESLyric 佈局用 %cui_now_playing_style% 切換
+// 自編版新增：展開頁樣式，1 置中（預設）、3 靠左＋資訊卡，ESLyric 佈局用 %cui_now_playing_style% 切換
+// （原本的 2「靠左＋VU 表」已在 2026-11-07 拿掉，編號不重排：舊設定裡存的值是 2 的話一律當成 1，見 now_playing_style_value）
 // ESLyric 的 visibility 不會隨時重算，所以切換後對正在播放的曲目送一次 dispatch_refresh，讓佈局重新套用
-// 樣式 2 的 VU 表是另一個面板，由分割面板排版時疊上去，所以切換後也要重新排版
 fbh::ConfigUint32 now_playing_style(
     GUID{0xdd906dca, 0x9b49, 0x492c, {0x8b, 0xb2, 0x43, 0xb9, 0xef, 0xe4, 0xf1, 0x8f}}, 1);
+
+// 目前生效的樣式：只有 3 是靠左＋資訊卡，其他值（含已拿掉的 2）都是置中
+uint32_t now_playing_style_value()
+{
+    return now_playing_style.get() == 3 ? 3 : 1;
+}
 
 // 對正在播放的曲目送一次 dispatch_refresh，讓 ESLyric 重算標題格式與 visibility
 void refresh_now_playing_track()
@@ -277,7 +283,6 @@ void refresh_now_playing_track()
 void set_now_playing_style(uint32_t style)
 {
     now_playing_style = style;
-    FlatSplitterPanel::s_refresh_now_playing();
     refresh_now_playing_track();
 }
 
@@ -441,7 +446,7 @@ public:
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
         if (index == 1) {
-            out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style.get()));
+            out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style_value()));
             return true;
         }
 
@@ -524,21 +529,16 @@ const MainMenuCommand theme_font{theme_font_id, nocturne_text::theme_font_name, 
 
 const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, nocturne_text::style_centered_name,
     nocturne_text::style_centered_description, [] { set_now_playing_style(1); }, {},
-    [] { return now_playing_style.get() == 1; }};
-
-// 2026-10-27 使用者覺得樣式 2 還不對，先藏起來：選單項目要按住 Shift 才出現，也不放進切換循環
-const MainMenuCommand now_playing_style_spectrum{now_playing_style_spectrum_id, nocturne_text::style_spectrum_name,
-    nocturne_text::style_spectrum_description, [] { set_now_playing_style(2); }, {},
-    [] { return now_playing_style.get() == 2; }, true};
+    [] { return now_playing_style_value() == 1; }};
 
 const MainMenuCommand now_playing_style_info{now_playing_style_info_id, nocturne_text::style_info_name,
     nocturne_text::style_info_description, [] { set_now_playing_style(3); }, {},
-    [] { return now_playing_style.get() == 3; }};
+    [] { return now_playing_style_value() == 3; }};
 
-// ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，在置中與靠左＋資訊卡之間切換（樣式 2 暫時不放進來）
+// ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，在置中與靠左＋資訊卡之間切換
 const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, nocturne_text::cycle_style_name,
     nocturne_text::cycle_style_description,
-    [] { set_now_playing_style(now_playing_style.get() == 1 ? 3 : 1); }};
+    [] { set_now_playing_style(now_playing_style_value() == 1 ? 3 : 1); }};
 
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},
@@ -679,8 +679,8 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
-    stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_spectrum, now_playing_style_info,
-    cycle_now_playing_style, next_track_toast_toggle, theme_font);
+    stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_info, cycle_now_playing_style,
+    next_track_toast_toggle, theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);
@@ -766,11 +766,6 @@ void on_lock_window_size_changed()
 }
 
 } // namespace commands
-
-uint32_t get_now_playing_style()
-{
-    return commands::now_playing_style.get();
-}
 
 std::optional<double> get_paused_position()
 {

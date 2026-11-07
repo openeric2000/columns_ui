@@ -339,7 +339,7 @@ void FlatSplitterPanel::refresh_children()
     on_size_changed();
 
     if (IsWindowVisible(get_wnd())) {
-        // 自編版新增：展開頁右側的容器只由 on_size_changed 決定顯示與否，這裡不強制顯示
+        // 自編版新增：展開頁右側的容器（舊版面留下的 VU 表面板）由 on_size_changed 一律藏起來，這裡不強制顯示
         const auto now_playing_side = get_now_playing_side_panel();
 
         for (auto&& panel : created_panels) {
@@ -362,7 +362,7 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
     pfc::list_t<unsigned> sizes;
     get_panels_sizes(width, height, sizes);
     const auto count = m_panels.size();
-    // 自編版新增：播放列的容器另外處理，見 s_toggle_now_playing；展開頁右側（VU 表）排完播放列後再疊上去
+    // 自編版新增：播放列的容器另外處理，見 s_toggle_now_playing；展開頁右側（舊版面留下的 VU 表面板）排完後藏起來
     const auto now_playing_bar = get_now_playing_bar_panel();
     const auto now_playing_side = get_now_playing_side_panel();
     RECT now_playing_bar_rect{};
@@ -452,23 +452,11 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
     }
 
+    // 展開頁樣式 2（靠左＋VU 表）已在 2026-11-07 拿掉。舊的版面裡可能還留著自訂標題「展開頁右側」的面板（VU 表），
+    // 不能讓它變成一般面板擠進版面，所以一律藏起來；版面設定檔有檔頭雜湊不能手改，要移掉它得從 Columns UI 的版面設定畫面刪
     if (now_playing_side && now_playing_side->m_wnd) {
-        // 展開且樣式 2 時疊在播放列（ESLyric）上，對齊 main.xml 樣式 2 的右側面板：
-        // 寬 640、離右邊 100，在展開區（扣掉播放列高度）垂直置中；高度照 VU 表外觀 Modern antonyb 的比例 830×199
-        // main.xml 的右側面板寬度、右留白改了，這裡要跟著改
-        // 展開動畫進行中先不顯示，等展開頁整塊出來再疊上去
-        if (m_now_playing_expanded && !m_now_playing_animating && main_menu::get_now_playing_style() == 2) {
-            const int stage_height = gsl::narrow<int>(height) - (now_playing_bar_rect.bottom - now_playing_bar_rect.top);
-            const int side_width = uih::scale_dpi_value(640);
-            const int side_height = MulDiv(side_width, 199, 830);
-            const int x = gsl::narrow<int>(width) - uih::scale_dpi_value(100) - side_width;
-            const int y = std::max(0, (stage_height - side_height) / 2);
-            SetWindowPos(
-                now_playing_side->m_wnd, HWND_TOP, x, y, side_width, side_height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-        } else {
-            SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
-                SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
+        SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
+            SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
@@ -1427,16 +1415,6 @@ FlatSplitterPanel::Panel::Ptr FlatSplitterPanel::get_now_playing_side_panel() co
     return find_panel_by_custom_title(now_playing_side_title);
 }
 
-void FlatSplitterPanel::s_refresh_now_playing()
-{
-    for (size_t index = 0; index < g_instances.get_count(); index++) {
-        const auto splitter = g_instances[index];
-
-        if (splitter->get_now_playing_side_panel())
-            splitter->on_size_changed();
-    }
-}
-
 bool FlatSplitterPanel::s_toggle_now_playing()
 {
     for (size_t index = 0; index < g_instances.get_count(); index++) {
@@ -1732,7 +1710,7 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
     if (!now_playing_bar || !now_playing_bar->m_wnd
         || elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
         m_now_playing_animating = false;
-        // 最終區域、展開頁右側面板
+        // 最終區域
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
     } else {

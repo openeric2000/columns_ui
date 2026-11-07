@@ -114,10 +114,6 @@ inline constexpr auto theme_font_description
       "overall list size.";
 inline constexpr auto style_centered_name = "Now Playing: Centered";
 inline constexpr auto style_centered_description = "Centers the cover and lyrics together in the now playing view.";
-inline constexpr auto style_spectrum_name = "Now Playing: Left + VU Meter";
-inline constexpr auto style_spectrum_description
-    = "Puts the cover on the left and the VU meter on the right (the panel with the custom title \"Now Playing "
-      "Side\" in the layout).";
 inline constexpr auto style_info_name = "Now Playing: Left + Info Card";
 inline constexpr auto style_info_description = "Puts the cover on the left and track information on the right.";
 inline constexpr auto cycle_style_name = "Toggle Now Playing Style";
@@ -261,9 +257,6 @@ inline constexpr auto theme_font_description
     = "一次換掉清單、分頁、資料夾樹、播放列與專輯標頭的字型，並調整清單的整體大小。";
 inline constexpr auto style_centered_name = "展開頁：置中";
 inline constexpr auto style_centered_description = "展開頁的封面與歌詞整組置中。";
-inline constexpr auto style_spectrum_name = "展開頁：靠左＋VU 表";
-inline constexpr auto style_spectrum_description
-    = "展開頁的封面靠左，右邊顯示 VU 表（版面裡自訂標題「展開頁右側」的面板）。";
 inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
 inline constexpr auto style_info_description = "展開頁的封面靠左，右邊顯示曲目資訊。";
 inline constexpr auto cycle_style_name = "切換展開頁樣式";
