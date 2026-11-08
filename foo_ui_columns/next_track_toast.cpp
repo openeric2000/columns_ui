@@ -322,6 +322,11 @@ Gdiplus::FontStyle pick_font_style(const Gdiplus::FontFamily& family)
     return Gdiplus::FontStyleItalic;
 }
 
+// 卡片底的不透明度（0～255）。原本 242（約 95%，幾乎實心）；展開頁封面虛化背景預設開啟後背景會依封面變藍、綠、粉紅，
+// 實心深灰卡片和背景色不搭，所以透出底色（2026-11-08 使用者要求）。第一次調到 205（80%）在深色底上肉眼幾乎看不出差別，
+// 使用者回報「似乎沒動」，所以再降到 150（約 59%）。再透明的話，卡片後面若剛好是亮的文字或圖（播放清單、封面）會透出殘影、壓到卡片上的字
+constexpr BYTE card_alpha = 150;
+
 // 靜態那一層：卡片底、封面、文字（換歌或換設定才重畫）
 void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, Gdiplus::Bitmap* cover)
 {
@@ -339,7 +344,7 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
 
     Gdiplus::GraphicsPath card;
     add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, width - 1, height - 1), static_cast<float>(layout.radius));
-    Gdiplus::SolidBrush background(rgba(242, 30, 31, 33));
+    Gdiplus::SolidBrush background(rgba(card_alpha, 30, 31, 33));
     g.FillPath(&background, &card);
     Gdiplus::Pen border(rgba(26, 255, 255, 255), 1.f);
     g.DrawPath(&border, &card);

@@ -36,8 +36,10 @@ void settings_changed()
 
 } // namespace
 
-// 預設不勾（跟原本的畫面一樣）；公開版要不要預設勾，待使用者決定
-fbh::ConfigBool enabled(GUID{0x2b8e4f71, 0x6a30, 0x4d95, {0x8c, 0x1e, 0xf2, 0x07, 0x5b, 0x93, 0xa6, 0x4d}}, false,
+// 預設勾選（2026-11-08 使用者決定：封面虛化背景預設開啟）。
+// 換過一次 GUID：舊版預設是不勾，各環境的設定檔裡已經存了「不勾」（舊 GUID 2b8e4f71-6a30-4d95-8c1e-f2075b93a64d），
+// 直接改預設值蓋不掉；換新 GUID 後舊值自然失效，所有環境（含朋友版、主環境）升級後都變成預設勾選，使用者之後自己取消勾選會照樣記住
+fbh::ConfigBool enabled(GUID{0xbee98704, 0x5ed2, 0x445c, {0x93, 0xba, 0x42, 0xed, 0xee, 0xc8, 0xcb, 0x07}}, true,
     [](bool, bool, std::optional<uint32_t>) { settings_changed(); });
 
 fbh::ConfigUint32 cap_percent(GUID{0x91c5a3d8, 0x0e74, 0x4b2f, {0xa9, 0x68, 0x3d, 0xc1, 0x7e, 0x05, 0xb2, 0x8f}},
