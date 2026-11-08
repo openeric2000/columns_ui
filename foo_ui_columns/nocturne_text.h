@@ -83,6 +83,14 @@ inline constexpr wchar_t font_tab_title[] = L"Fonts";
 inline constexpr auto about_tab_name = "About";
 inline constexpr wchar_t about_tab_title[] = L"About";
 inline constexpr wchar_t about_version_prefix[] = L"Version ";
+// 「外觀」分頁（2026-11-08）：目前只有細捲軸開關
+inline constexpr auto appearance_tab_name = "Appearance";
+inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
+inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
+inline constexpr wchar_t thin_scrollbar_note[]
+    = L"A slim bar along the right edge of the playlist and the folder tree. It widens when the pointer comes near it. "
+      L"It floats on top of the list instead of taking up space, so the list gets a little wider. "
+      L"Turn this off to use the standard Windows scroll bars. Takes effect immediately.";
 inline constexpr auto startup_tab_name = "Startup";
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
@@ -231,6 +239,13 @@ inline constexpr wchar_t font_tab_title[] = L"字型";
 inline constexpr auto about_tab_name = "關於";
 inline constexpr wchar_t about_tab_title[] = L"關於";
 inline constexpr wchar_t about_version_prefix[] = L"版本 ";
+// 「外觀」分頁（2026-11-08）：目前只有細捲軸開關
+inline constexpr auto appearance_tab_name = "外觀";
+inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
+inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
+inline constexpr wchar_t thin_scrollbar_note[]
+    = L"播放清單與資料夾樹的右邊緣各有一條很細的捲軸，滑鼠靠近才變寬。它浮在清單上、不占版面，清單因此多出一點寬度。"
+      L"關掉就用 Windows 原本的捲軸。改了馬上生效。";
 inline constexpr auto startup_tab_name = "啟動";
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
