@@ -56,7 +56,8 @@ inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an ic
 inline constexpr wchar_t volume_muted[] = L"Muted";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
-inline constexpr auto next_toast_tab_name = "Up Next Notice";
+// 「下一首提示」與「播放佇列」兩個只有少數選項的分頁合併成一頁（2026-11-08 使用者要求）
+inline constexpr auto next_toast_tab_name = "Up Next & Queue";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
 inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
 inline constexpr wchar_t next_toast_seconds_label[] = L"Start counting down this many seconds before the track ends (3-30)";
@@ -69,34 +70,32 @@ inline constexpr wchar_t next_toast_size_label[] = L"Size";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"Small (85%)", L"Standard", L"Large (120%)", L"Extra large (140%)"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
-// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+// 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "Playback";
-inline constexpr auto queue_tab_name = "Queue";
 inline constexpr wchar_t progress_title[] = L"Progress bar";
 inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
 inline constexpr wchar_t wheel_step_label[] = L"Seconds per notch (1-60)";
 inline constexpr wchar_t wheel_shift_step_label[] = L"Seconds per notch while holding Shift (5-300)";
 inline constexpr auto font_tab_name = "Fonts";
 inline constexpr wchar_t font_tab_title[] = L"Fonts";
-// 「啟動」分頁（開機優化 B）
 // 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
 inline constexpr auto about_tab_name = "About";
 inline constexpr wchar_t about_tab_title[] = L"About";
 inline constexpr wchar_t about_version_prefix[] = L"Version ";
-// 「外觀」分頁（2026-11-08）：目前只有細捲軸開關
-inline constexpr auto appearance_tab_name = "Appearance";
+// 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
+inline constexpr auto interface_tab_name = "Interface";
+// 捲軸：細捲軸開關
 inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
-// 「展開頁」分頁（2026-11-08）：封面虛化背景
-inline constexpr auto expanded_tab_name = "Now Playing";
+// 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
 inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
 inline constexpr wchar_t expanded_bg_cap_label[] = L"Brightness limit";
 inline constexpr wchar_t expanded_bg_cap_names[6][24]
-    = {L"10% (very dark)", L"15% (default)", L"20%", L"25%", L"30%", L"35% (lighter)"};
-inline constexpr auto startup_tab_name = "Startup";
+    = {L"10% (very dark)", L"15%", L"20% (default)", L"25%", L"30%", L"35% (lighter)"};
+// 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
 inline constexpr wchar_t startup_hold_note[]
@@ -215,7 +214,7 @@ inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示（Windows 
 inline constexpr wchar_t volume_muted[] = L"靜音";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
-inline constexpr auto next_toast_tab_name = "下一首提示";
+inline constexpr auto next_toast_tab_name = "下一首與佇列";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";
 inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
 inline constexpr wchar_t next_toast_seconds_label[] = L"歌曲最後幾秒開始倒數（3～30 秒）";
@@ -228,34 +227,32 @@ inline constexpr wchar_t next_toast_size_label[] = L"大小";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"小（85%）", L"標準", L"大（120%）", L"特大（140%）"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
 inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
-// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+// 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "播放";
-inline constexpr auto queue_tab_name = "播放佇列";
 inline constexpr wchar_t progress_title[] = L"進度條";
 inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
 inline constexpr wchar_t wheel_step_label[] = L"每滾一格跳幾秒（1～60）";
 inline constexpr wchar_t wheel_shift_step_label[] = L"按住 Shift 每滾一格跳幾秒（5～300）";
 inline constexpr auto font_tab_name = "字型";
 inline constexpr wchar_t font_tab_title[] = L"字型";
-// 「啟動」分頁（開機優化 B）
 // 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
 inline constexpr auto about_tab_name = "關於";
 inline constexpr wchar_t about_tab_title[] = L"關於";
 inline constexpr wchar_t about_version_prefix[] = L"版本 ";
-// 「外觀」分頁（2026-11-08）：目前只有細捲軸開關
-inline constexpr auto appearance_tab_name = "外觀";
+// 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
+inline constexpr auto interface_tab_name = "介面";
+// 捲軸：細捲軸開關
 inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
-// 「展開頁」分頁（2026-11-08）：封面虛化背景
-inline constexpr auto expanded_tab_name = "展開頁";
+// 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
 inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";
 inline constexpr wchar_t expanded_bg_cap_label[] = L"亮度上限";
 inline constexpr wchar_t expanded_bg_cap_names[6][24]
-    = {L"10%（很暗）", L"15%（預設）", L"20%", L"25%", L"30%", L"35%（偏亮）"};
-inline constexpr auto startup_tab_name = "啟動";
+    = {L"10%（很暗）", L"15%", L"20%（預設）", L"25%", L"30%", L"35%（偏亮）"};
+// 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]

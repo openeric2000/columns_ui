@@ -126,11 +126,8 @@
 #define IDD_PREFS_NEXT_TRACK_TOAST      244
 #define IDD_PREFS_NOCTURNE_PLAYBACK     245
 #define IDD_PREFS_NOCTURNE_FONT         246
-#define IDD_PREFS_NOCTURNE_STARTUP      247
-#define IDD_PREFS_NOCTURNE_QUEUE        248
 #define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDD_PREFS_NOCTURNE_APPEARANCE   250
-#define IDD_PREFS_NOCTURNE_EXPANDED     251
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007

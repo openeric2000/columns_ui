@@ -16,12 +16,12 @@
 
 namespace cui::expanded_cover_bg {
 
-// 亮度上限（％）：10、15、20、25、30、35 六格，預設 15（使用者 2026-11-08 選的；11/08 傍晚他試了 25% 覺得差異不明顯，要求加到 35%）。
+// 亮度上限（％）：10、15、20、25、30、35 六格，預設 20（原本 15，使用者 2026-11-08 晚上要求改成 20；11/08 傍晚他試了 25% 覺得差異不明顯，要求加到 35%）。
 // 注意：背景亮度超過約 18% 時，沒被選中的歌詞行（灰 118）對比會低於 3:1
 inline constexpr uint32_t cap_min = 10;
 inline constexpr uint32_t cap_max = 35;
 inline constexpr uint32_t cap_step = 5;
-inline constexpr uint32_t cap_default = 15;
+inline constexpr uint32_t cap_default = 20;
 
 extern fbh::ConfigBool enabled;
 extern fbh::ConfigUint32 cap_percent;
