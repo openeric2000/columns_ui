@@ -553,7 +553,6 @@ private:
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::expanded_tab_title);
         SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
-        SetDlgItemText(wnd, IDC_EXPANDED_BG_NOTE, nocturne_text::expanded_bg_note);
         SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
 
         const auto cap_combo = GetDlgItem(wnd, IDC_EXPANDED_BG_CAP);

@@ -438,7 +438,6 @@
 #define IDC_THIN_SCROLLBAR             1350
 #define IDC_THIN_SCROLLBAR_NOTE        1351
 #define IDC_EXPANDED_BG                1360
-#define IDC_EXPANDED_BG_NOTE           1361
 #define IDC_EXPANDED_BG_CAP_LABEL      1362
 #define IDC_EXPANDED_BG_CAP            1363
 #define IDC_ABOUT_NAME                 1340

@@ -60,8 +60,13 @@ constexpr double max_dim = 0.95;
 // 壓暗後補彩度：飽和度放大倍數＝1＋這個值×壓暗比例（壓暗 85% 約放大 2.7 倍），放大後的飽和度最高到 max_saturation
 constexpr double saturation_boost = 2.0;
 constexpr double max_saturation = 0.9;
-// 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度）
-constexpr unsigned algorithm_version = 2;
+// 實際存成圖檔的大小：小圖放大到這個解析度並抖色（見 generate 裡的說明）。640×320 約 4 倍於面板放大前的像素，PNG 約 100～200 KB
+constexpr int output_width = 640;
+constexpr int output_height = 320;
+// 抖色雜訊的幅度（8 位元色階數）
+constexpr double noise_amplitude = 1.5;
+// 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度；3：放大並抖色，避免暗色漸層的色階斷層；4：抖色幅度 1→1.5）
+constexpr unsigned algorithm_version = 4;
 // 等背景執行緒的最長時間（ESLyric 在主執行緒要圖，所以這段時間介面是停住的）。逾時就先回空：
 // 實測 ESLyric 只在換歌時才讀這個路徑，所以逾時的那首歌就沒有背景（下一首起恢復），寧可多等一點。
 // 平常下一首已經提前做好，不會真的等；沒預測到（隨機、點別首歌）才會等 60～200 毫秒
@@ -169,7 +174,7 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
 
         // 檔名＝封面內容＋亮度上限＋演算法版本的雜湊：同一張封面（同專輯的每首歌）共用同一個檔案
         auto hash = fnv1a(data->get_ptr(), data->get_size());
-        const uint32_t salt[] = {cap, algorithm_version, image_width, image_height};
+        const uint32_t salt[] = {cap, algorithm_version, image_width, image_height, output_width, output_height};
         hash = fnv1a(salt, sizeof(salt), hash);
         wchar_t name[32];
         std::swprintf(name, std::size(name), L"%016llx.png", static_cast<unsigned long long>(hash));
@@ -280,51 +285,91 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
             dim = std::max(dim, (peak_luma - limit * 2.0) / (peak_luma - shade_luma));
         dim = std::clamp(dim, 0.0, max_dim);
 
-        Gdiplus::Bitmap result(image_width, image_height, PixelFormat32bppARGB);
-        Gdiplus::BitmapData result_data{};
-        const Gdiplus::Rect result_rect(0, 0, image_width, image_height);
-        if (result.LockBits(&result_rect, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &result_data)
-            != Gdiplus::Ok)
-            return std::nullopt;
-
         // 壓暗後補彩度（2026-11-08 使用者看了粉彩封面壓暗後變成灰灰的、沒有色彩感）：往深色混會讓亮度與色彩一起縮，
         // 又淡又亮的封面壓到 10～35% 亮度後幾乎只剩灰色。所以壓暗越多，飽和度（HSV 的 S）放大越多——只放大色相的偏離、
         // 不動色相；再把亮度校正回壓暗後原本的值，所以「亮度上限」不受影響。白、灰封面本來沒有色（S≈0），放大後還是灰，不會被染色
         const double saturation_gain = 1.0 + saturation_boost * dim;
-        const auto finish = [](double value) { return static_cast<BYTE>(std::clamp(std::lround(value), 0l, 255l)); };
-        for (int y = 0; y < image_height; ++y) {
-            auto* row = static_cast<BYTE*>(result_data.Scan0) + static_cast<ptrdiff_t>(y) * result_data.Stride;
-            for (int x = 0; x < image_width; ++x) {
-                const size_t index = static_cast<size_t>(y) * image_width + x;
-                double r = plane_r[index] * (1.0 - dim) + shade_value * dim;
-                double g = plane_g[index] * (1.0 - dim) + shade_value * dim;
-                double b = plane_b[index] * (1.0 - dim) + shade_value * dim;
+        // 先算出壓暗＋補彩度之後，每個小圖像素的最終顏色（浮點數，還沒進位成 8 位元）
+        std::vector<float> final_r(pixel_count);
+        std::vector<float> final_g(pixel_count);
+        std::vector<float> final_b(pixel_count);
+        for (size_t index = 0; index < pixel_count; ++index) {
+            double r = plane_r[index] * (1.0 - dim) + shade_value * dim;
+            double g = plane_g[index] * (1.0 - dim) + shade_value * dim;
+            double b = plane_b[index] * (1.0 - dim) + shade_value * dim;
 
-                const double top = std::max({r, g, b});
-                const double bottom = std::min({r, g, b});
-                if (dim > 0.0 && top > 1.0 && top > bottom) {
-                    const double saturation = (top - bottom) / top;
-                    const double wanted = std::min(saturation * saturation_gain, max_saturation);
-                    if (wanted > saturation) {
-                        const double before = 0.299 * r + 0.587 * g + 0.114 * b;
-                        const double scale = wanted / saturation;
-                        r = top - (top - r) * scale;
-                        g = top - (top - g) * scale;
-                        b = top - (top - b) * scale;
-                        const double after = 0.299 * r + 0.587 * g + 0.114 * b;
-                        if (after > 0.0) {
-                            const double restore = before / after;
-                            r *= restore;
-                            g *= restore;
-                            b *= restore;
-                        }
+            const double top = std::max({r, g, b});
+            const double bottom = std::min({r, g, b});
+            if (dim > 0.0 && top > 1.0 && top > bottom) {
+                const double saturation = (top - bottom) / top;
+                const double wanted = std::min(saturation * saturation_gain, max_saturation);
+                if (wanted > saturation) {
+                    const double before = 0.299 * r + 0.587 * g + 0.114 * b;
+                    const double scale = wanted / saturation;
+                    r = top - (top - r) * scale;
+                    g = top - (top - g) * scale;
+                    b = top - (top - b) * scale;
+                    const double after = 0.299 * r + 0.587 * g + 0.114 * b;
+                    if (after > 0.0) {
+                        const double restore = before / after;
+                        r *= restore;
+                        g *= restore;
+                        b *= restore;
                     }
                 }
+            }
 
-                row[x * 4 + 0] = finish(b);
-                row[x * 4 + 1] = finish(g);
-                row[x * 4 + 2] = finish(r);
-                row[x * 4 + 3] = 255;
+            final_r[index] = static_cast<float>(r);
+            final_g[index] = static_cast<float>(g);
+            final_b[index] = static_cast<float>(b);
+        }
+
+        // 放大到 output_width×output_height 並「抖色」（dither）。
+        // 背景是暗色的緩慢漸層，8 位元每個色階只差 1，放大後同一個色階會連續好幾百像素，每個色彩通道的階梯位置又不同，
+        // 在最左、最右這種變化最慢的地方就看得到一條條長條色柱（2026-11-08 使用者回報；實測 219 左邊有 257 像素寬的單一色階）。
+        // 所以這裡先自己放大到接近面板的解析度、進位前加上正負 1 階的三角分布雜訊（每個通道各自獨立），
+        // ESLyric 再放大時階梯就被打散成看不出來的細顆粒。雜訊用雜湊當種子，同一張封面每次做出來都一樣
+        Gdiplus::Bitmap result(output_width, output_height, PixelFormat32bppARGB);
+        Gdiplus::BitmapData result_data{};
+        const Gdiplus::Rect result_rect(0, 0, output_width, output_height);
+        if (result.LockBits(&result_rect, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &result_data)
+            != Gdiplus::Ok)
+            return std::nullopt;
+
+        uint32_t seed = static_cast<uint32_t>(hash ^ (hash >> 32)) | 1u;
+        const auto next_random = [&seed] {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            return seed;
+        };
+        // 三角分布、正負 noise_amplitude 階（ESLyric 放大時會把相鄰的雜訊平均掉一部分，所以幅度要比 1 階大一點）
+        const auto noise = [&next_random] {
+            return (next_random() / 4294967296.0 + next_random() / 4294967296.0 - 1.0) * noise_amplitude;
+        };
+        const auto sample = [](const std::vector<float>& plane, int x0, int y0, int x1, int y1, double fx, double fy) {
+            const auto at = [&plane](int x, int y) { return plane[static_cast<size_t>(y) * image_width + x]; };
+            const double top = at(x0, y0) * (1.0 - fx) + at(x1, y0) * fx;
+            const double bottom = at(x0, y1) * (1.0 - fx) + at(x1, y1) * fx;
+            return top * (1.0 - fy) + bottom * fy;
+        };
+        const auto finish = [](double value) { return static_cast<BYTE>(std::clamp(std::lround(value), 0l, 255l)); };
+
+        for (int oy = 0; oy < output_height; ++oy) {
+            auto* row = static_cast<BYTE*>(result_data.Scan0) + static_cast<ptrdiff_t>(oy) * result_data.Stride;
+            const double v = std::clamp((oy + 0.5) * image_height / output_height - 0.5, 0.0, image_height - 1.0);
+            const int y0 = static_cast<int>(v);
+            const int y1 = std::min(y0 + 1, image_height - 1);
+            const double fy = v - y0;
+            for (int ox = 0; ox < output_width; ++ox) {
+                const double u = std::clamp((ox + 0.5) * image_width / output_width - 0.5, 0.0, image_width - 1.0);
+                const int x0 = static_cast<int>(u);
+                const int x1 = std::min(x0 + 1, image_width - 1);
+                const double fx = u - x0;
+                row[ox * 4 + 0] = finish(sample(final_b, x0, y0, x1, y1, fx, fy) + noise());
+                row[ox * 4 + 1] = finish(sample(final_g, x0, y0, x1, y1, fx, fy) + noise());
+                row[ox * 4 + 2] = finish(sample(final_r, x0, y0, x1, y1, fx, fy) + noise());
+                row[ox * 4 + 3] = 255;
             }
         }
         result.UnlockBits(&result_data);
