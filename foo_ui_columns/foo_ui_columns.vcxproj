@@ -288,6 +288,7 @@
     <ClCompile Include="output_chip.cpp" />
     <ClCompile Include="volume_chip.cpp" />
     <ClCompile Include="thin_scrollbar.cpp" />
+    <ClCompile Include="expanded_cover_bg.cpp" />
     <ClCompile Include="gdi.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="imaging.cpp" />
@@ -496,6 +497,7 @@
     <ClInclude Include="output_chip.h" />
     <ClInclude Include="volume_chip.h" />
     <ClInclude Include="thin_scrollbar.h" />
+    <ClInclude Include="expanded_cover_bg.h" />
     <ClInclude Include="nocturne_text.h" />
     <ClInclude Include="nocturne_timing.h" />
     <ClInclude Include="gdi.h" />

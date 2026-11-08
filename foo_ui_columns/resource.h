@@ -130,6 +130,7 @@
 #define IDD_PREFS_NOCTURNE_QUEUE        248
 #define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDD_PREFS_NOCTURNE_APPEARANCE   250
+#define IDD_PREFS_NOCTURNE_EXPANDED     251
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -436,6 +437,10 @@
 #define IDC_STARTUP_HOLD_NOTE          1331
 #define IDC_THIN_SCROLLBAR             1350
 #define IDC_THIN_SCROLLBAR_NOTE        1351
+#define IDC_EXPANDED_BG                1360
+#define IDC_EXPANDED_BG_NOTE           1361
+#define IDC_EXPANDED_BG_CAP_LABEL      1362
+#define IDC_EXPANDED_BG_CAP            1363
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1

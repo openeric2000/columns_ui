@@ -16,6 +16,7 @@
 #include "nocturne_text.h"
 #include "next_track_toast.h"
 #include "volume_chip.h"
+#include "expanded_cover_bg.h"
 
 namespace cui::main_menu {
 
@@ -435,11 +436,11 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 7; }
+    t_uint32 get_field_count() override { return 8; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
-            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon"};
+            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg"};
         out = names[index];
     }
 
@@ -447,6 +448,20 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style_value()));
+            return true;
+        }
+
+        // %cui_expanded_bg%：展開頁「封面虛化背景」用的圖檔完整路徑（2026-11-08）。沒勾、沒封面或還沒做好時不存在。
+        // ESLyric 面板參數選項 → 外觀「背景類型：圖片」、圖片頁「來源：自訂、值填 %cui_expanded_bg%」會把它當整個展開頁的背景（見 expanded_cover_bg.h）
+        if (index == 7) {
+            if (!handle)
+                return false;
+
+            const auto path = expanded_cover_bg::background_path_for(metadb_handle_ptr(handle));
+            if (!path || path->empty())
+                return false;
+
+            out->write(titleformat_inputtypes::meta, path->c_str());
             return true;
         }
 

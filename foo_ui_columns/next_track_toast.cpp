@@ -1304,6 +1304,12 @@ play_callback_static_factory_t<NewTrackCallback> new_track_callback;
 
 } // namespace
 
+metadb_handle_ptr predict_next_track(const metadb_handle_ptr& now_playing)
+{
+    const auto next = resolve_next(now_playing);
+    return next ? next->handle : metadb_handle_ptr{};
+}
+
 bool gdiplus_fonts_ready()
 {
     return font_warm_up::done;

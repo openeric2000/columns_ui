@@ -689,6 +689,9 @@
     <ClCompile Include="thin_scrollbar.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="expanded_cover_bg.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1068,6 +1071,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="thin_scrollbar.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="expanded_cover_bg.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_text.h">

@@ -11,6 +11,7 @@
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 #include "thin_scrollbar.h"
+#include "expanded_cover_bg.h"
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），六個分頁：
@@ -20,6 +21,7 @@
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
 // - 啟動：主視窗等網頁面板載好再顯示（開機優化 B，2026-11-06）
 // - 外觀：細捲軸開關（2026-11-08）
+// - 展開頁：封面虛化背景與亮度上限（2026-11-08）
 // - 關於：只放產品名稱與版本號（2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
 // 設定視窗下方的「Reset page」會把播放、下一首提示、啟動三個分頁還原成預設（字型分頁不動）
@@ -529,6 +531,60 @@ private:
     }
 };
 
+// ---- 展開頁（2026-11-08）----
+// 封面虛化背景：一個勾選＋「背景亮度上限」下拉（10／15／20／25％）；沒勾時亮度上限整個藏起來。
+// 之後有別的展開頁選項（例如封面光暈）放在這一頁。邏輯在 expanded_cover_bg.cpp；改了馬上生效
+class TabNocturneExpanded : public NocturneTab {
+public:
+    TabNocturneExpanded() : NocturneTab({IDC_TITLE1}) {}
+
+    const char* get_name() override { return nocturne_text::expanded_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_EXPANDED; }
+
+    static void show_cap(HWND wnd, bool visible)
+    {
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
+    }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::expanded_tab_title);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG_NOTE, nocturne_text::expanded_bg_note);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
+
+        const auto cap_combo = GetDlgItem(wnd, IDC_EXPANDED_BG_CAP);
+        for (const auto& name : nocturne_text::expanded_bg_cap_names)
+            ComboBox_AddString(cap_combo, name);
+        const auto cap = std::clamp(expanded_cover_bg::cap_percent.get(), expanded_cover_bg::cap_min,
+            expanded_cover_bg::cap_max);
+        ComboBox_SetCurSel(cap_combo, gsl::narrow<int>((cap - expanded_cover_bg::cap_min) / expanded_cover_bg::cap_step));
+
+        CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
+        show_cap(wnd, expanded_cover_bg::enabled.get());
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
+            const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
+            expanded_cover_bg::enabled = checked;
+            show_cap(wnd, checked);
+        } else if (id == IDC_EXPANDED_BG_CAP && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                expanded_cover_bg::cap_percent
+                    = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
+        }
+    }
+};
+
 // ---- 關於（2026-11-06，使用者要求加回來但「不要寫太厚、主要就寫版本號」）----
 // 只放產品名稱與版本號；版本號在 nocturne_text.h 的 nocturne_version。11/05 做過的「關於」分頁有版本與必要元件檢查，使用者說不要，這次刻意只留版本號
 class TabNocturneAbout : public NocturneTab {
@@ -557,13 +613,15 @@ TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
 TabNocturneStartup g_tab_nocturne_startup;
 TabNocturneAppearance g_tab_nocturne_appearance;
+TabNocturneExpanded g_tab_nocturne_expanded;
 TabNocturneAbout g_tab_nocturne_about;
 
-// 分頁順序：播放、播放佇列、下一首提示、字型、啟動、外觀、關於。
-// 存的「最後開啟的分頁」是這個順序的編號，所以在中間插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀插在關於前面）之後，
+// 分頁順序：播放、播放佇列、下一首提示、字型、啟動、外觀、展開頁、關於。
+// 存的「最後開啟的分頁」是這個順序的編號，所以在中間插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀與展開頁插在關於前面）之後，
 // 已經用過的人更新後第一次開設定頁可能停在不同的分頁，無傷大雅；之後新增分頁盡量加在最後面（關於之前）
 PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_nocturne_queue, &g_tab_next_track_toast,
-    &g_tab_nocturne_font, &g_tab_nocturne_startup, &g_tab_nocturne_appearance, &g_tab_nocturne_about};
+    &g_tab_nocturne_font, &g_tab_nocturne_startup, &g_tab_nocturne_appearance, &g_tab_nocturne_expanded,
+    &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(
@@ -651,6 +709,9 @@ void reset_nocturne_settings()
     startup_hold_until_ready.reset();
 
     thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
+
+    expanded_cover_bg::enabled.reset();
+    expanded_cover_bg::cap_percent.reset();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）
