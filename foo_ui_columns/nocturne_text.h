@@ -88,20 +88,16 @@ inline constexpr auto appearance_tab_name = "Appearance";
 inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
-    = L"A slim bar along the right edge of the playlist and the folder tree. It widens when the pointer comes near it. "
-      L"It floats on top of the list instead of taking up space, so the list gets a little wider. "
-      L"Turn this off to use the standard Windows scroll bars. Takes effect immediately.";
+    = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
 // 「展開頁」分頁（2026-11-08）：封面虛化背景
 inline constexpr auto expanded_tab_name = "Now Playing";
 inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
 inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
 inline constexpr wchar_t expanded_bg_note[]
-    = L"The now playing view uses a soft, blurred version of the playing track's cover as its background, darkened so "
-      L"the lyrics stay readable. It needs the lyrics panel's background to be set up for it (the theme's settings "
-      L"already are). Turn this off for the plain dark background. Changes apply from the next track.";
-inline constexpr wchar_t expanded_bg_cap_label[]
-    = L"Background brightness limit (a brighter cover is darkened down to this)";
-inline constexpr wchar_t expanded_bg_cap_names[4][24] = {L"10% (very dark)", L"15% (default)", L"20%", L"25% (lighter)"};
+    = L"Uses the cover as a soft, darkened background. Changes apply from the next track.";
+inline constexpr wchar_t expanded_bg_cap_label[] = L"Brightness limit";
+inline constexpr wchar_t expanded_bg_cap_names[6][24]
+    = {L"10% (very dark)", L"15% (default)", L"20%", L"25%", L"30%", L"35% (lighter)"};
 inline constexpr auto startup_tab_name = "Startup";
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
@@ -255,17 +251,16 @@ inline constexpr auto appearance_tab_name = "外觀";
 inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
-    = L"播放清單與資料夾樹的右邊緣各有一條很細的捲軸，滑鼠靠近才變寬。它浮在清單上、不占版面，清單因此多出一點寬度。"
-      L"關掉就用 Windows 原本的捲軸。改了馬上生效。";
+    = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
 // 「展開頁」分頁（2026-11-08）：封面虛化背景
 inline constexpr auto expanded_tab_name = "展開頁";
 inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
 inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";
 inline constexpr wchar_t expanded_bg_note[]
-    = L"展開頁用正在播放的專輯封面做柔和的虛化背景，並自動壓暗，歌詞才看得清楚。需要歌詞面板的背景已經設好"
-      L"（主題附的設定已經設好）。關掉就是原本的純深色背景。改了之後，從下一首歌開始套用。";
-inline constexpr wchar_t expanded_bg_cap_label[] = L"背景亮度上限（封面比這個亮，就壓暗到這個亮度）";
-inline constexpr wchar_t expanded_bg_cap_names[4][24] = {L"10%（很暗）", L"15%（預設）", L"20%", L"25%（偏亮）"};
+    = L"用封面做柔和的壓暗背景。改了從下一首歌開始套用。";
+inline constexpr wchar_t expanded_bg_cap_label[] = L"亮度上限";
+inline constexpr wchar_t expanded_bg_cap_names[6][24]
+    = {L"10%（很暗）", L"15%（預設）", L"20%", L"25%", L"30%", L"35%（偏亮）"};
 inline constexpr auto startup_tab_name = "啟動";
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";

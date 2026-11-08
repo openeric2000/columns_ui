@@ -57,8 +57,11 @@ constexpr int blur_passes = 3;
 // 壓暗用的深色（sRGB 值，同預覽頁的 SHADE）與最大壓暗比例
 constexpr double shade_value = 10.0;
 constexpr double max_dim = 0.95;
-// 改演算法時加一，舊檔案就不會被拿來用
-constexpr unsigned algorithm_version = 1;
+// 壓暗後補彩度：飽和度放大倍數＝1＋這個值×壓暗比例（壓暗 85% 約放大 2.7 倍），放大後的飽和度最高到 max_saturation
+constexpr double saturation_boost = 2.0;
+constexpr double max_saturation = 0.9;
+// 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度）
+constexpr unsigned algorithm_version = 2;
 // 等背景執行緒的最長時間（ESLyric 在主執行緒要圖，所以這段時間介面是停住的）。逾時就先回空：
 // 實測 ESLyric 只在換歌時才讀這個路徑，所以逾時的那首歌就沒有背景（下一首起恢復），寧可多等一點。
 // 平常下一首已經提前做好，不會真的等；沒預測到（隨機、點別首歌）才會等 60～200 毫秒
@@ -284,16 +287,43 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
             != Gdiplus::Ok)
             return std::nullopt;
 
-        const auto mix = [dim](float value) {
-            return static_cast<BYTE>(std::clamp(std::lround(value * (1.0 - dim) + shade_value * dim), 0l, 255l));
-        };
+        // 壓暗後補彩度（2026-11-08 使用者看了粉彩封面壓暗後變成灰灰的、沒有色彩感）：往深色混會讓亮度與色彩一起縮，
+        // 又淡又亮的封面壓到 10～35% 亮度後幾乎只剩灰色。所以壓暗越多，飽和度（HSV 的 S）放大越多——只放大色相的偏離、
+        // 不動色相；再把亮度校正回壓暗後原本的值，所以「亮度上限」不受影響。白、灰封面本來沒有色（S≈0），放大後還是灰，不會被染色
+        const double saturation_gain = 1.0 + saturation_boost * dim;
+        const auto finish = [](double value) { return static_cast<BYTE>(std::clamp(std::lround(value), 0l, 255l)); };
         for (int y = 0; y < image_height; ++y) {
             auto* row = static_cast<BYTE*>(result_data.Scan0) + static_cast<ptrdiff_t>(y) * result_data.Stride;
             for (int x = 0; x < image_width; ++x) {
                 const size_t index = static_cast<size_t>(y) * image_width + x;
-                row[x * 4 + 0] = mix(plane_b[index]);
-                row[x * 4 + 1] = mix(plane_g[index]);
-                row[x * 4 + 2] = mix(plane_r[index]);
+                double r = plane_r[index] * (1.0 - dim) + shade_value * dim;
+                double g = plane_g[index] * (1.0 - dim) + shade_value * dim;
+                double b = plane_b[index] * (1.0 - dim) + shade_value * dim;
+
+                const double top = std::max({r, g, b});
+                const double bottom = std::min({r, g, b});
+                if (dim > 0.0 && top > 1.0 && top > bottom) {
+                    const double saturation = (top - bottom) / top;
+                    const double wanted = std::min(saturation * saturation_gain, max_saturation);
+                    if (wanted > saturation) {
+                        const double before = 0.299 * r + 0.587 * g + 0.114 * b;
+                        const double scale = wanted / saturation;
+                        r = top - (top - r) * scale;
+                        g = top - (top - g) * scale;
+                        b = top - (top - b) * scale;
+                        const double after = 0.299 * r + 0.587 * g + 0.114 * b;
+                        if (after > 0.0) {
+                            const double restore = before / after;
+                            r *= restore;
+                            g *= restore;
+                            b *= restore;
+                        }
+                    }
+                }
+
+                row[x * 4 + 0] = finish(b);
+                row[x * 4 + 1] = finish(g);
+                row[x * 4 + 2] = finish(r);
                 row[x * 4 + 3] = 255;
             }
         }
