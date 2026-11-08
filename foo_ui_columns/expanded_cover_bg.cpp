@@ -408,39 +408,6 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
     }
 }
 
-// 診斷紀錄（開發版；跟 nocturne_toast_diag.log 一樣放在 profile）：每次要背景圖時記一行——在不在主執行緒、有沒有命中記憶體、
-// 等了多久、做圖花多久、有沒有逾時。用來確認「欄位在哪個執行緒被呼叫」與「做圖會不會拖慢換歌」
-void diag(const char* format, ...)
-{
-    static std::mutex diag_mutex;
-    char text[300];
-    va_list args;
-    va_start(args, format);
-    std::vsnprintf(text, sizeof(text), format, args);
-    va_end(args);
-
-    SYSTEMTIME time{};
-    GetLocalTime(&time);
-    char line[360];
-    const int length = std::snprintf(line, sizeof(line), "%02d:%02d:%02d.%03d  %s\r\n", time.wHour, time.wMinute,
-        time.wSecond, time.wMilliseconds, text);
-
-    const auto log_path = [] {
-        const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
-        return std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
-            + L"\\nocturne_bg_diag.log";
-    }();
-
-    std::scoped_lock lock(diag_mutex);
-    const auto file = CreateFileW(log_path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-        return;
-    DWORD written{};
-    WriteFile(file, line, static_cast<DWORD>(std::max(length, 0)), &written, nullptr);
-    CloseHandle(file);
-}
-
 struct Entry {
     std::shared_future<std::optional<std::string>> result;
     // 呼叫端等逾時之後立起來；背景工作做完時看到它，就通知 ESLyric 重算
@@ -459,7 +426,6 @@ Entry acquire(const metadb_handle_ptr& track, uint32_t cap, bool& cache_hit)
         static_cast<unsigned long long>(track->get_filetimestamp()), cap);
     const std::string key = std::string(track->get_path()) + suffix;
 
-    const auto started = std::chrono::steady_clock::now();
     std::scoped_lock lock(g_mutex);
     auto found = g_entries.find(key);
     cache_hit = found != g_entries.end();
@@ -472,13 +438,8 @@ Entry acquire(const metadb_handle_ptr& track, uint32_t cap, bool& cache_hit)
         Entry created{promise->get_future().share(), std::make_shared<std::atomic<bool>>(false)};
         found = g_entries.emplace(key, created).first;
 
-        std::thread([promise, late = created.late, track, cap, started] {
-            const auto result = generate(track, cap);
-            promise->set_value(result);
-            const auto made_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - started).count();
-            diag("generated in %lld ms (since it was asked for) result=%s late=%d", static_cast<long long>(made_ms),
-                result ? "ok" : "none", late->load() ? 1 : 0);
+        std::thread([promise, late = created.late, track, cap] {
+            promise->set_value(generate(track, cap));
             if (late->load())
                 settings_changed();
         }).detach();
@@ -499,8 +460,6 @@ void prefetch_for_next_of(const metadb_handle_ptr& now_playing)
 
     bool cache_hit{};
     acquire(next, std::clamp(cap_percent.get(), cap_min, cap_max), cache_hit);
-    if (!cache_hit)
-        diag("prefetch for the predicted next track");
 }
 
 // 換歌（主執行緒）：替下一首先做好圖，換歌時 ESLyric 在主執行緒要圖就不用等
@@ -538,30 +497,17 @@ std::optional<std::string> background_path_for(const metadb_handle_ptr& track)
     if (!enabled.get() || track.is_empty())
         return std::nullopt;
 
-    const auto started = std::chrono::steady_clock::now();
-    const bool on_main_thread = core_api::is_main_thread();
     bool cache_hit{};
     const auto entry = acquire(track, std::clamp(cap_percent.get(), cap_min, cap_max), cache_hit);
 
-    const auto elapsed_ms = [started] {
-        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - started).count());
-    };
-
-    if (entry.result.wait_for(wait_limit) == std::future_status::ready) {
-        auto result = entry.result.get();
-        diag("request main_thread=%d cache_hit=%d waited=%lld ms result=%s", on_main_thread ? 1 : 0, cache_hit ? 1 : 0,
-            elapsed_ms(), result ? "ok" : "none");
-        return result;
-    }
+    if (entry.result.wait_for(wait_limit) == std::future_status::ready)
+        return entry.result.get();
 
     entry.late->store(true);
     // 標記立起來之前剛好做完的話，工作那邊看不到標記、不會通知，所以這裡再看一次
     if (entry.result.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
         return entry.result.get();
 
-    diag("request main_thread=%d cache_hit=%d TIMED OUT after %lld ms", on_main_thread ? 1 : 0, cache_hit ? 1 : 0,
-        elapsed_ms());
     return std::nullopt;
 }
 
