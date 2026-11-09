@@ -88,12 +88,15 @@ inline constexpr wchar_t about_edition_personal[] = L" Personal build";
 // 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
 inline constexpr auto interface_tab_name = "Interface";
 // 捲軸：細捲軸開關
-inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
+inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars and folder tree";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
 inline constexpr wchar_t thin_autohide_vertical[] = L"Folder tree: auto-hide the vertical scroll bar";
 inline constexpr wchar_t thin_autohide_horizontal[] = L"Folder tree: auto-hide the horizontal scroll bar";
+// 資料夾樹的搜尋框放上面還是下面（2026-11-09）
+inline constexpr wchar_t folder_search_position_label[] = L"Folder tree: search box position";
+inline constexpr wchar_t folder_search_position_names[2][16] = {L"Top", L"Bottom (default)"};
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
 inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
@@ -250,12 +253,15 @@ inline constexpr wchar_t about_edition_personal[] = L" 個人版";
 // 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
 inline constexpr auto interface_tab_name = "介面";
 // 捲軸：細捲軸開關
-inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
+inline constexpr wchar_t appearance_tab_title[] = L"捲軸與資料夾樹";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
 inline constexpr wchar_t thin_autohide_vertical[] = L"資料夾樹：直向捲軸自動隱藏";
 inline constexpr wchar_t thin_autohide_horizontal[] = L"資料夾樹：橫向捲軸自動隱藏";
+// 資料夾樹的搜尋框放上面還是下面（2026-11-09）
+inline constexpr wchar_t folder_search_position_label[] = L"資料夾樹：搜尋框位置";
+inline constexpr wchar_t folder_search_position_names[2][16] = {L"上方", L"下方（預設）"};
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
 inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";

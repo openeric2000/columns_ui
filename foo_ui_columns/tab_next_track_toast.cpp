@@ -474,6 +474,23 @@ private:
 // - 展開頁：封面虛化背景一個勾選＋「亮度上限」下拉（10～35％，每 5％一格）；沒勾時亮度上限整個藏起來。
 //   之後有別的展開頁選項（例如封面光暈）放在這一塊。邏輯在 expanded_cover_bg.cpp；改了馬上生效
 // - 啟動：開機優化 B，主視窗等網頁面板回報「好了」再顯示（邏輯在 main_window.cpp）。設定在啟動時才讀，所以改了要下次啟動才有效
+// 資料夾樹（自編版 Album list）的搜尋框放上面還是下面（2026-11-09 使用者要求加開關）：存在 fb2k 共用設定，
+// Album list 登記了變更通知，寫入就當場重排。鍵名、預設值要跟 Album list 的 main.cpp 一致；預設 false＝下方
+namespace folder_search_position {
+inline constexpr char config_key[] = "nocturne.folderTree.searchOnTop";
+inline constexpr bool on_top_default = false;
+
+bool is_on_top()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, on_top_default);
+}
+
+void set_on_top(bool on_top)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, on_top);
+}
+} // namespace folder_search_position
+
 class TabNocturneInterface : public NocturneTab {
 public:
     TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
@@ -509,6 +526,13 @@ private:
         CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, check_state(thin_scrollbar::is_autohide(false)));
         enable_autohide(wnd, thin_scrollbar::is_enabled());
 
+        // 資料夾樹搜尋框位置：0＝上方、1＝下方
+        SetDlgItemText(wnd, IDC_FOLDER_SEARCH_POS_LABEL, nocturne_text::folder_search_position_label);
+        const auto search_combo = GetDlgItem(wnd, IDC_FOLDER_SEARCH_POS);
+        for (const auto& name : nocturne_text::folder_search_position_names)
+            ComboBox_AddString(search_combo, name);
+        ComboBox_SetCurSel(search_combo, folder_search_position::is_on_top() ? 0 : 1);
+
         // 展開頁
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
         SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
@@ -542,6 +566,10 @@ private:
             enable_autohide(wnd, checked);
         } else if ((id == IDC_THIN_AUTOHIDE_VERTICAL || id == IDC_THIN_AUTOHIDE_HORIZONTAL) && code == BN_CLICKED) {
             thin_scrollbar::set_autohide(id == IDC_THIN_AUTOHIDE_VERTICAL, IsDlgButtonChecked(wnd, id) == BST_CHECKED);
+        } else if (id == IDC_FOLDER_SEARCH_POS && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                folder_search_position::set_on_top(selection == 0);
         } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
             const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
             expanded_cover_bg::enabled = checked;
@@ -689,6 +717,7 @@ void reset_nocturne_settings()
     thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
     thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
     thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
+    folder_search_position::set_on_top(folder_search_position::on_top_default);
 
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();
