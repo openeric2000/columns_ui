@@ -22,12 +22,13 @@ constexpr int button_inset_dip = 14;     // 離封面右緣、下緣
 constexpr float icon_font_dip = 24;      // main.xml 的 font-size 18（pt）＝24 DIP
 constexpr int stage_min_height_dip = 300; // main.xml 的 stage min-height：比這矮整個展開頁會藏起來
 
-// 平常很淡、不搶封面（2026-11-09 使用者看了第一版 .45 深色圓底說太明顯；第二版圖示 .35 又說白色箭頭也要再透明）：
-// 圓底 .16、圖示 .20；滑過才變明顯（圓底 .59、圖示全白），按下再深一點
-const Gdiplus::Color disc_colour(40, 0, 0, 0);
+// 平常不搶封面（2026-11-09 使用者看了 .45 深色圓底、再淡的圓底都說還是一圈很明顯，最後定案「平常不要圓底、只留雙箭頭」）：
+// 平常只畫箭頭（白 .24），底下墊一層往右下偏 1 DIP 的淡黑陰影，白色或很淺的封面上才認得出來；
+// 滑過、按下才出現深色圓底（.59／.71）與全白箭頭
 const Gdiplus::Color disc_hot_colour(150, 0, 0, 0);
 const Gdiplus::Color disc_pressed_colour(180, 0, 0, 0);
-const Gdiplus::Color icon_colour(51, 241, 241, 241);
+const Gdiplus::Color icon_colour(61, 241, 241, 241);
+const Gdiplus::Color icon_shadow_colour(46, 0, 0, 0);
 const Gdiplus::Color icon_hot_colour(255, 255, 255, 255);
 
 int dip(int value)
@@ -350,8 +351,11 @@ private:
             g.FillRectangle(&hit_brush, 0, 0, width, height);
         }
 
-        {
-            const Gdiplus::SolidBrush brush(m_pressed ? disc_pressed_colour : m_hot ? disc_hot_colour : disc_colour);
+        const auto lit = m_hot || m_pressed;
+
+        // 圓底只在滑過、按下時畫
+        if (lit) {
+            const Gdiplus::SolidBrush brush(m_pressed ? disc_pressed_colour : disc_hot_colour);
             g.FillEllipse(&brush, 0.f, 0.f, static_cast<float>(width), static_cast<float>(height));
         }
 
@@ -364,10 +368,19 @@ private:
         format.SetAlignment(Gdiplus::StringAlignmentCenter);
         format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
         format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
-        const Gdiplus::SolidBrush brush(m_hot || m_pressed ? icon_hot_colour : icon_colour);
+        const Gdiplus::RectF box(0.f, 0.f, static_cast<float>(width), static_cast<float>(height));
+
+        // 平常（沒有圓底）先畫淡黑陰影，亮色封面上才看得出箭頭
+        if (!lit) {
+            const auto offset = dip_f(1.f);
+            const Gdiplus::SolidBrush shadow(icon_shadow_colour);
+            g.DrawString(L"\xE740", -1, &font, Gdiplus::RectF(box.X + offset, box.Y + offset, box.Width, box.Height),
+                &format, &shadow);
+        }
+
+        const Gdiplus::SolidBrush brush(lit ? icon_hot_colour : icon_colour);
         // E740＝全螢幕（四角往外的箭頭）
-        g.DrawString(L"\xE740", -1, &font, Gdiplus::RectF(0.f, 0.f, static_cast<float>(width), static_cast<float>(height)),
-            &format, &brush);
+        g.DrawString(L"\xE740", -1, &font, box, &format, &brush);
     }
 
     void reset_mouse_state()
