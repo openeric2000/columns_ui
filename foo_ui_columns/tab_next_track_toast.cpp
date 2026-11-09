@@ -11,6 +11,7 @@
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 #include "thin_scrollbar.h"
+#include "playlist_marquee.h"
 #include "expanded_cover_bg.h"
 
 // 建置資訊（版本種類、日期）：build_columns_ui.ps1 每次建置時產生，不進版控。
@@ -533,6 +534,10 @@ private:
             ComboBox_AddString(search_combo, name);
         ComboBox_SetCurSel(search_combo, folder_search_position::is_on_top() ? 0 : 1);
 
+        // 播放清單框選方框
+        SetDlgItemText(wnd, IDC_PLAYLIST_MARQUEE, nocturne_text::playlist_marquee);
+        CheckDlgButton(wnd, IDC_PLAYLIST_MARQUEE, check_state(playlist_marquee::is_enabled()));
+
         // 展開頁
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
         SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
@@ -570,6 +575,8 @@ private:
             const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
             if (selection != CB_ERR)
                 folder_search_position::set_on_top(selection == 0);
+        } else if (id == IDC_PLAYLIST_MARQUEE && code == BN_CLICKED) {
+            playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
         } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
             const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
             expanded_cover_bg::enabled = checked;
@@ -718,6 +725,7 @@ void reset_nocturne_settings()
     thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
     thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
     folder_search_position::set_on_top(folder_search_position::on_top_default);
+    playlist_marquee::set_enabled(playlist_marquee::enabled_default);
 
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();
