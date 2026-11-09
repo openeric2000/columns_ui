@@ -31,6 +31,12 @@ const Gdiplus::Color icon_colour(61, 241, 241, 241);
 const Gdiplus::Color icon_shadow_colour(46, 0, 0, 0);
 const Gdiplus::Color icon_hot_colour(255, 255, 255, 255);
 
+// 出現時淡入（2026-11-09 使用者回報：展開頁滑完停住的那一格按鈕才突然冒出來，像彈一下）。
+// 展開動畫是一張往上滑的截圖，截圖時按鈕還藏著，所以按鈕沒辦法跟著滑上來；改成停住後用這段時間淡入
+constexpr auto fade_in_duration = std::chrono::milliseconds(180);
+constexpr UINT_PTR fade_timer_id = 1;
+constexpr UINT fade_timer_interval_ms = 10;
+
 int dip(int value)
 {
     return uih::scale_dpi_value(value);
@@ -41,8 +47,9 @@ float dip_f(float value)
     return value * static_cast<float>(uih::scale_dpi_value(1000)) / 1000.0f;
 }
 
-// 跟 volume_chip.cpp 同一套：draw 畫好的內容用 UpdateLayeredWindow 貼到 wnd（32 位元預乘 alpha 的 DIB）
-void present_layered(HWND wnd, int width, int height, const std::function<void(Gdiplus::Graphics&)>& draw)
+// 跟 volume_chip.cpp 同一套：draw 畫好的內容用 UpdateLayeredWindow 貼到 wnd（32 位元預乘 alpha 的 DIB）；
+// opacity 是整個視窗再乘上的不透明度（淡入用，0～255）
+void present_layered(HWND wnd, int width, int height, BYTE opacity, const std::function<void(Gdiplus::Graphics&)>& draw)
 {
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -70,7 +77,7 @@ void present_layered(HWND wnd, int width, int height, const std::function<void(G
 
     SIZE size{width, height};
     POINT source{0, 0};
-    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
     UpdateLayeredWindow(wnd, screen_dc.get(), nullptr, &size, memory_dc.get(), &source, 0, &blend, ULW_ALPHA);
 }
 
@@ -260,9 +267,23 @@ public:
         const auto target = compute_layout();
 
         if (IsRectEmpty(&target)) {
+            stop_fade();
             if (IsWindowVisible(m_wnd))
                 ShowWindow(m_wnd, SW_HIDE);
             reset_mouse_state();
+            return;
+        }
+
+        // 從藏著變成顯示：先放好位置、貼上全透明的第一格再顯示，然後淡入。
+        // 先貼再顯示也避免露出上次藏起來前留下的畫面（例如當時是滑過的深色圓底）
+        if (!IsWindowVisible(m_wnd)) {
+            m_opacity = 0;
+            m_fade_start = std::chrono::steady_clock::now();
+            SetWindowPos(m_wnd, HWND_TOP, target.left, target.top, target.right - target.left,
+                target.bottom - target.top, SWP_NOACTIVATE);
+            render(true);
+            SetWindowPos(m_wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            SetTimer(m_wnd, fade_timer_id, fade_timer_interval_ms, nullptr);
             return;
         }
 
@@ -270,17 +291,18 @@ public:
         GetWindowRect(m_wnd, &current);
         MapWindowPoints(HWND_DESKTOP, GetParent(m_wnd), reinterpret_cast<POINT*>(&current), 2);
 
-        if (!(IsWindowVisible(m_wnd) && EqualRect(&current, &target))) {
+        if (!EqualRect(&current, &target)) {
             SetWindowPos(m_wnd, HWND_TOP, target.left, target.top, target.right - target.left,
-                target.bottom - target.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                target.bottom - target.top, SWP_NOACTIVATE);
         }
 
         render();
     }
 
-    void render()
+    // force：視窗還藏著也貼（顯示前先準備好第一格）
+    void render(bool force = false)
     {
-        if (!m_wnd || !IsWindowVisible(m_wnd))
+        if (!m_wnd || (!force && !IsWindowVisible(m_wnd)))
             return;
 
         RECT client{};
@@ -288,10 +310,30 @@ public:
         if (client.right <= 0 || client.bottom <= 0)
             return;
 
-        present_layered(m_wnd, client.right, client.bottom, [&](Gdiplus::Graphics& g) { draw(g, client.right, client.bottom); });
+        present_layered(m_wnd, client.right, client.bottom, m_opacity,
+            [&](Gdiplus::Graphics& g) { draw(g, client.right, client.bottom); });
     }
 
 private:
+    // 淡入的每一格：ease-out（一開始變化快、最後慢慢到全不透明）
+    void step_fade()
+    {
+        const auto elapsed = std::chrono::steady_clock::now() - m_fade_start;
+        const auto progress = std::clamp(
+            std::chrono::duration<double>(elapsed) / std::chrono::duration<double>(fade_in_duration), 0.0, 1.0);
+        const auto eased = 1.0 - (1.0 - progress) * (1.0 - progress);
+        m_opacity = static_cast<BYTE>(std::lround(255.0 * eased));
+        render();
+        if (progress >= 1.0)
+            KillTimer(m_wnd, fade_timer_id);
+    }
+
+    void stop_fade()
+    {
+        KillTimer(m_wnd, fade_timer_id);
+        m_opacity = 255;
+    }
+
     RECT compute_layout() const
     {
         if (m_bar_rect.right <= m_bar_rect.left)
@@ -416,6 +458,12 @@ private:
         }
         case WM_ERASEBKGND:
             return 1;
+        case WM_TIMER:
+            if (wp == fade_timer_id) {
+                step_fade();
+                return 0;
+            }
+            break;
         case WM_PAINT: {
             // 分層視窗的畫面由 render() 貼上去，這裡只要把更新區域標成已處理
             PAINTSTRUCT ps{};
@@ -483,6 +531,8 @@ private:
     HWND m_wnd{};
     HWND m_tooltip{};
     RECT m_bar_rect{};
+    BYTE m_opacity{255};
+    std::chrono::steady_clock::time_point m_fade_start{};
     bool m_hot{};
     bool m_tracking{};
     bool m_pressed{};
@@ -590,8 +640,12 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
         return dwp;
     }
 
+    // 還藏著的不在批次裡顯示：排版批次之後一定會再呼叫 layout()，由那裡貼好第一格再淡入
+    if (!IsWindowVisible(wnd))
+        return dwp;
+
     return DeferWindowPos(dwp, wnd, HWND_TOP, target.left, target.top, target.right - target.left,
-        target.bottom - target.top, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        target.bottom - target.top, SWP_NOACTIVATE);
 }
 
 } // namespace cui::cover_zoom
