@@ -686,6 +686,15 @@
     <ClCompile Include="volume_chip.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="nocturne_default_stub.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="thin_scrollbar.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="expanded_cover_bg.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1064,7 +1073,19 @@
     <ClInclude Include="volume_chip.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="nocturne_default_stub.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="thin_scrollbar.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="expanded_cover_bg.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="nocturne_text.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="nocturne_timing.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="permutation_utils.h">

@@ -10,6 +10,11 @@
 
 namespace cui::next_track_toast {
 
+// 預測播放完 now_playing 之後會接哪一首（佇列第一首 → 播放跟隨游標 → 下一列；隨機、單曲循環猜不準就傳空）。
+// 給「提前準備」用：展開頁封面虛化背景（expanded_cover_bg.cpp）趁現在先替下一首做好背景圖，換歌時就不用在主執行緒上等。
+// 只能在主執行緒呼叫
+metadb_handle_ptr predict_next_track(const metadb_handle_ptr& now_playing);
+
 inline constexpr uint32_t min_seconds = 3;
 inline constexpr uint32_t max_seconds = 30;
 // 有些歌結尾會有好幾秒無聲，5 秒太短，預設改 10 秒（2026-11-02）

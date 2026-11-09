@@ -5,6 +5,7 @@
 
 #include "now_playing_progress.h"
 #include "menu_items.h"
+#include "nocturne_timing.h"
 
 #pragma comment(lib, "winmm.lib")
 
@@ -41,10 +42,6 @@ constexpr int bar_height_dip = 12;
 constexpr float track_height_dip = 3;
 constexpr float thumb_radius_dip = 6;
 
-// 暫停→繼續瞬間 fb2k 回報的位置會往前跳約 0.2～0.3 秒（ASIO+DSD），單次不超過這個秒數的跳動當成回報誤差吸收掉，
-// 吸收掉的偏差再用 offset_decay_seconds 慢慢歸零（跟 next_track_toast.cpp 的 smooth_position 同一套）
-constexpr double max_absorb_seconds = 0.6;
-constexpr double offset_decay_seconds = 0.7;
 // 跳轉之後到 fb2k 說「跳完了」之前先顯示跳轉的目標，免得紅線先彈回舊位置；等太久（沒收到通知）就放棄
 // 2026-11-02 錄影：原本固定壓住 400 ms，fb2k 其實已經開始播、位置一直在前進，期滿紅線才突然往前跳 0.4 秒，看起來像卡一下
 constexpr auto seek_hold_timeout = std::chrono::milliseconds(1500);
@@ -58,7 +55,8 @@ constexpr UINT_PTR timer_wheel_commit = 1;
 
 const Gdiplus::Color background_colour(255, 24, 24, 24);
 const Gdiplus::Color track_colour(255, 61, 61, 61);
-const Gdiplus::Color played_colour(255, 247, 11, 11);
+// 主題紅（2026-11-07 從 247,11,11 調柔成 229,38,43 = #e5262b；全主題一起換，見待做清單 v1.4 第 6 個）
+const Gdiplus::Color played_colour(255, 229, 38, 43);
 
 // 每跳轉完成一次（任何來源：這個進度條、別的進度條、快速鍵）加一，進度條用它判斷自己發的跳轉完成了沒
 std::atomic<uint64_t> seek_generation{0};
@@ -151,7 +149,6 @@ private:
     void tick();
     View sample_view();
     double live_position(double length);
-    double smooth_position(double source, bool paused);
     void apply_view(const View& view);
     void set_interval(UINT ms);
 
@@ -174,8 +171,8 @@ private:
     std::atomic<UINT> m_period_ms{interval_idle_ms};
     std::atomic<bool> m_tick_pending{false};
     UINT m_interval{};
-    // 計時精度是否已調成 1 ms（要成對還原）；高精度等待計時器不可用時才靠它
-    bool m_high_resolution_timer{};
+    // 播放中把計時精度調成 1 ms（成對還原）；高精度等待計時器不可用時才靠它
+    nocturne_timing::TimerResolution m_resolution;
 
     View m_view;
     bool m_hover{};
@@ -187,12 +184,8 @@ private:
     int m_wheel_remainder{};
     std::optional<double> m_wheel_offset;
 
-    // 位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
-    bool m_position_valid{};
-    bool m_position_paused{};
-    double m_position_source{};
-    double m_position_offset{};
-    Clock::time_point m_position_time{};
+    // 位置濾波：吸收暫停→繼續時 fb2k 回報的小誤差（跟下一首提示共用同一套）
+    nocturne_timing::PositionSmoother m_smoother;
 
     struct SeekHold {
         double seconds{};
@@ -240,10 +233,7 @@ LRESULT ProgressBar::on_message(UINT msg, WPARAM wp, LPARAM lp)
         main_menu::set_seek_preview({});
         std::erase(live_bars(), m_wnd);
         stop_ticker();
-        if (m_high_resolution_timer) {
-            timeEndPeriod(1);
-            m_high_resolution_timer = false;
-        }
+        m_resolution.request(false);
         break;
     case WM_ERASEBKGND:
         return TRUE;
@@ -435,14 +425,7 @@ void ProgressBar::ticker_main()
 void ProgressBar::set_interval(UINT ms)
 {
     // 一般等待計時器（沒有高精度可用時）的精度要靠 timeBeginPeriod，有高精度時多開也無妨
-    const auto want_high_resolution = ms == interval_active_ms;
-    if (want_high_resolution != m_high_resolution_timer) {
-        if (want_high_resolution)
-            timeBeginPeriod(1);
-        else
-            timeEndPeriod(1);
-        m_high_resolution_timer = want_high_resolution;
-    }
+    m_resolution.request(ms == interval_active_ms);
 
     if (m_interval == ms)
         return;
@@ -452,44 +435,13 @@ void ProgressBar::set_interval(UINT ms)
     m_ticker_wake.SetEvent();
 }
 
-double ProgressBar::smooth_position(double source, bool paused)
-{
-    const auto now = Clock::now();
-
-    if (m_position_valid) {
-        const auto dt = std::chrono::duration<double>(now - m_position_time).count();
-        // 上一次取樣時是暫停，這段時間（暫停→繼續的那一次取樣，最多一個閒置間隔 100 ms）紅線沒有在走，應該前進 0。
-        // 原本只在「前後都是暫停」時算 0，繼續播放那一次取樣把整段暫停時間當成播放中，紅線一次往前補 dt，
-        // 2026-11-02 自動化錄影：繼續第一步 0.25～1.0 px 不等（取決於繼續時閒置計時器走到哪），跟 dt 吻合
-        const auto expected = m_position_paused ? 0.0 : dt;
-        const auto residual = (source - m_position_source) - expected;
-
-        if (std::abs(residual) <= max_absorb_seconds)
-            m_position_offset -= residual;
-        else
-            m_position_offset = 0;
-
-        // 暫停中偏差要原地不動，不然顯示位置會在暫停時慢慢往前爬
-        if (!paused)
-            m_position_offset *= std::exp(-dt / offset_decay_seconds);
-    } else {
-        m_position_offset = 0;
-    }
-
-    m_position_valid = true;
-    m_position_paused = paused;
-    m_position_source = source;
-    m_position_time = now;
-    return source + m_position_offset;
-}
-
 View ProgressBar::sample_view()
 {
     View view;
     const auto playback = playback_control::get();
 
     if (!playback->is_playing()) {
-        m_position_valid = false;
+        m_smoother.reset();
         m_seek_hold.reset();
         cancel_wheel_seek();
         return view;
@@ -500,7 +452,7 @@ View ProgressBar::sample_view()
 
     const auto length = playback->playback_get_length();
     if (length <= 0) {
-        m_position_valid = false;
+        m_smoother.reset();
         return view;
     }
 
@@ -520,7 +472,7 @@ View ProgressBar::sample_view()
         m_seek_hold.reset();
     if (m_seek_hold && seek_generation.load() != m_seek_hold->generation) {
         m_seek_hold.reset();
-        m_position_valid = false;
+        m_smoother.reset();
     }
 
     if (m_seek_hold) {
@@ -533,7 +485,7 @@ View ProgressBar::sample_view()
             if (const auto paused_position = main_menu::get_paused_position())
                 source = *paused_position;
         }
-        position = smooth_position(source, view.paused);
+        position = m_smoother.filter(source, view.paused);
     }
 
     // 滾輪累積中：顯示「目前位置加上累積的秒數」（歌還在播，所以紅線會繼續往前走），等滾輪停下來才真的跳轉
@@ -644,7 +596,7 @@ void ProgressBar::seek_to(double ratio)
 
     // 先記下目前的跳轉次數再發出跳轉：fb2k 的通知可能在 playback_seek 裡就同步送出
     m_seek_hold = SeekHold{seconds, seek_generation.load(), Clock::now() + seek_hold_timeout};
-    m_position_valid = false;
+    m_smoother.reset();
     playback->playback_seek(seconds);
 }
 

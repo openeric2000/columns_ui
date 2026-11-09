@@ -14,7 +14,8 @@ inline constexpr PanelTitles now_playing_bar_title{"播放列", "Now Playing Bar
 // 自編版新增：播放列高度固定為 ESLyric 佈局 main.xml 播放列（bar）的高度 138 DIP，改了那邊要跟著改
 // 版面裡存的高度會跟著存檔時的 DPI 換算而有誤差（219 實測少約 5px），播放列頂端的進度條就會被切掉
 inline constexpr int now_playing_bar_height = 138;
-// 自編版新增（展開頁樣式 2）：同一層自訂標題「展開頁右側」的面板（VU 表），展開且樣式 2 時疊到展開頁右側
+// 展開頁樣式 2（靠左＋VU 表）已在 2026-11-07 拿掉。舊版面裡可能還留著同一層自訂標題「展開頁右側」的面板（VU 表），
+// 認得它只是為了一律藏起來，免得它變成一般面板擠進版面
 inline constexpr PanelTitles now_playing_side_title{"展開頁右側", "Now Playing Side"};
 // 自編版新增（展開頁動畫）：展開時視窗區域的上緣從播放列往上推、收合時往下蓋回的時間長度
 // 2026-10-28 使用者在示意頁選 A 款；280ms 實測「不夠絲滑」，改 400ms 並換平緩的曲線（見 get_now_playing_animation_rect）
@@ -110,8 +111,6 @@ public:
     static bool s_get_now_playing_stage(RECT& screen_rect, HWND& owner);
     // 自編版新增（停止畫面）：展開頁已經完全展開時，截下展開頁目前的畫面（跟 screen_rect 一樣大）；不能截就傳回空的
     static wil::unique_hbitmap s_capture_now_playing_stage(RECT& screen_rect, HWND& owner);
-    // 展開頁樣式改變時重新排版，讓「展開頁右側」面板跟著顯示或隱藏
-    static void s_refresh_now_playing();
     // 給標題格式欄位用（可能在別的執行緒讀），跟 m_now_playing_expanded 同步
     static std::atomic<bool> s_now_playing_expanded_for_fields;
 
@@ -236,7 +235,7 @@ private:
     Panel::Ptr find_panel_by_custom_title(const PanelTitles& titles) const;
     // 直向且同一層有主內容與播放列兩個面板時傳回播放列，否則 nullptr
     Panel::Ptr get_now_playing_bar_panel() const;
-    // 有播放列時，同一層自訂標題「展開頁右側」的面板，否則 nullptr
+    // 有播放列時，同一層自訂標題「展開頁右側」的面板（舊版面留下的 VU 表，一律藏起來），否則 nullptr
     Panel::Ptr get_now_playing_side_panel() const;
     // 自編版新增（展開頁動畫）：從目前看得到的區域開始，往 m_now_playing_expanded 的最終區域移動
     void start_now_playing_animation();

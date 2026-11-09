@@ -3,6 +3,7 @@
 #include "dark_mode.h"
 #include "font_utils.h"
 #include "scroll.h"
+#include "thin_scrollbar.h"
 
 namespace cui::utils {
 
@@ -37,6 +38,11 @@ public:
             configure_autoscroll(autoscroll_cursor_info);
             m_use_smooth_scroll_change_token = config::use_smooth_scrolling.on_change(
                 [this](bool new_value, auto) { set_use_smooth_scroll(new_value); });
+
+            // 細捲軸（自編版新增）：使用這個基底的清單（播放清單、篩選、播放清單切換）都允許用；
+            // 開或關由設定頁決定（thin_scrollbar.h），建立前先把目前的設定值同步給清單程式庫
+            thin_scrollbar::sync_to_list_views();
+            set_thin_scrollbar_allowed(true);
 
             this->create(
                 parent, {p_position.x, p_position.y, static_cast<int>(p_position.cx), static_cast<int>(p_position.cy)});

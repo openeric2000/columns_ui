@@ -47,11 +47,12 @@ extern fbh::ConfigBool lock_main_window_size;
 // （視窗先出現、專輯樹是空的、網頁面板只有 WebView2 字樣）。預設開；關掉就跟原本一樣，視窗建好立刻顯示
 extern fbh::ConfigBool startup_hold_until_ready;
 // 等太久（沒有網頁面板、網頁壞掉、機器很慢）就直接顯示：從行程啟動起算（使用者按下去之後最多等這麼久），
-// 視窗建立時已經剩不到 startup_hold_min_ms 就不等了（機器慢到這個地步，等也只是讓空殼晚幾秒出現）
+// 視窗建立時已經剩不到 startup_hold_min_ms 就不等了（機器慢到這個地步，等也只是讓空殼晚幾秒出現），
+// 但視窗顯示出來時仍然淡入（m_startup_late_fade_pending）
 inline constexpr DWORD startup_hold_timeout_ms = 3000;
 inline constexpr DWORD startup_hold_min_ms = 400;
 // 網頁回報「好了」之後柔和淡入的時間（透明度 0 → 100%，曲線跟輸出裝置面板縮回去一樣是兩頭都慢的 smootherstep）。
-// 逾時、第二次啟動轉送時不淡入，直接出現
+// 慢速啟動（太晚才建立視窗）也用這個時間淡入；逾時、第二次啟動轉送時不淡入，直接出現
 inline constexpr DWORD startup_fade_ms = 400;
 
 class MainWindow {
@@ -140,6 +141,8 @@ private:
     void start_startup_hold_watchdog(DWORD wait_ms);
     void stop_startup_hold_watchdog();
     bool m_startup_hold_active{};
+    // 視窗建立得太晚（HDD 冷啟動等）所以不等網頁、但已經先隱形：視窗顯示出來之後要馬上接淡入
+    bool m_startup_late_fade_pending{};
     ULONGLONG m_startup_hold_started_ms{};
     wil::unique_handle m_startup_hold_cancel;
     std::thread m_startup_hold_watchdog;

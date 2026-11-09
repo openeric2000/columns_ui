@@ -27,11 +27,10 @@ constexpr GUID stop_or_collapse_id{
 // 自編版新增：View/Layout/顯示封面大圖
 constexpr GUID show_now_playing_cover_id{
     0x2cc23246, 0xc90d, 0x4787, {0x84, 0x16, 0xdf, 0x32, 0x6d, 0x69, 0x6d, 0xbf}};
-// 自編版新增：View/Layout/展開頁樣式（三種）與切換展開頁樣式
+// 自編版新增：View/Layout/展開頁樣式（置中、靠左＋資訊卡）與切換展開頁樣式
+// （原本還有第三種「靠左＋VU 表」，2026-11-07 拿掉；它的選單項目 GUID 是 4eb74dc8-f7c3-4277-8f4b-73dc65a06c7c，以後要復原可以沿用）
 constexpr GUID now_playing_style_centered_id{
     0x8a9efc3a, 0x7b5d, 0x4cff, {0xae, 0x4c, 0x06, 0x46, 0xf2, 0xb6, 0xa2, 0xfb}};
-constexpr GUID now_playing_style_spectrum_id{
-    0x4eb74dc8, 0xf7c3, 0x4277, {0x8f, 0x4b, 0x73, 0xdc, 0x65, 0xa0, 0x6c, 0x7c}};
 constexpr GUID now_playing_style_info_id{
     0x66712042, 0x47c3, 0x4379, {0xae, 0x31, 0xfb, 0x58, 0xd6, 0x68, 0xd0, 0xe3}};
 constexpr GUID cycle_now_playing_style_id{
@@ -46,9 +45,6 @@ void on_transparency_changed();
 void on_lock_window_size_changed();
 
 } // namespace commands
-
-// 自編版新增：目前的展開頁樣式（1 置中、2 靠左＋VU 表、3 靠左＋資訊卡）
-uint32_t get_now_playing_style();
 
 // 自編版新增：暫停時按下暫停（或暫停中跳轉）當下記下的位置（秒）；沒在暫停或沒記到時為空
 // 有些輸出方式暫停中回報的位置會前後跳，要顯示暫停中的位置請用這個，不要讀 playback_get_position

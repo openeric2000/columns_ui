@@ -10,17 +10,20 @@
 #include "volume_chip.h"
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
+#include "thin_scrollbar.h"
+#include "expanded_cover_bg.h"
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
-// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），六個分頁：
+// 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
 // - 播放：進度條滾輪、輸出裝置顯示、音量條收成圖示
-// - 播放佇列：播放別首歌時保留播放佇列（2026-11-02 起放在「下一首提示」分頁底下，11/05 併進「播放」，11/06 獨立成分頁）
-// - 下一首提示：展開頁角落的提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）
+// - 下一首與佇列：展開頁角落的下一首提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）＋播放別首歌時保留播放佇列
+//   （佇列 11/02 起放在這一頁底下，11/05 併進「播放」，11/06 獨立成分頁，11/08 使用者說一個選項一個分頁太浪費，又併回這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
-// - 啟動：主視窗等網頁面板載好再顯示（開機優化 B，2026-11-06）
+// - 介面：細捲軸開關（11/08）、封面虛化背景與亮度上限（11/08）、主視窗等網頁面板載好再顯示（開機優化 B，11/06）。
+//   這三個原本各自一個分頁、各只有一個設定，11/08 使用者要求合併成一頁（小標題分開）
 // - 關於：只放產品名稱與版本號（2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
-// 設定視窗下方的「Reset page」會把播放、下一首提示、啟動三個分頁還原成預設（字型分頁不動）
+// 設定視窗下方的「Reset page」會把播放、下一首與佇列、介面三個分頁還原成預設（字型分頁不動）
 // 檔名沿用 tab_next_track_toast.cpp，免得動到專案檔
 
 namespace cui::prefs {
@@ -157,34 +160,11 @@ private:
     }
 };
 
-// ---- 播放佇列（2026-11-06 從「播放」分頁獨立出來）----
-class TabNocturneQueue : public NocturneTab {
-public:
-    TabNocturneQueue() : NocturneTab({IDC_TITLE1}) {}
-
-    const char* get_name() override { return nocturne_text::queue_tab_name; }
-
-private:
-    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_QUEUE; }
-
-    void on_init_dialog(HWND wnd) override
-    {
-        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::keep_queue_title);
-        SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
-        CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
-    }
-
-    void on_command(HWND wnd, WPARAM wp) override
-    {
-        if (LOWORD(wp) == IDC_KEEP_QUEUE_ON_PLAY && HIWORD(wp) == BN_CLICKED)
-            playlist_item_helpers::keep_queue_on_play = IsDlgButtonChecked(wnd, IDC_KEEP_QUEUE_ON_PLAY) == BST_CHECKED;
-    }
-};
-
-// ---- 下一首提示 ----
+// ---- 下一首與佇列 ----
+// 上半是下一首提示，下半是播放佇列（11/08 把原本獨立的「播放佇列」分頁併進來）
 class TabNextTrackToast : public NocturneTab {
 public:
-    TabNextTrackToast() : NocturneTab({IDC_TITLE1}) {}
+    TabNextTrackToast() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
 
     const char* get_name() override { return nocturne_text::next_toast_tab_name; }
 
@@ -206,7 +186,10 @@ private:
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_POSITION_LABEL, nocturne_text::next_toast_position_label);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SIZE_LABEL, nocturne_text::next_toast_size_label);
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
+        SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
 
+        CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_ENABLED, check_state(next_track_toast::enabled.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, check_state(next_track_toast::show_seconds_in_ring.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_COVER, check_state(next_track_toast::show_cover.get()));
@@ -236,6 +219,10 @@ private:
         const auto is_checked = [wnd, id] { return IsDlgButtonChecked(wnd, id) == BST_CHECKED; };
 
         switch (id) {
+        case IDC_KEEP_QUEUE_ON_PLAY:
+            if (code == BN_CLICKED)
+                playlist_item_helpers::keep_queue_on_play = is_checked();
+            break;
         case IDC_NEXT_TOAST_ENABLED:
             if (code == BN_CLICKED)
                 next_track_toast::enabled = is_checked();
@@ -475,20 +462,52 @@ private:
     }
 };
 
-// ---- 啟動 ----
-// 開機優化 B：主視窗等網頁面板回報「好了」再顯示（邏輯在 main_window.cpp）。設定在啟動時才讀，所以改了要下次啟動才有效
-class TabNocturneStartup : public NocturneTab {
+// ---- 介面（2026-11-08）----
+// 三個各只有一個設定的小項目合併成一頁，各自一個小標題（原本是「外觀」「展開頁」「啟動」三個分頁）：
+// - 捲軸：細捲軸開關。開關存在 fb2k 共用設定（資料夾樹那個元件也讀它），邏輯在 thin_scrollbar.cpp；改了馬上生效
+// - 展開頁：封面虛化背景一個勾選＋「亮度上限」下拉（10～35％，每 5％一格）；沒勾時亮度上限整個藏起來。
+//   之後有別的展開頁選項（例如封面光暈）放在這一塊。邏輯在 expanded_cover_bg.cpp；改了馬上生效
+// - 啟動：開機優化 B，主視窗等網頁面板回報「好了」再顯示（邏輯在 main_window.cpp）。設定在啟動時才讀，所以改了要下次啟動才有效
+class TabNocturneInterface : public NocturneTab {
 public:
-    TabNocturneStartup() : NocturneTab({IDC_TITLE1}) {}
+    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
 
-    const char* get_name() override { return nocturne_text::startup_tab_name; }
+    const char* get_name() override { return nocturne_text::interface_tab_name; }
 
 private:
-    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_STARTUP; }
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_APPEARANCE; }
+
+    static void show_cap(HWND wnd, bool visible)
+    {
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
+    }
 
     void on_init_dialog(HWND wnd) override
     {
-        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::startup_tab_title);
+        // 捲軸
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::appearance_tab_title);
+        SetDlgItemText(wnd, IDC_THIN_SCROLLBAR, nocturne_text::thin_scrollbar);
+        SetDlgItemText(wnd, IDC_THIN_SCROLLBAR_NOTE, nocturne_text::thin_scrollbar_note);
+        CheckDlgButton(wnd, IDC_THIN_SCROLLBAR, check_state(thin_scrollbar::is_enabled()));
+
+        // 展開頁
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
+
+        const auto cap_combo = GetDlgItem(wnd, IDC_EXPANDED_BG_CAP);
+        for (const auto& name : nocturne_text::expanded_bg_cap_names)
+            ComboBox_AddString(cap_combo, name);
+        const auto cap = std::clamp(expanded_cover_bg::cap_percent.get(), expanded_cover_bg::cap_min,
+            expanded_cover_bg::cap_max);
+        ComboBox_SetCurSel(cap_combo, gsl::narrow<int>((cap - expanded_cover_bg::cap_min) / expanded_cover_bg::cap_step));
+
+        CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
+        show_cap(wnd, expanded_cover_bg::enabled.get());
+
+        // 啟動
+        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::startup_tab_title);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
         CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
@@ -496,8 +515,23 @@ private:
 
     void on_command(HWND wnd, WPARAM wp) override
     {
-        if (LOWORD(wp) == IDC_STARTUP_HOLD && HIWORD(wp) == BN_CLICKED)
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_THIN_SCROLLBAR && code == BN_CLICKED) {
+            thin_scrollbar::set_enabled(IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED);
+        } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
+            const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
+            expanded_cover_bg::enabled = checked;
+            show_cap(wnd, checked);
+        } else if (id == IDC_EXPANDED_BG_CAP && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                expanded_cover_bg::cap_percent
+                    = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
+        } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
             startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        }
     }
 };
 
@@ -524,17 +558,17 @@ private:
 };
 
 TabNocturnePlayback g_tab_nocturne_playback;
-TabNocturneQueue g_tab_nocturne_queue;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
-TabNocturneStartup g_tab_nocturne_startup;
+TabNocturneInterface g_tab_nocturne_interface;
 TabNocturneAbout g_tab_nocturne_about;
 
-// 分頁順序：播放、播放佇列、下一首提示、字型、啟動、關於。
-// 存的「最後開啟的分頁」是這個順序的編號，所以在中間插入分頁（2026-11-06 播放佇列插在播放後面）之後，
-// 已經用過的人更新後第一次開設定頁可能停在不同的分頁，無傷大雅；之後新增分頁盡量加在最後面
-PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_nocturne_queue, &g_tab_next_track_toast,
-    &g_tab_nocturne_font, &g_tab_nocturne_startup, &g_tab_nocturne_about};
+// 分頁順序：播放、下一首與佇列、字型、介面、關於。
+// 存的「最後開啟的分頁」是這個順序的編號，所以合併或插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀與展開頁插在關於前面、
+// 11/08 晚把播放佇列／啟動／外觀／展開頁併成現在這五頁）之後，已經用過的人更新後第一次開設定頁可能停在不同的分頁
+// （編號超出範圍時由分頁架構處理），無傷大雅；之後新增分頁盡量加在最後面（關於之前）
+PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font,
+    &g_tab_nocturne_interface, &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(
@@ -599,7 +633,7 @@ public:
 
 service_factory_single_t<WebKeyFromConsole> g_web_key_from_console;
 
-// 設定視窗的「Reset page」：播放與下一首提示兩個分頁的所有設定還原成預設。
+// 設定視窗的「Reset page」：播放、下一首與佇列、介面三個分頁的所有設定還原成預設。
 // 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
 void reset_nocturne_settings()
 {
@@ -620,6 +654,11 @@ void reset_nocturne_settings()
     next_track_toast::size_index.reset();
 
     startup_hold_until_ready.reset();
+
+    thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
+
+    expanded_cover_bg::enabled.reset();
+    expanded_cover_bg::cap_percent.reset();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）

@@ -9,7 +9,7 @@ namespace cui::nocturne_text {
 
 // 產品名稱與版本號（設定頁「關於」分頁顯示；中英文版共用，發布新版時只改這一行版本號）
 inline constexpr wchar_t about_product_name[] = L"Nocturne for foobar2000";
-inline constexpr wchar_t nocturne_version[] = L"1.30";
+inline constexpr wchar_t nocturne_version[] = L"1.40";
 
 #ifdef NOCTURNE_LANG_EN
 
@@ -56,7 +56,8 @@ inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an ic
 inline constexpr wchar_t volume_muted[] = L"Muted";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
-inline constexpr auto next_toast_tab_name = "Up Next Notice";
+// 「下一首提示」與「播放佇列」兩個只有少數選項的分頁合併成一頁（2026-11-08 使用者要求）
+inline constexpr auto next_toast_tab_name = "Up Next & Queue";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
 inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
 inline constexpr wchar_t next_toast_seconds_label[] = L"Start counting down this many seconds before the track ends (3-30)";
@@ -69,28 +70,37 @@ inline constexpr wchar_t next_toast_size_label[] = L"Size";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"Small (85%)", L"Standard", L"Large (120%)", L"Extra large (140%)"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
 inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
-// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+// 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "Playback";
-inline constexpr auto queue_tab_name = "Queue";
 inline constexpr wchar_t progress_title[] = L"Progress bar";
 inline constexpr wchar_t wheel_seek_enabled[] = L"Seek with the mouse wheel over the progress bar";
 inline constexpr wchar_t wheel_step_label[] = L"Seconds per notch (1-60)";
 inline constexpr wchar_t wheel_shift_step_label[] = L"Seconds per notch while holding Shift (5-300)";
 inline constexpr auto font_tab_name = "Fonts";
 inline constexpr wchar_t font_tab_title[] = L"Fonts";
-// 「啟動」分頁（開機優化 B）
 // 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
 inline constexpr auto about_tab_name = "About";
 inline constexpr wchar_t about_tab_title[] = L"About";
 inline constexpr wchar_t about_version_prefix[] = L"Version ";
-inline constexpr auto startup_tab_name = "Startup";
+// 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
+inline constexpr auto interface_tab_name = "Interface";
+// 捲軸：細捲軸開關
+inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
+inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
+inline constexpr wchar_t thin_scrollbar_note[]
+    = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
+// 展開頁：封面虛化背景
+inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
+inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
+inline constexpr wchar_t expanded_bg_cap_label[] = L"Brightness limit";
+inline constexpr wchar_t expanded_bg_cap_names[6][24]
+    = {L"10% (very dark)", L"15%", L"20% (default)", L"25%", L"30%", L"35% (lighter)"};
+// 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
 inline constexpr wchar_t startup_hold_note[]
-    = L"The main window stays hidden for the first second or two while the panels load, so you never see empty panels. "
-      L"It fades in gently as soon as the web panel (the album header) is ready, or appears right away after 3 seconds "
-      L"at most. Nothing is waited for if the web panel component is not installed. Turn this off to show the window "
-      L"the moment it is created. Takes effect the next time foobar2000 starts.";
+    = L"Keeps the window hidden until the album header is ready (3 seconds at most). Takes effect the next time "
+      L"foobar2000 starts.";
 inline constexpr wchar_t font_tab_note[]
     = L"Change the font of each part separately, or all parts at once with the first row. The lists, tabs, folder tree "
       L"and other interface text also take a size. These apply at once.";
@@ -114,10 +124,6 @@ inline constexpr auto theme_font_description
       "overall list size.";
 inline constexpr auto style_centered_name = "Now Playing: Centered";
 inline constexpr auto style_centered_description = "Centers the cover and lyrics together in the now playing view.";
-inline constexpr auto style_spectrum_name = "Now Playing: Left + VU Meter";
-inline constexpr auto style_spectrum_description
-    = "Puts the cover on the left and the VU meter on the right (the panel with the custom title \"Now Playing "
-      "Side\" in the layout).";
 inline constexpr auto style_info_name = "Now Playing: Left + Info Card";
 inline constexpr auto style_info_description = "Puts the cover on the left and track information on the right.";
 inline constexpr auto cycle_style_name = "Toggle Now Playing Style";
@@ -208,7 +214,7 @@ inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示（Windows 
 inline constexpr wchar_t volume_muted[] = L"靜音";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
-inline constexpr auto next_toast_tab_name = "下一首提示";
+inline constexpr auto next_toast_tab_name = "下一首與佇列";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";
 inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
 inline constexpr wchar_t next_toast_seconds_label[] = L"歌曲最後幾秒開始倒數（3～30 秒）";
@@ -221,26 +227,36 @@ inline constexpr wchar_t next_toast_size_label[] = L"大小";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"小（85%）", L"標準", L"大（120%）", L"特大（140%）"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
 inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
-// 設定頁的分頁：播放、播放佇列、下一首提示、字型、啟動
+// 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "播放";
-inline constexpr auto queue_tab_name = "播放佇列";
 inline constexpr wchar_t progress_title[] = L"進度條";
 inline constexpr wchar_t wheel_seek_enabled[] = L"在進度條上用滑鼠滾輪前後跳轉";
 inline constexpr wchar_t wheel_step_label[] = L"每滾一格跳幾秒（1～60）";
 inline constexpr wchar_t wheel_shift_step_label[] = L"按住 Shift 每滾一格跳幾秒（5～300）";
 inline constexpr auto font_tab_name = "字型";
 inline constexpr wchar_t font_tab_title[] = L"字型";
-// 「啟動」分頁（開機優化 B）
 // 「關於」分頁：只放產品名稱與版本號（2026-11-06，使用者要求「不要寫太厚、主要就寫版本號」）
 inline constexpr auto about_tab_name = "關於";
 inline constexpr wchar_t about_tab_title[] = L"關於";
 inline constexpr wchar_t about_version_prefix[] = L"版本 ";
-inline constexpr auto startup_tab_name = "啟動";
+// 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
+inline constexpr auto interface_tab_name = "介面";
+// 捲軸：細捲軸開關
+inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
+inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
+inline constexpr wchar_t thin_scrollbar_note[]
+    = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
+// 展開頁：封面虛化背景
+inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
+inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";
+inline constexpr wchar_t expanded_bg_cap_label[] = L"亮度上限";
+inline constexpr wchar_t expanded_bg_cap_names[6][24]
+    = {L"10%（很暗）", L"15%", L"20%（預設）", L"25%", L"30%", L"35%（偏亮）"};
+// 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]
-    = L"啟動時主視窗先不顯示，等網頁面板（專輯標頭）載好再整個柔和淡入，不會先看到空殼畫面；最多等 3 秒，逾時就直接顯示（不淡入）。"
-      L"沒有安裝網頁面板元件時不會等。關掉就是視窗一建好立刻顯示。下次啟動 foobar2000 才會生效。";
+    = L"等專輯標頭載好才顯示視窗（最多等 3 秒）。下次啟動才生效。";
 inline constexpr wchar_t font_tab_note[]
     = L"每個區塊可以各自換字型，也可以用第一列一次全換。清單、分頁、資料夾樹與其餘介面文字還能調大小，改了馬上生效。";
 inline constexpr wchar_t font_row_all[] = L"全部區塊";
@@ -261,9 +277,6 @@ inline constexpr auto theme_font_description
     = "一次換掉清單、分頁、資料夾樹、播放列與專輯標頭的字型，並調整清單的整體大小。";
 inline constexpr auto style_centered_name = "展開頁：置中";
 inline constexpr auto style_centered_description = "展開頁的封面與歌詞整組置中。";
-inline constexpr auto style_spectrum_name = "展開頁：靠左＋VU 表";
-inline constexpr auto style_spectrum_description
-    = "展開頁的封面靠左，右邊顯示 VU 表（版面裡自訂標題「展開頁右側」的面板）。";
 inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
 inline constexpr auto style_info_description = "展開頁的封面靠左，右邊顯示曲目資訊。";
 inline constexpr auto cycle_style_name = "切換展開頁樣式";

@@ -8,6 +8,7 @@
 #include "font_utils.h"
 #include "menu_items.h"
 #include "nocturne_text.h"
+#include "nocturne_timing.h"
 #include "playlist_item_helpers.h"
 #include "splitter.h"
 
@@ -46,11 +47,6 @@ constexpr double fade_out_seconds = 0.5;
 constexpr double max_step_seconds = 0.04;
 // 換曲後這段時間不顯示提示，避免換曲瞬間播放位置還沒更新而誤判
 constexpr auto suppress_after_new_track = std::chrono::milliseconds(1500);
-// 倒數圈用的播放位置要保持連續：暫停→繼續時 fb2k 回報的位置會往前跳約 0.2～0.3 秒（ASIO+DSD，錄影量到進度條紅線跳 2 px、
-// 圈內數字早翻一格），狂按暫停就一直小卡。單次不超過這個秒數的跳動當成回報誤差吸收掉，更大的（跳轉、換曲）照實顯示
-constexpr double max_absorb_seconds = 0.6;
-// 吸收掉的偏差用這個時間常數慢慢歸零，免得每次暫停繼續都累積落後
-constexpr double offset_decay_seconds = 0.7;
 // 提示淡入時從上方多少 DIP 滑下來
 constexpr double slide_dip = 6;
 constexpr auto next_refresh_interval = std::chrono::seconds(1);
@@ -326,6 +322,11 @@ Gdiplus::FontStyle pick_font_style(const Gdiplus::FontFamily& family)
     return Gdiplus::FontStyleItalic;
 }
 
+// 卡片底的不透明度（0～255）。原本 242（約 95%，幾乎實心）；展開頁封面虛化背景預設開啟後背景會依封面變藍、綠、粉紅，
+// 實心深灰卡片和背景色不搭，所以透出底色（2026-11-08 使用者要求）。第一次調到 205（80%）在深色底上肉眼幾乎看不出差別，
+// 使用者回報「似乎沒動」，所以再降到 150（約 59%）。再透明的話，卡片後面若剛好是亮的文字或圖（播放清單、封面）會透出殘影、壓到卡片上的字
+constexpr BYTE card_alpha = 150;
+
 // 靜態那一層：卡片底、封面、文字（換歌或換設定才重畫）
 void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, Gdiplus::Bitmap* cover)
 {
@@ -343,7 +344,7 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
 
     Gdiplus::GraphicsPath card;
     add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, width - 1, height - 1), static_cast<float>(layout.radius));
-    Gdiplus::SolidBrush background(rgba(242, 30, 31, 33));
+    Gdiplus::SolidBrush background(rgba(card_alpha, 30, 31, 33));
     g.FillPath(&background, &card);
     Gdiplus::Pen border(rgba(26, 255, 255, 255), 1.f);
     g.DrawPath(&border, &card);
@@ -478,7 +479,7 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
     }
 
     // 從 12 點鐘方向順時針畫剩餘的弧，剩餘變少時弧的末端往逆時針退
-    Gdiplus::Pen arc(rgba(255, 247, 11, 11), layout.stroke);
+    Gdiplus::Pen arc(rgba(255, 229, 38, 43), layout.stroke); // 主題紅 #e5262b
     arc.SetStartCap(Gdiplus::LineCapRound);
     arc.SetEndCap(Gdiplus::LineCapRound);
 
@@ -573,12 +574,53 @@ private:
     std::unique_ptr<Gdiplus::Bitmap> m_static;
 };
 
+// 卡片可以點（2026-11-07）：點下去等於按「下一首」（已停止的「接下來」卡片則是開始播放）。
+// 實作在 Controller 之後（要讀它的狀態）；視窗訊息這邊只轉過去
+bool toast_hit_test(LPARAM screen_point);
+void toast_set_hover(HWND wnd, bool inside);
+void toast_activate();
+
 LRESULT CALLBACK toast_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    static bool pressed = false;
+
     switch (msg) {
     case WM_NCHITTEST:
-        // 不擋滑鼠，點到的是底下的展開頁
-        return HTTRANSPARENT;
+        // 還在淡入初期（幾乎看不見）、圓角外面都不接，點到的是底下的展開頁
+        return toast_hit_test(lp) ? HTCLIENT : HTTRANSPARENT;
+    case WM_SETCURSOR:
+        if (LOWORD(lp) == HTCLIENT) {
+            SetCursor(LoadCursor(nullptr, IDC_HAND));
+            return TRUE;
+        }
+        break;
+    case WM_MOUSEMOVE:
+        toast_set_hover(wnd, true);
+        return 0;
+    case WM_MOUSELEAVE:
+        toast_set_hover(wnd, false);
+        return 0;
+    case WM_LBUTTONDOWN:
+        pressed = true;
+        SetCapture(wnd);
+        return 0;
+    case WM_LBUTTONUP: {
+        const auto was_pressed = pressed;
+        pressed = false;
+        if (GetCapture() == wnd)
+            ReleaseCapture();
+
+        // 按下與放開都要在卡片上才算點擊（按下後拖出去再放開不算）
+        RECT client{};
+        GetClientRect(wnd, &client);
+        const POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        if (was_pressed && PtInRect(&client, point))
+            toast_activate();
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        pressed = false;
+        break;
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_ERASEBKGND:
@@ -625,6 +667,10 @@ public:
     void invalidate_next() { m_next_valid = false; }
     void on_new_track();
     void on_cover_loaded(uint64_t generation, std::shared_ptr<Gdiplus::Bitmap> cover);
+    // 卡片可以點（見 toast_wndproc）
+    bool hit_test(const POINT& screen_point) const;
+    void set_hover(HWND wnd, bool inside);
+    void activate();
 
 private:
     enum class Mode { countdown, stopped };
@@ -641,7 +687,6 @@ private:
     };
 
     std::optional<Want> evaluate();
-    double smooth_position(double source, bool paused);
     void update_next(const metadb_handle_ptr& now_playing);
     bool ensure_window(HWND owner, const Layout& layout);
     void destroy_window();
@@ -653,9 +698,11 @@ private:
     HWND m_timer_wnd{};
     HWND m_wnd{};
     HWND m_owner{};
-    UINT m_interval{};
-    // 倒數期間是否已把系統計時精度調成 1 ms（要成對還原）
-    bool m_high_resolution_timer{};
+    // 滑鼠停在卡片上（畫面微亮）；圓角半徑（像素，點擊判斷用，每次畫時更新）
+    bool m_hover{};
+    int m_corner_radius{};
+    // 掛在 m_timer_wnd 上的雙頻計時器（動畫 16 ms／閒置 150 ms），動畫期間才把系統計時精度調成 1 ms
+    nocturne_timing::WindowTimer m_timer;
     double m_alpha{};
     Clock::time_point m_last_tick{Clock::now()};
     // 換曲後到這個時間點之前不顯示
@@ -663,12 +710,8 @@ private:
     // 這一輪 evaluate() 是因為展開頁已經不在（收合、動畫中、截圖視窗還蓋著）而沒有東西要顯示；
     // 這種情況提示要直接收掉，不能淡出（見 tick）
     bool m_stage_unavailable{};
-    // 播放位置濾波：上一次的來源位置與時間、當時是否暫停，以及目前吸收掉的偏差（顯示位置＝來源位置＋偏差）
-    bool m_position_valid{};
-    bool m_position_paused{};
-    double m_position_source{};
-    double m_position_offset{};
-    Clock::time_point m_position_time{};
+    // 倒數圈用的播放位置要保持連續：吸收暫停→繼續時 fb2k 回報的小誤差（跟進度條共用同一套）
+    nocturne_timing::PositionSmoother m_smoother;
 
     std::optional<NextTrack> m_next;
     metadb_handle_ptr m_next_for;
@@ -693,6 +736,82 @@ Controller& controller()
 {
     static Controller instance;
     return instance;
+}
+
+// 淡入到這個程度以上才接受點擊（剛冒出來幾乎看不見時，點到的是底下的東西）
+constexpr double clickable_alpha = 0.5;
+
+bool Controller::hit_test(const POINT& screen_point) const
+{
+    if (!m_wnd || m_alpha < clickable_alpha)
+        return false;
+
+    RECT rect{};
+    if (!GetWindowRect(m_wnd, &rect))
+        return false;
+
+    const auto x = static_cast<int>(screen_point.x - rect.left);
+    const auto y = static_cast<int>(screen_point.y - rect.top);
+    const auto width = static_cast<int>(rect.right - rect.left);
+    const auto height = static_cast<int>(rect.bottom - rect.top);
+
+    if (x < 0 || y < 0 || x >= width || y >= height)
+        return false;
+
+    // 四個圓角外面不算（圓角外的像素本來就是全透明）
+    const auto r = std::min({m_corner_radius, width / 2, height / 2});
+    const auto cx = std::max(r, std::min(x, width - 1 - r));
+    const auto cy = std::max(r, std::min(y, height - 1 - r));
+    const auto dx = x - cx;
+    const auto dy = y - cy;
+    return dx * dx + dy * dy <= r * r;
+}
+
+void Controller::set_hover(HWND wnd, bool inside)
+{
+    if (inside && !m_hover) {
+        // 要自己登記「滑鼠離開」，不然離開時不會收到通知
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
+        TrackMouseEvent(&track);
+    }
+    m_hover = inside;
+}
+
+// 點卡片：播放中＝跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）；已停止＝開始播放
+void Controller::activate()
+{
+    if (!m_content_valid)
+        return;
+
+    const auto stopped = m_content.stopped;
+
+    // 不在自己的視窗訊息裡直接換歌：換歌會馬上收掉這個視窗（on_new_track），改排到下一輪主執行緒訊息再做
+    fb2k::inMainThread([stopped] {
+        if (!g_alive)
+            return;
+
+        try {
+            play_control::get()->start(stopped ? play_control::track_command_play : play_control::track_command_next);
+        }
+        CATCH_LOG()
+    });
+}
+
+bool toast_hit_test(LPARAM screen_point)
+{
+    return g_alive && controller().hit_test(POINT{GET_X_LPARAM(screen_point), GET_Y_LPARAM(screen_point)});
+}
+
+void toast_set_hover(HWND wnd, bool inside)
+{
+    if (g_alive)
+        controller().set_hover(wnd, inside);
+}
+
+void toast_activate()
+{
+    if (g_alive)
+        controller().activate();
 }
 
 LRESULT CALLBACK timer_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -731,45 +850,25 @@ void Controller::start()
 
     m_timer_wnd = CreateWindowEx(0, timer_class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
         core_api::get_my_instance(), nullptr);
+    m_timer.start(m_timer_wnd, timer_id);
     set_interval(interval_idle_ms);
 }
 
 void Controller::stop()
 {
+    m_timer.stop();
     if (m_timer_wnd) {
-        KillTimer(m_timer_wnd, timer_id);
         DestroyWindow(m_timer_wnd);
         m_timer_wnd = nullptr;
     }
     destroy_window();
-
-    if (m_high_resolution_timer) {
-        timeEndPeriod(1);
-        m_high_resolution_timer = false;
-    }
 }
 
 void Controller::set_interval(UINT ms)
 {
-    if (!m_timer_wnd)
-        return;
-
     // 只有顯示動畫的期間才把系統計時精度調成 1 ms：預設 15.6 ms 的精度下，16 ms 的計時器常常要等到 31 ms 才觸發，
     // 動畫實測只剩 33～41 Hz；閒置時還原，不影響耗電
-    const auto want_high_resolution = ms == interval_active_ms;
-    if (want_high_resolution != m_high_resolution_timer) {
-        if (want_high_resolution)
-            timeBeginPeriod(1);
-        else
-            timeEndPeriod(1);
-        m_high_resolution_timer = want_high_resolution;
-    }
-
-    if (m_interval == ms)
-        return;
-
-    m_interval = ms;
-    SetTimer(m_timer_wnd, timer_id, ms, nullptr);
+    m_timer.set_interval(ms, ms == interval_active_ms);
 }
 
 // 換曲了：提示講的下一首已經在播，舊的提示不用淡出，直接收掉；錄影量到原本換曲後舊提示還會殘留 0.2～0.3 秒
@@ -777,7 +876,7 @@ void Controller::on_new_track()
 {
     m_suppress_until = Clock::now() + suppress_after_new_track;
     m_next_valid = false;
-    m_position_valid = false;
+    m_smoother.reset();
 
     if (m_wnd) {
         destroy_window();
@@ -792,6 +891,7 @@ void Controller::destroy_window()
         m_wnd = nullptr;
     }
     m_owner = nullptr;
+    m_hover = false;
     m_surface.reset();
     m_content_valid = false;
     m_static_dirty = true;
@@ -814,37 +914,6 @@ void Controller::update_next(const metadb_handle_ptr& now_playing)
     m_next_for = now_playing;
     m_next_time = now;
     m_next_valid = true;
-}
-
-// 讓倒數用的播放位置保持連續。顯示位置＝來源位置＋偏差；每次比較「來源位置實際前進多少」與「這段時間理應前進多少
-// （播放中＝經過的時間，暫停中＝0）」，差距在 max_absorb_seconds 以內就算回報誤差，記進偏差讓顯示位置不跳，
-// 差距更大（跳轉）就重設偏差照實顯示；偏差再以 offset_decay_seconds 慢慢歸零
-double Controller::smooth_position(double source, bool paused)
-{
-    const auto now = Clock::now();
-
-    if (m_position_valid) {
-        const auto dt = std::chrono::duration<double>(now - m_position_time).count();
-        const auto expected = (paused && m_position_paused) ? 0.0 : dt;
-        const auto residual = (source - m_position_source) - expected;
-
-        if (std::abs(residual) <= max_absorb_seconds)
-            m_position_offset -= residual;
-        else
-            m_position_offset = 0;
-
-        // 暫停中偏差要原地不動，不然顯示位置會在暫停時慢慢往前爬
-        if (!paused)
-            m_position_offset *= std::exp(-dt / offset_decay_seconds);
-    } else {
-        m_position_offset = 0;
-    }
-
-    m_position_valid = true;
-    m_position_paused = paused;
-    m_position_source = source;
-    m_position_time = now;
-    return source + m_position_offset;
 }
 
 std::optional<Controller::Want> Controller::evaluate()
@@ -872,14 +941,14 @@ std::optional<Controller::Want> Controller::evaluate()
 
     if (playback->is_playing()) {
         if (!playback->get_now_playing(now_playing)) {
-            m_position_valid = false;
+            m_smoother.reset();
             return {};
         }
 
         const auto length = playback->playback_get_length();
         // 長度未知（串流）或太短（不到 2N 秒）不顯示，免得一開始就出現
         if (length <= 0 || length < 2.0 * count) {
-            m_position_valid = false;
+            m_smoother.reset();
             return {};
         }
 
@@ -892,7 +961,7 @@ std::optional<Controller::Want> Controller::evaluate()
         }
 
         // 再把暫停→繼續瞬間位置往前跳的小誤差吸收掉，圈與數字才不會在狂按暫停時一直跳
-        const auto current_position = smooth_position(source_position, paused);
+        const auto current_position = m_smoother.filter(source_position, paused);
 
         // 最後 fade_out_seconds 秒就開始淡出，讓提示剛好在歌曲結束時消失（原本到歌曲結束才開始淡出，換曲後還會殘留）
         // 淡出期間仍回傳內容（fading），倒數圈與數字照常往 0 走；原本這段傳回空，畫面凍結在「剩 5% 的紅弧＋1」就淡掉
@@ -905,7 +974,7 @@ std::optional<Controller::Want> Controller::evaluate()
         want.remaining = std::max(remaining, 0.0);
         want.ratio = want.remaining / count;
     } else {
-        m_position_valid = false;
+        m_smoother.reset();
 
         if (playlist_manager::get()->queue_get_count() == 0)
             return {};
@@ -929,7 +998,8 @@ bool Controller::ensure_window(HWND owner, const Layout& layout)
     if (m_wnd)
         return true;
 
-    m_wnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, toast_class_name,
+    // 不再加 WS_EX_TRANSPARENT：卡片要能點（穿不穿透由 WM_NCHITTEST 決定）
+    m_wnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, toast_class_name,
         L"", WS_POPUP, 0, 0, layout.width, layout.height, owner, nullptr, core_api::get_my_instance(), nullptr);
 
     if (!m_wnd)
@@ -950,37 +1020,57 @@ void Controller::start_cover_load(const metadb_handle_ptr& track, int size_px)
     std::thread([track, size_px, generation] {
         std::shared_ptr<Gdiplus::Bitmap> result;
 
-        try {
-            abort_callback_dummy abort;
-            pfc::list_single_ref_t<metadb_handle_ptr> items(track);
-            pfc::list_single_ref_t<GUID> ids(album_art_ids::cover_front);
-            const auto instance = album_art_manager_v2::get()->open(items, ids, abort);
+        // 從一個封面來源（真正的封面，或 fb2k 的「沒封面佔位圖」）取出正面封面，縮成方形；取不到回空
+        const auto load_front = [size_px](const album_art_extractor_instance_v2::ptr& instance,
+                                    abort_callback& abort) -> std::shared_ptr<Gdiplus::Bitmap> {
+            try {
+                album_art_data_ptr data;
+                if (!instance->query(album_art_ids::cover_front, data, abort) || !data.is_valid() || data->get_size() == 0)
+                    return nullptr;
 
-            album_art_data_ptr data;
-            if (instance->query(album_art_ids::cover_front, data, abort) && data.is_valid() && data->get_size() > 0) {
                 wil::com_ptr<IStream> stream;
                 stream.attach(SHCreateMemStream(static_cast<const BYTE*>(data->get_ptr()), gsl::narrow<UINT>(data->get_size())));
 
-                if (stream) {
-                    Gdiplus::Bitmap source(stream.get());
-                    const auto width = static_cast<int>(source.GetWidth());
-                    const auto height = static_cast<int>(source.GetHeight());
+                if (!stream)
+                    return nullptr;
 
-                    if (source.GetLastStatus() == Gdiplus::Ok && width > 0 && height > 0) {
-                        auto scaled = std::make_shared<Gdiplus::Bitmap>(size_px, size_px, PixelFormat32bppPARGB);
-                        Gdiplus::Graphics g(scaled.get());
-                        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-                        g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
-                        // 取中間的正方形
-                        const auto side = std::min(width, height);
-                        g.DrawImage(&source, Gdiplus::Rect(0, 0, size_px, size_px), (width - side) / 2,
-                            (height - side) / 2, side, side, Gdiplus::UnitPixel);
-                        result = std::move(scaled);
-                    }
-                }
+                Gdiplus::Bitmap source(stream.get());
+                const auto width = static_cast<int>(source.GetWidth());
+                const auto height = static_cast<int>(source.GetHeight());
+
+                if (source.GetLastStatus() != Gdiplus::Ok || width <= 0 || height <= 0)
+                    return nullptr;
+
+                auto scaled = std::make_shared<Gdiplus::Bitmap>(size_px, size_px, PixelFormat32bppPARGB);
+                Gdiplus::Graphics g(scaled.get());
+                g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+                // 取中間的正方形
+                const auto side = std::min(width, height);
+                g.DrawImage(&source, Gdiplus::Rect(0, 0, size_px, size_px), (width - side) / 2, (height - side) / 2, side,
+                    side, Gdiplus::UnitPixel);
+                return scaled;
+            } catch (...) {
+                return nullptr;
             }
+        };
+
+        abort_callback_dummy abort;
+
+        try {
+            pfc::list_single_ref_t<metadb_handle_ptr> items(track);
+            pfc::list_single_ref_t<GUID> ids(album_art_ids::cover_front);
+            result = load_front(album_art_manager_v2::get()->open(items, ids, abort), abort);
+        } catch (...) {
         }
-        catch (...) {
+
+        // 沒封面：用 fb2k 自己的「Stub image」（Preferences 的 Album art 頁設定，展開頁與標頭沒封面時顯示的同一張），
+        // 讓提示卡片跟其他地方一致；沒設就維持畫雙圓圖示
+        if (!result) {
+            try {
+                result = load_front(album_art_manager_v2::get()->open_stub(abort), abort);
+            } catch (...) {
+            }
         }
 
         fb2k::inMainThread([result, generation] {
@@ -1047,6 +1137,18 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
     m_surface.copy_static_to_canvas();
     // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
     draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
+
+    m_corner_radius = layout.radius;
+    if (m_hover) {
+        // 滑鼠停在卡片上：整張卡片微亮一層，讓人知道可以點
+        Gdiplus::Graphics g(&m_surface.canvas());
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        Gdiplus::GraphicsPath card;
+        add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, static_cast<float>(layout.width) - 1, static_cast<float>(layout.height) - 1),
+            static_cast<float>(layout.radius));
+        Gdiplus::SolidBrush wash(rgba(24, 255, 255, 255));
+        g.FillPath(&wash, &card);
+    }
 
     // 淡入時從靠近邊緣那一側滑進來：放上面就從上往下，放下面就從下往上
     const auto corner = std::min(position.get(), position_count - 1);
@@ -1206,6 +1308,12 @@ public:
 play_callback_static_factory_t<NewTrackCallback> new_track_callback;
 
 } // namespace
+
+metadb_handle_ptr predict_next_track(const metadb_handle_ptr& now_playing)
+{
+    const auto next = resolve_next(now_playing);
+    return next ? next->handle : metadb_handle_ptr{};
+}
 
 bool gdiplus_fonts_ready()
 {
