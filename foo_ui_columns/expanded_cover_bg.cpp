@@ -388,12 +388,24 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
         std::error_code ignored;
         std::filesystem::create_directories(folder, ignored);
 
-        // 先存成暫存檔再改名，面板不會讀到寫到一半的圖
-        const auto temp_path = final_path + L".tmp";
-        if (result.Save(temp_path.c_str(), &png, nullptr) != Gdiplus::Ok)
+        // 先存成暫存檔再改名，面板不會讀到寫到一半的圖。
+        // 暫存檔名加上執行緒編號（2026-11-09）：換歌時「預先替下一首做圖」和「目前這首要圖」常常是同一張封面（同專輯），
+        // 兩條執行緒原本寫同一個 .tmp，會互相搶，其中一條失敗回「沒有圖」，那首歌就整首沒有虛化背景
+        wchar_t temp_suffix[32];
+        std::swprintf(temp_suffix, std::size(temp_suffix), L".%lu.tmp", GetCurrentThreadId());
+        const auto temp_path = final_path + temp_suffix;
+        if (result.Save(temp_path.c_str(), &png, nullptr) != Gdiplus::Ok) {
+            DeleteFileW(temp_path.c_str());
+            // 存不了，但別條執行緒可能已經把同一張做好了
+            if (std::filesystem::exists(final_path, ignored))
+                return to_utf8(final_path);
             return std::nullopt;
+        }
         if (!MoveFileExW(temp_path.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
             DeleteFileW(temp_path.c_str());
+            // 換不過去（例如面板正開著同名的圖）時，只要同一張已經在了就算成功：檔名是封面內容的雜湊，內容一樣
+            if (std::filesystem::exists(final_path, ignored))
+                return to_utf8(final_path);
             return std::nullopt;
         }
 
@@ -445,8 +457,18 @@ Entry acquire(const metadb_handle_ptr& track, uint32_t cap, bool& cache_hit)
         Entry created{promise->get_future().share(), std::make_shared<std::atomic<bool>>(false)};
         found = g_entries.emplace(key, created).first;
 
-        std::thread([promise, late = created.late, track, cap] {
-            promise->set_value(generate(track, cap));
+        std::thread([promise, late = created.late, track, cap, key] {
+            const auto result = generate(track, cap);
+            promise->set_value(result);
+            // 失敗不記住（2026-11-09）：拿掉這筆，下次要圖時重做。原本失敗結果會一直留在記憶體，
+            // 一次偶發失敗（例如兩條執行緒搶同一個暫存檔）就讓這首歌整個開啟期間都沒有背景。
+            // 只拿掉自己這筆（late 指標相同），中間被清空重建過的新紀錄不動
+            if (!result) {
+                std::scoped_lock lock(g_mutex);
+                const auto it = g_entries.find(key);
+                if (it != g_entries.end() && it->second.late == late)
+                    g_entries.erase(it);
+            }
             if (late->load())
                 settings_changed();
         }).detach();
