@@ -802,6 +802,16 @@ uint32_t get_now_playing_style()
     return commands::now_playing_style_value();
 }
 
+void reset_now_playing_style_to_cover()
+{
+    if (commands::now_playing_style_value() != 3)
+        return;
+
+    commands::now_playing_style = 1;
+    commands::refresh_now_playing_track();
+    cover_zoom::refresh_layouts();
+}
+
 std::optional<double> get_paused_position()
 {
     const auto position = commands::paused_position_ms.load();

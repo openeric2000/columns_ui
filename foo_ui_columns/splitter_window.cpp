@@ -1449,6 +1449,7 @@ void FlatSplitterPanel::start_now_playing_animation()
 
     if (!now_playing_bar || !now_playing_bar->m_wnd) {
         on_size_changed();
+        on_now_playing_animation_finished();
         return;
     }
 
@@ -1692,6 +1693,16 @@ void FlatSplitterPanel::finish_now_playing_slide()
     // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
     if (m_cover_zoom_wnd)
         cover_zoom::layout(m_cover_zoom_wnd, m_now_playing_bar_rect);
+
+    on_now_playing_animation_finished();
+}
+
+void FlatSplitterPanel::on_now_playing_animation_finished()
+{
+    // 收合完成（展開頁已經看不到）：資訊卡切回封面，下次打開一定是封面（2026-11-09 使用者要求）。
+    // 不在打開的那一刻才切：展開動畫一開始就截圖，那時 ESLyric 還沒畫好封面，會先看到資訊卡再跳成封面
+    if (!m_now_playing_expanded)
+        main_menu::reset_now_playing_style_to_cover();
 }
 
 void FlatSplitterPanel::on_now_playing_animation_frame()
@@ -1728,6 +1739,7 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
         // 最終區域
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+        on_now_playing_animation_finished();
     } else {
         RECT client_rect{};
         GetClientRect(m_wnd, &client_rect);

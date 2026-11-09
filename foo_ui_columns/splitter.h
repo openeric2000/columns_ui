@@ -249,6 +249,8 @@ private:
     int get_now_playing_slide_offset() const;
     // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
     void finish_now_playing_slide();
+    // 自編版新增（2026-11-09）：展開／收合動畫完全結束時呼叫；收合完成就把資訊卡切回封面（下次打開一定是封面）
+    void on_now_playing_animation_finished();
     // 自編版新增：動畫每格送出下一格前，先讓播放列（ESLyric 的進度條與時間）更新
     void let_now_playing_bar_update();
     // 自編版新增：排定下一格動畫。先處理輸入佇列裡的滑鼠、鍵盤訊息（已投遞的訊息優先於輸入，不處理的話點擊要等整段動畫結束），再投遞下一格
