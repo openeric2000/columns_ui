@@ -13,6 +13,12 @@
 #include "thin_scrollbar.h"
 #include "expanded_cover_bg.h"
 
+// 建置資訊（版本種類、commit、日期）：build_columns_ui.ps1 每次建置時產生，不進版控。
+// 沒有這個檔（例如直接從原始碼編）時，「關於」只顯示版本號，跟公開版一樣
+#if __has_include("nocturne_build_info.h")
+#include "nocturne_build_info.h"
+#endif
+
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
 // - 播放：進度條滾輪、輸出裝置顯示、音量條收成圖示
@@ -550,7 +556,16 @@ private:
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::about_tab_title);
         SetDlgItemText(wnd, IDC_ABOUT_NAME, nocturne_text::about_product_name);
-        const std::wstring version = std::wstring(nocturne_text::about_version_prefix) + nocturne_text::nocturne_version;
+        std::wstring version = std::wstring(nocturne_text::about_version_prefix) + nocturne_text::nocturne_version;
+        // 開發版（219、169）與個人版（主環境）後面加上種類、commit 與建置日期；公開版與朋友版只顯示版本號
+#if defined(NOCTURNE_BUILD_DEV) || defined(NOCTURNE_BUILD_PERSONAL)
+#if defined(NOCTURNE_BUILD_DEV)
+        version += nocturne_text::about_edition_dev;
+#else
+        version += nocturne_text::about_edition_personal;
+#endif
+        version += L" · " NOCTURNE_BUILD_COMMIT L" · " NOCTURNE_BUILD_DATE;
+#endif
         SetDlgItemText(wnd, IDC_ABOUT_VERSION, version.c_str());
     }
 

@@ -82,6 +82,9 @@ inline constexpr wchar_t font_tab_title[] = L"Fonts";
 inline constexpr auto about_tab_name = "About";
 inline constexpr wchar_t about_tab_title[] = L"About";
 inline constexpr wchar_t about_version_prefix[] = L"Version ";
+// 個人建置在版本號後面加上版本種類（見 nocturne_build_info.h，由 build_columns_ui.ps1 產生）
+inline constexpr wchar_t about_edition_dev[] = L" Development build";
+inline constexpr wchar_t about_edition_personal[] = L" Personal build";
 // 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
 inline constexpr auto interface_tab_name = "Interface";
 // 捲軸：細捲軸開關
@@ -239,6 +242,9 @@ inline constexpr wchar_t font_tab_title[] = L"字型";
 inline constexpr auto about_tab_name = "關於";
 inline constexpr wchar_t about_tab_title[] = L"關於";
 inline constexpr wchar_t about_version_prefix[] = L"版本 ";
+// 個人建置在版本號後面加上版本種類（見 nocturne_build_info.h，由 build_columns_ui.ps1 產生）
+inline constexpr wchar_t about_edition_dev[] = L" 開發版";
+inline constexpr wchar_t about_edition_personal[] = L" 個人版";
 // 「介面」分頁（2026-11-08）：原本的「外觀」「展開頁」「啟動」三個各只有一個設定的分頁合併成一頁，各自一個小標題
 inline constexpr auto interface_tab_name = "介面";
 // 捲軸：細捲軸開關
