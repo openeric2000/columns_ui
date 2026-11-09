@@ -61,17 +61,17 @@ constexpr double shade_value = 10.0;
 constexpr double max_dim = 0.95;
 // 壓暗後補彩度：飽和度放大倍數＝1＋這個值×壓暗比例（壓暗 85% 約放大 2.7 倍），放大後的飽和度最高到 max_saturation
 constexpr double saturation_boost = 2.0;
-// 飽和度天花板（2026-11-09 使用者看了紅色封面整片太豔，對照 0.9／0.8／0.75／0.65 後選 0.8）：
+// 飽和度天花板（2026-11-09 使用者看了紅色封面整片太豔，對照 0.9／0.85／0.8／0.75／0.65 並在 219 實看 0.8 與 0.85 後，先用 0.85 試用）：
 // 補彩度最多補到這裡；封面本來就超過的（鮮紅、鮮藍）也壓回這裡，亮度維持不變。偏灰的封面碰不到，不受影響
-constexpr double max_saturation = 0.8;
+constexpr double max_saturation = 0.85;
 // 實際存成圖檔的大小：小圖放大到這個解析度並抖色（見 generate 裡的說明）。640×320 約 4 倍於面板放大前的像素，PNG 約 100～200 KB
 constexpr int output_width = 640;
 constexpr int output_height = 320;
 // 抖色雜訊的幅度（8 位元色階數）
 constexpr double noise_amplitude = 1.5;
 // 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度；3：放大並抖色，避免暗色漸層的色階斷層；4：抖色幅度 1→1.5；
-// 5：飽和度天花板 0.8，原本就太豔的也往下壓）
-constexpr unsigned algorithm_version = 5;
+// 5：飽和度天花板 0.8，原本就太豔的也往下壓；6：天花板改 0.85）
+constexpr unsigned algorithm_version = 6;
 // 等背景執行緒的最長時間（ESLyric 在主執行緒要圖，所以這段時間介面是停住的）。逾時就先回空：
 // 實測 ESLyric 只在換歌時才讀這個路徑，所以逾時的那首歌就沒有背景（下一首起恢復），寧可多等一點。
 // 平常下一首已經提前做好，不會真的等；沒預測到（隨機、點別首歌）才會等 60～200 毫秒
