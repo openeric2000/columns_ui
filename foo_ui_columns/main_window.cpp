@@ -19,6 +19,7 @@
 #include "legacy_artwork_config.h"
 #include "menu_items.h"
 #include "nocturne_timing.h"
+#include "nocturne_default_stub.h"
 #include "rebar.h"
 #include "win32.h"
 
@@ -79,6 +80,9 @@ HWND cui::MainWindow::initialise(user_interface::HookProc_t hook, bool is_hidden
     }
 
     warn_if_ui_hacks_installed();
+
+    // 公開版：還沒設過沒封面佔位圖就指到附的唱片圖（個人版是空函式）；要在任何面板查封面之前
+    nocturne::apply_default_stub_image();
 
     try {
         THROW_IF_FAILED(OleInitialize(nullptr));
