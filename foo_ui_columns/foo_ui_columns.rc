@@ -874,13 +874,15 @@ BEGIN
     LTEXT           "Scroll bars",IDC_TITLE1,7,4,313,17
     CONTROL         "Use thin scroll bars",IDC_THIN_SCROLLBAR,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,30,313,10
     LTEXT           "",IDC_THIN_SCROLLBAR_NOTE,7,46,313,20
-    LTEXT           "Now playing view",IDC_TITLE2,7,78,313,17
-    CONTROL         "Blurred cover background",IDC_EXPANDED_BG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,104,313,10
-    LTEXT           "Brightness limit",IDC_EXPANDED_BG_CAP_LABEL,7,120,313,8
-    COMBOBOX        IDC_EXPANDED_BG_CAP,7,131,110,90,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Startup",IDC_TITLE3,7,160,313,17
-    CONTROL         "Show the window only when the page is ready",IDC_STARTUP_HOLD,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,186,313,10
-    LTEXT           "",IDC_STARTUP_HOLD_NOTE,7,202,313,20
+    CONTROL         "Folder tree: hide the vertical scroll bar",IDC_THIN_AUTOHIDE_VERTICAL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,68,313,10
+    CONTROL         "Folder tree: hide the horizontal scroll bar",IDC_THIN_AUTOHIDE_HORIZONTAL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,82,313,10
+    LTEXT           "Now playing view",IDC_TITLE2,7,106,313,17
+    CONTROL         "Blurred cover background",IDC_EXPANDED_BG,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,132,313,10
+    LTEXT           "Brightness limit",IDC_EXPANDED_BG_CAP_LABEL,7,148,313,8
+    COMBOBOX        IDC_EXPANDED_BG_CAP,7,159,110,90,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Startup",IDC_TITLE3,7,188,313,17
+    CONTROL         "Show the window only when the page is ready",IDC_STARTUP_HOLD,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,214,313,10
+    LTEXT           "",IDC_STARTUP_HOLD_NOTE,7,230,313,20
 END
 
 IDD_PREFS_NOCTURNE_ABOUT DIALOGEX 0, 0, 327, 272

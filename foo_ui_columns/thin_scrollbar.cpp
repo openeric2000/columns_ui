@@ -9,6 +9,18 @@ bool is_enabled()
     return fb2k::configStore::get()->getConfigBool(config_key, enabled_default);
 }
 
+bool is_autohide(bool vertical)
+{
+    return fb2k::configStore::get()->getConfigBool(
+        vertical ? autohide_vertical_key : autohide_horizontal_key, autohide_default);
+}
+
+void set_autohide(bool vertical, bool value)
+{
+    // 資料夾樹那邊登記了變更通知，寫入就會當場切換
+    fb2k::configStore::get()->setConfigBool(vertical ? autohide_vertical_key : autohide_horizontal_key, value);
+}
+
 void sync_to_list_views()
 {
     // 第一次呼叫時登記變更通知：資料夾樹那邊（或任何人）改了開關，清單也要跟著切

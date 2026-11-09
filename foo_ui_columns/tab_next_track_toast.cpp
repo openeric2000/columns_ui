@@ -489,6 +489,13 @@ private:
         ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
     }
 
+    // 「平常隱藏」只對細捲軸有意義：沒勾細捲軸時變灰
+    static void enable_autohide(HWND wnd, bool enabled)
+    {
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_VERTICAL), enabled);
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL), enabled);
+    }
+
     void on_init_dialog(HWND wnd) override
     {
         // 捲軸
@@ -496,6 +503,11 @@ private:
         SetDlgItemText(wnd, IDC_THIN_SCROLLBAR, nocturne_text::thin_scrollbar);
         SetDlgItemText(wnd, IDC_THIN_SCROLLBAR_NOTE, nocturne_text::thin_scrollbar_note);
         CheckDlgButton(wnd, IDC_THIN_SCROLLBAR, check_state(thin_scrollbar::is_enabled()));
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_VERTICAL, nocturne_text::thin_autohide_vertical);
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, nocturne_text::thin_autohide_horizontal);
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_VERTICAL, check_state(thin_scrollbar::is_autohide(true)));
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, check_state(thin_scrollbar::is_autohide(false)));
+        enable_autohide(wnd, thin_scrollbar::is_enabled());
 
         // 展開頁
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
@@ -525,7 +537,11 @@ private:
         const auto code = HIWORD(wp);
 
         if (id == IDC_THIN_SCROLLBAR && code == BN_CLICKED) {
-            thin_scrollbar::set_enabled(IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED);
+            const auto checked = IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED;
+            thin_scrollbar::set_enabled(checked);
+            enable_autohide(wnd, checked);
+        } else if ((id == IDC_THIN_AUTOHIDE_VERTICAL || id == IDC_THIN_AUTOHIDE_HORIZONTAL) && code == BN_CLICKED) {
+            thin_scrollbar::set_autohide(id == IDC_THIN_AUTOHIDE_VERTICAL, IsDlgButtonChecked(wnd, id) == BST_CHECKED);
         } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
             const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
             expanded_cover_bg::enabled = checked;
@@ -671,6 +687,8 @@ void reset_nocturne_settings()
     startup_hold_until_ready.reset();
 
     thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
+    thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
+    thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
 
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();

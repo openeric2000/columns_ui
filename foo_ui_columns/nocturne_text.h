@@ -92,6 +92,8 @@ inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
+inline constexpr wchar_t thin_autohide_vertical[] = L"Folder tree: hide the vertical scroll bar until the pointer is over it";
+inline constexpr wchar_t thin_autohide_horizontal[] = L"Folder tree: hide the horizontal scroll bar until the pointer is over it";
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
 inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
@@ -252,6 +254,8 @@ inline constexpr wchar_t appearance_tab_title[] = L"捲軸";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
+inline constexpr wchar_t thin_autohide_vertical[] = L"資料夾樹的直向捲軸平常隱藏，滑鼠移過去才出現";
+inline constexpr wchar_t thin_autohide_horizontal[] = L"資料夾樹的橫向捲軸平常隱藏，滑鼠移過去才出現";
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
 inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";

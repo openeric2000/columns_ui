@@ -13,7 +13,16 @@ namespace cui::thin_scrollbar {
 inline constexpr char config_key[] = "nocturne.thinScrollbar";
 inline constexpr bool enabled_default = true;
 
+// 資料夾樹（自編版 Album list）的細捲軸「平常隱藏、滑鼠移進軌道才出現」，直、橫各一個開關（2026-11-09 使用者要求）。
+// 只有資料夾樹會讀；鍵名要跟 Album list 的 main_thin_scrollbar.cpp 一致。播放清單的細捲軸不受影響
+inline constexpr char autohide_vertical_key[] = "nocturne.thinScrollbar.autoHideVertical";
+inline constexpr char autohide_horizontal_key[] = "nocturne.thinScrollbar.autoHideHorizontal";
+inline constexpr bool autohide_default = true;
+
 bool is_enabled();
+
+bool is_autohide(bool vertical);
+void set_autohide(bool vertical, bool value);
 
 // 設定頁勾選、Reset page 用：寫入設定並馬上套用到所有清單
 void set_enabled(bool enabled);
