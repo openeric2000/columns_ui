@@ -277,6 +277,8 @@ private:
     HWND m_output_chip_wnd{};
     // 播放列上的音量圖示視窗（自己畫，見 volume_chip.h）；有播放列時才存在，設定頁沒開「音量條收成圖示」時藏起來
     HWND m_volume_chip_wnd{};
+    // 展開頁大封面右下角的放大鈕（自己畫，見 now_playing_cover_zoom.h）；有播放列時才存在，只在完全展開的封面模式顯示
+    HWND m_cover_zoom_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
     int m_now_playing_slide_from{};

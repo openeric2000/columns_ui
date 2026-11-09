@@ -17,6 +17,7 @@
 #include "next_track_toast.h"
 #include "volume_chip.h"
 #include "expanded_cover_bg.h"
+#include "now_playing_cover_zoom.h"
 
 namespace cui::main_menu {
 
@@ -285,6 +286,8 @@ void set_now_playing_style(uint32_t style)
 {
     now_playing_style = style;
     refresh_now_playing_track();
+    // 封面右下角的放大鈕只在封面模式顯示（資訊卡模式藏起來）
+    cover_zoom::refresh_layouts();
 }
 
 // 自編版新增：暫停時凍結進度條用的位置與曲長（毫秒），沒在暫停時位置為 -1
@@ -781,6 +784,11 @@ void on_lock_window_size_changed()
 }
 
 } // namespace commands
+
+uint32_t get_now_playing_style()
+{
+    return commands::now_playing_style_value();
+}
 
 std::optional<double> get_paused_position()
 {

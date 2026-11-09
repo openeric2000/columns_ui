@@ -287,6 +287,7 @@
     <ClCompile Include="now_playing_progress.cpp" />
     <ClCompile Include="output_chip.cpp" />
     <ClCompile Include="volume_chip.cpp" />
+    <ClCompile Include="now_playing_cover_zoom.cpp" />
     <ClCompile Include="nocturne_default_stub.cpp" />
     <ClCompile Include="thin_scrollbar.cpp" />
     <ClCompile Include="expanded_cover_bg.cpp" />
@@ -497,6 +498,7 @@
     <ClInclude Include="now_playing_progress.h" />
     <ClInclude Include="output_chip.h" />
     <ClInclude Include="volume_chip.h" />
+    <ClInclude Include="now_playing_cover_zoom.h" />
     <ClInclude Include="nocturne_default_stub.h" />
     <ClInclude Include="thin_scrollbar.h" />
     <ClInclude Include="expanded_cover_bg.h" />

@@ -60,4 +60,7 @@ void set_seek_preview(std::optional<double> seconds);
 // 要在主執行緒呼叫
 void refresh_layout_fields();
 
+// 自編版新增（2026-11-09）：目前生效的展開頁樣式（1 封面、3 資訊卡；已拿掉的 2 當成 1），給展開頁放大鈕判斷要不要顯示
+uint32_t get_now_playing_style();
+
 } // namespace cui::main_menu

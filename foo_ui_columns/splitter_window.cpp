@@ -4,6 +4,7 @@
 #include "now_playing_progress.h"
 #include "output_chip.h"
 #include "volume_chip.h"
+#include "now_playing_cover_zoom.h"
 
 namespace cui::panels::splitter {
 
@@ -377,8 +378,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_output_chip_wnd = output_chip::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_volume_chip_wnd)
         m_volume_chip_wnd = volume_chip::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_cover_zoom_wnd)
+        m_cover_zoom_wnd = cover_zoom::create(get_wnd());
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 3);
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 4);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -412,6 +415,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = output_chip::defer_layout(dwp, m_output_chip_wnd, now_playing_bar_rect);
         if (m_volume_chip_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = volume_chip::defer_layout(dwp, m_volume_chip_wnd, now_playing_bar_rect);
+        if (m_cover_zoom_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = cover_zoom::defer_layout(dwp, m_cover_zoom_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -443,6 +448,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_volume_chip_wnd = volume_chip::create(get_wnd());
         if (m_volume_chip_wnd)
             volume_chip::layout(m_volume_chip_wnd, now_playing_bar_rect);
+        if (!m_cover_zoom_wnd)
+            m_cover_zoom_wnd = cover_zoom::create(get_wnd());
+        if (m_cover_zoom_wnd)
+            cover_zoom::layout(m_cover_zoom_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
@@ -450,6 +459,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_output_chip_wnd, nullptr));
         if (m_volume_chip_wnd)
             DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
+        if (m_cover_zoom_wnd)
+            DestroyWindow(std::exchange(m_cover_zoom_wnd, nullptr));
     }
 
     // 展開頁樣式 2（靠左＋VU 表）已在 2026-11-07 拿掉。舊的版面裡可能還留著自訂標題「展開頁右側」的面板（VU 表），
@@ -1677,6 +1688,10 @@ void FlatSplitterPanel::finish_now_playing_slide()
     }
 
     DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+
+    // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
+    if (m_cover_zoom_wnd)
+        cover_zoom::layout(m_cover_zoom_wnd, m_now_playing_bar_rect);
 }
 
 void FlatSplitterPanel::on_now_playing_animation_frame()

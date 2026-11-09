@@ -125,6 +125,8 @@ inline constexpr wchar_t font_tab_foot[]
 inline constexpr wchar_t font_restart_note[] = L"Changed fonts will show after foobar2000 restarts.";
 inline constexpr wchar_t font_restart_button[] = L"Restart now";
 inline constexpr auto show_cover_name = "Show Large Cover";
+// 展開頁封面右下角的放大鈕（2026-11-09，now_playing_cover_zoom.cpp）
+inline constexpr wchar_t cover_zoom_tooltip[] = L"View the large cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
 inline constexpr auto theme_font_description
@@ -287,6 +289,8 @@ inline constexpr wchar_t font_tab_foot[]
 inline constexpr wchar_t font_restart_note[] = L"換過字型的部分要重開 foobar2000 才會生效。";
 inline constexpr wchar_t font_restart_button[] = L"立即重開";
 inline constexpr auto show_cover_name = "顯示封面大圖";
+// 展開頁封面右下角的放大鈕（2026-11-09，now_playing_cover_zoom.cpp）
+inline constexpr wchar_t cover_zoom_tooltip[] = L"看封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";
 inline constexpr auto theme_font_description
