@@ -29,4 +29,8 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);
 // 用上一次的 bar_rect 重排所有按鈕（展開動畫結束、切換展開頁樣式、GDI+ 字型暖機做完時用）
 void refresh_layouts();
 
+// 封面方塊在展開頁裡的位置（展開頁左上角為原點、實際像素），照 main.xml 的 nocturne-cover-zoom 標記算；
+// 版面沒有標記、展開頁太矮或封面放不下時傳回空的。不看展開頁樣式（資訊卡也在同一塊），給封面⇄資訊卡的切換動畫用
+std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height);
+
 } // namespace cui::cover_zoom

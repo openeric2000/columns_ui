@@ -311,35 +311,23 @@ private:
         if (!next_track_toast::gdiplus_fonts_ready())
             return {};
 
-        const auto& geometry = layout_geometry();
-        if (!geometry.valid)
-            return {};
-
         // 展開頁＝分割面板扣掉底部播放列那一段（播放列視窗跟分割面板一樣大、在 (0, 0)）
         const auto stage_width = m_bar_rect.right - m_bar_rect.left;
         const auto stage_height = m_bar_rect.top;
-        if (stage_height < dip(stage_min_height_dip))
+        const auto cover_rect = cover_rect_in_stage(stage_width, stage_height);
+        if (!cover_rect)
             return {};
 
-        const auto resolve = [stage_width](const Length& length) {
-            return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                                  : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
-        };
-
-        const auto cover = resolve(geometry.cover);
-        const auto cover_left = m_bar_rect.left + resolve(geometry.left);
-        const auto group_height = cover + resolve(geometry.gap) + resolve(geometry.info);
-        const auto cover_top = (stage_height - group_height) / 2;
+        const auto cover = cover_rect->right - cover_rect->left;
         const auto size = dip(button_size_dip);
         const auto inset = dip(button_inset_dip);
 
-        // 封面太小（放不下按鈕）或跑出展開頁就不顯示
-        if (cover < size + 2 * inset || cover_left + cover > m_bar_rect.right || cover_top < 0
-            || cover_top + cover > stage_height)
+        // 封面太小就不顯示按鈕
+        if (cover < size + 2 * inset)
             return {};
 
-        const auto right = cover_left + cover - inset;
-        const auto bottom = cover_top + cover - inset;
+        const auto right = m_bar_rect.left + cover_rect->right - inset;
+        const auto bottom = cover_rect->bottom - inset;
         return {right - size, bottom - size, right, bottom};
     }
 
@@ -516,6 +504,30 @@ LRESULT CALLBACK Button::s_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 } // namespace
+
+std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
+{
+    const auto& geometry = layout_geometry();
+    if (!geometry.valid || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
+        return {};
+
+    const auto resolve = [stage_width](const Length& length) {
+        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
+                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    };
+
+    // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）
+    const auto cover = resolve(geometry.cover);
+    const auto cover_left = resolve(geometry.left);
+    const auto group_height = cover + resolve(geometry.gap) + resolve(geometry.info);
+    const auto cover_top = (stage_height - group_height) / 2;
+
+    // 跑出展開頁（視窗太小）就當作沒有
+    if (cover <= 0 || cover_left + cover > stage_width || cover_top < 0 || cover_top + cover > stage_height)
+        return {};
+
+    return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
+}
 
 void refresh_layouts()
 {

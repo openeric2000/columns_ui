@@ -18,6 +18,7 @@
 #include "volume_chip.h"
 #include "expanded_cover_bg.h"
 #include "now_playing_cover_zoom.h"
+#include "now_playing_style_transition.h"
 
 namespace cui::main_menu {
 
@@ -284,10 +285,21 @@ void refresh_now_playing_track()
 
 void set_now_playing_style(uint32_t style)
 {
-    now_playing_style = style;
-    refresh_now_playing_track();
-    // 封面右下角的放大鈕只在封面模式顯示（資訊卡模式藏起來）
-    cover_zoom::refresh_layouts();
+    const auto apply = [style] {
+        now_playing_style = style;
+        refresh_now_playing_track();
+        // 封面右下角的放大鈕只在封面模式顯示（資訊卡模式藏起來）
+        cover_zoom::refresh_layouts();
+    };
+
+    // 樣式沒變（例如主選單點了目前這個）就不做動畫
+    if ((style == 3 ? 3u : 1u) == now_playing_style_value()) {
+        apply();
+        return;
+    }
+
+    // 封面⇄資訊卡的過渡動畫（展開頁完全展開、找得到封面位置時才有，見 now_playing_style_transition.h）
+    style_transition::run(apply);
 }
 
 // 自編版新增：暫停時凍結進度條用的位置與曲長（毫秒），沒在暫停時位置為 -1

@@ -689,6 +689,9 @@
     <ClCompile Include="now_playing_cover_zoom.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="now_playing_style_transition.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="nocturne_default_stub.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1077,6 +1080,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="now_playing_cover_zoom.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_style_transition.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_default_stub.h">
