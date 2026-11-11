@@ -62,18 +62,25 @@ constexpr NeedleTuning needle_tunings[needle_preset_count] = {
 };
 // 自動校準
 constexpr double auto_gate_dbfs = -45.0;       // 比這小聲的片段不算進平均
-constexpr double auto_average_vu_offset = 2.0; // 平均音量對到 −2 VU
-constexpr double auto_reference_min = -20.0;
+constexpr double auto_average_vu_offset = 1.75; // 平均音量對到 −1.75 VU
+// 0 VU 最低可以對到 −30 dBFS（原本 −20：很安靜的錄音如 Don Quixote 大提琴獨奏、DSD 的悲しい酒會卡在下限，指針中位只有 −13～−16 VU）
+constexpr double auto_reference_min = -30.0;
 constexpr double auto_reference_max = -4.0;
 constexpr double auto_fast_seconds = 1.5;
 constexpr double auto_slow_seconds = 8.0;
 constexpr double auto_rise_seconds = 3.0; // 變大聲時跟得快一點
 constexpr double auto_warm_seconds = 3.0;
-// 「自動」的峰值燈：這一格（約 16 毫秒）的音量超過刻度右端 +3 VU 就亮＝「這一下大聲到爆表」。
-// 2026-11-12 使用者要燈跟著自動一起調整。原本看瞬間峰值：169 的歌疑似開 ReplayGain、母帶又壓到天花板，
-// 峰值幾乎全卡在同一個值（nazonazo 全在 −4.2 dBFS），門檻設在那之下就一直亮、之上就完全不亮，怎麼設都沒意義。
-// 用實錄離線模擬：nazonazo 約每分鐘 2 次、BRIDGES 漸強處約 5 次，前奏轉大聲的歌（Fighting My Way）轉折處會比較常亮
-constexpr double auto_lamp_vu = 3.0;
+// 「自動」的峰值燈：最近約 1/8 秒（auto_lamp_frames 格）的音量超過 +3.5 VU（刻度右端再高半格）就亮＝「這一下大聲到爆表」。
+// 2026-11-12 使用者要燈跟著自動一起調整。不看瞬間峰值：169 的歌峰值常卡在同一個值（母帶壓滿，nazonazo 全在 −4.2 dBFS），
+// 門檻設在那之下就一直亮、之上就完全不亮。第一版看單格（16 毫秒）音量 +3 VU，三首歌調的；
+// 同天用 55 首實錄（常聽、Vocaloid、OST、古典、DSD…）重調：單格太敏感，44 首每分鐘閃超過 10 次、34 首亮著超過 8% 的時間；
+// 改成約 1/8 秒、+3.5 VU 後每首中位每分鐘 2～3 次，動態大的曲子（鋼琴、吹奏樂、OST 重擊）閃得多，壓滿的流行歌偶爾才閃
+constexpr double auto_lamp_vu = 3.5;
+constexpr int auto_lamp_frames = 8;
+// 指針吃的音量：最近 needle_frames 格（約 50 毫秒）的平均功率。單格（16 毫秒）對低音太短，指針會細細抖動；
+// 55 首實錄比較：3 格時細抖少約兩成，其他表現幾乎不變
+constexpr int needle_frames = 3;
+constexpr int power_history = 8; // 留幾格的功率（取上面兩個的大者）
 // 沒訊號（暫停、停止）時的回落：阻尼比 0.8、自然頻率 3.4。2026-11-12 實測（從 −11 VU 暫停）：約 0.35 秒落到一半、1.1 秒回到左邊停住、不反彈。
 // 第一版用「1.1 秒停穩」算，但大部分路程在前 0.3 秒就走完，看起來還是一下就掉回去（2026-11-11 實測）
 constexpr double rest_damping_ratio = 0.8;
@@ -188,6 +195,9 @@ struct State {
     double auto_power{};
     double auto_warm{};
     double auto_reference{-7.0};
+    // 最近幾格的功率（每聲道，環狀），指針與「自動」峰值燈取平均用
+    double power_history_[2][power_history]{};
+    int power_index{};
     visualisation_stream::ptr stream;
     ULONGLONG last_tick{};
     ULONGLONG shown_at{};
@@ -869,7 +879,7 @@ void draw_face_text(Gdiplus::Graphics& g, const State& state, int index, const G
     wchar_t reference[64]{};
     const auto& tuning = needle_tunings[static_cast<int>(cached_needle_preset())];
     if (tuning.automatic)
-        swprintf_s(reference, L"0 VU = AUTO");
+        swprintf_s(reference, L"AUTO"); // 2026-11-12 使用者說只寫 AUTO 就好
     else
         swprintf_s(reference, L"0 VU = −%d dBFS", static_cast<int>(std::lround(-tuning.reference_dbfs)));
     const Gdiplus::Color vu_colour(204, 244, 240, 230);
@@ -1447,10 +1457,14 @@ void present(HWND wnd, State& state, bool content_changed = true)
 
 // ---- 音量 ----
 
+// 第幾首（換歌時加一；開發版的指針紀錄用來分段）
+int track_serial{};
+
 #if defined(NOCTURNE_BUILD_DEV)
 // 開發版才有的指針動態紀錄（2026-11-12 使用者要觀察播歌時指針跳動是否符合預期）：
-// 環境變數 NOCTURNE_VU_LOG＝CSV 檔路徑（當前綴用）時，從有訊號起每段記 25 秒每一格的原始音量、校準、目標值、指針位置、
-// 峰值與峰值燈，存成「<路徑去掉 .csv>_p<指針設定>_<第幾段>.csv」；換指針設定就結束這段、另開一段。
+// 環境變數 NOCTURNE_VU_LOG＝CSV 檔路徑（當前綴用）時，從有訊號起每段記 60 秒每一格的原始音量、校準、目標值、指針位置、
+// 峰值與峰值燈，存成「<路徑去掉 .csv>_t<第幾首>_p<指針設定>.csv」；換歌或換指針設定就結束這段、另開一段
+// （2026-11-12 用三十幾首歌調指針與峰值燈時改成每首一段）。
 // 只在段落結束時寫檔（中途不碰磁碟）；沒設環境變數就什麼都不做
 struct NeedleLog {
     bool checked{};
@@ -1459,7 +1473,7 @@ struct NeedleLog {
     LARGE_INTEGER frequency{};
     LARGE_INTEGER start{};
     int preset{-1};
-    int segment{};
+    int track{-1};
     bool finished{}; // 這個指針設定已經記完一段，等換設定才再記
     std::string rows;
 };
@@ -1469,7 +1483,7 @@ void flush_needle_log(NeedleLog& log)
     if (log.rows.empty())
         return;
     wchar_t path[MAX_PATH]{};
-    swprintf_s(path, L"%s_p%d_%d.csv", log.prefix.c_str(), log.preset, ++log.segment);
+    swprintf_s(path, L"%s_t%d_p%d.csv", log.prefix.c_str(), log.track, log.preset);
     FILE* file{};
     if (_wfopen_s(&file, path, L"w") == 0 && file) {
         fwrite(log.rows.data(), 1, log.rows.size(), file);
@@ -1497,9 +1511,10 @@ void log_needles(const State& state, double dt, const double* rms, double refere
         QueryPerformanceFrequency(&log.frequency);
     }
     const auto preset = static_cast<int>(get_needle_preset());
-    if (preset != log.preset) {
+    if (preset != log.preset || track_serial != log.track) {
         flush_needle_log(log);
         log.preset = preset;
+        log.track = track_serial;
         log.start.QuadPart = 0;
         log.finished = false;
     }
@@ -1517,7 +1532,7 @@ void log_needles(const State& state, double dt, const double* rms, double refere
         live ? 1 : 0, static_cast<int>(state.style), preset, reference, rms[0], rms[1], targets[0], state.needles[0].pos,
         targets[1], state.needles[1].pos, peaks[0], peaks[1], state.needles[0].lamp, state.needles[1].lamp);
     log.rows += line;
-    if (t < 25000.0)
+    if (t < 60000.0)
         return;
     flush_needle_log(log);
     log.finished = true;
@@ -1588,8 +1603,20 @@ bool update_needles(State& state, double dt)
 
     const auto reference = tuning.automatic ? state.auto_reference : tuning.reference_dbfs;
     const auto gain = std::pow(10.0, -reference / 20.0) / std::pow(10.0, scale_top_vu / 20.0);
-    for (int side = 0; side < 2; ++side)
-        targets[side] = rms[side] * gain;
+    // 這一格的功率放進環狀紀錄，指針用最近 needle_frames 格、峰值燈用最近 auto_lamp_frames 格的平均
+    state.power_index = (state.power_index + 1) % power_history;
+    double lamp_rms[2]{};
+    for (int side = 0; side < 2; ++side) {
+        state.power_history_[side][state.power_index] = rms[side] * rms[side];
+        const auto mean_of = [&](int frames) {
+            double sum = 0;
+            for (int k = 0; k < frames; ++k)
+                sum += state.power_history_[side][(state.power_index - k + power_history) % power_history];
+            return std::sqrt(sum / frames);
+        };
+        targets[side] = mean_of(needle_frames) * gain;
+        lamp_rms[side] = mean_of(auto_lamp_frames);
+    }
 
     const auto lamp_threshold = std::pow(10.0, peak_lamp_dbfs / 20.0);
     // 暫停／停止時沒有訊號：改用比較慢、阻尼小一點的回落（約 1.1 秒），像錶頭的彈簧把指針慢慢拉回去
@@ -1619,7 +1646,7 @@ bool update_needles(State& state, double dt)
             }
         }
         const auto lamp_on = tuning.automatic
-            ? rms[side] > 0 && 20.0 * std::log10(rms[side]) - reference >= auto_lamp_vu
+            ? lamp_rms[side] > 0 && 20.0 * std::log10(lamp_rms[side]) - reference >= auto_lamp_vu
             : peaks[side] >= lamp_threshold;
         if (lamp_on) {
             needle.lamp = 1.0;
@@ -2454,6 +2481,7 @@ public:
         // 換歌：「自動」校準重新快速找位置（保留上一首的平均當起點，同一張專輯不會跳）
         for (const auto& [wnd, state] : states())
             state->auto_warm = 0;
+        ++track_serial;
     }
     void on_playback_starting(play_control::t_track_command command, bool paused) override {}
     void on_playback_stop(play_control::t_stop_reason reason) override {}
