@@ -148,13 +148,12 @@ inline constexpr auto mode_cover_name = "Now Playing: Cover Only";
 inline constexpr auto mode_cover_description = "Shows only a large cover in the middle of the now playing view.";
 inline constexpr auto mode_vu_name = "Now Playing: VU Meter";
 inline constexpr auto mode_vu_description
-    = "Shows the VU meter in place of the lyrics (needs the panel with the custom title \"Now Playing Side\" in the "
-      "layout).";
+    = "Shows the VU meter in place of the lyrics.";
 inline constexpr auto mode_button_name = "Switch Now Playing Content";
 inline constexpr auto mode_button_description
     = "Switches what the now playing view shows. Clicking moves to the next one or opens a menu, as set in Preferences.";
-// 彈出選單與切換時的提示（第 4 個是沒有 VU 元件時的灰色項目）
-inline constexpr wchar_t mode_short_names[4][32] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (not installed)"};
+// 彈出選單與切換時的提示（第 4 個是版面沒標記歌詞欄位置、不能用 VU 表時的灰色項目）
+inline constexpr wchar_t mode_short_names[4][32] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (layout not supported)"};
 inline constexpr const char* mode_toast_names[3] = {"Lyrics", "Cover only", "VU meter"};
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"Top-left button";
@@ -165,7 +164,7 @@ inline constexpr wchar_t expanded_section_background[] = L"Background";
 inline constexpr wchar_t expanded_section_content[] = L"Content";
 inline constexpr wchar_t expanded_section_lyrics[] = L"Lyrics";
 inline constexpr wchar_t mode_note[]
-    = L"Only the ticked ones take part in the top-left button. The VU meter needs a VU meter panel in the layout.";
+    = L"Only the ticked ones take part in the top-left button.";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"Show";
 inline constexpr wchar_t modes_separator[] = L", ";
@@ -344,11 +343,11 @@ inline constexpr auto mode_lyrics_description = "展開頁顯示封面與歌詞�
 inline constexpr auto mode_cover_name = "展開頁：純封面";
 inline constexpr auto mode_cover_description = "展開頁只在中間顯示放大的封面。";
 inline constexpr auto mode_vu_name = "展開頁：VU 表";
-inline constexpr auto mode_vu_description = "展開頁歌詞的位置換成 VU 表（版面裡要有自訂標題「展開頁右側」的面板）。";
+inline constexpr auto mode_vu_description = "展開頁歌詞的位置換成 VU 表。";
 inline constexpr auto mode_button_name = "切換展開頁顯示內容";
 inline constexpr auto mode_button_description = "切換展開頁要顯示什麼；點一下換下一種或跳出選單，依設定頁的選擇。";
-// 彈出選單與切換時的提示（第 4 個是沒有 VU 元件時的灰色項目）
-inline constexpr wchar_t mode_short_names[4][32] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（沒有安裝 VU 元件）"};
+// 彈出選單與切換時的提示（第 4 個是版面沒標記歌詞欄位置、不能用 VU 表時的灰色項目）
+inline constexpr wchar_t mode_short_names[4][32] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（這個版面不支援）"};
 inline constexpr const char* mode_toast_names[3] = {"歌詞", "純封面", "VU 表"};
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
@@ -358,7 +357,7 @@ inline constexpr auto expanded_page_tab_name = "展開頁";
 inline constexpr wchar_t expanded_section_background[] = L"背景";
 inline constexpr wchar_t expanded_section_content[] = L"顯示內容";
 inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
-inline constexpr wchar_t mode_note[] = L"勾選的才會出現在左上角按鈕的輪流與選單裡。VU 表要版面裡有 VU 表面板才能用。";
+inline constexpr wchar_t mode_note[] = L"勾選的才會出現在左上角按鈕的輪流與選單裡。";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"展開頁要有";
 inline constexpr wchar_t modes_separator[] = L"、";

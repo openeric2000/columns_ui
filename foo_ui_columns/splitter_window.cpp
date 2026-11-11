@@ -5,6 +5,7 @@
 #include "output_chip.h"
 #include "volume_chip.h"
 #include "now_playing_cover_zoom.h"
+#include "now_playing_vu_meter.h"
 
 namespace cui::panels::splitter {
 
@@ -382,6 +383,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_cover_zoom_wnd = cover_zoom::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_lyrics_lock_wnd)
         m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_vu_meter_wnd)
+        m_vu_meter_wnd = vu_meter::create(get_wnd());
 
     HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 5);
     if (dwp) {
@@ -421,6 +424,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = cover_zoom::defer_layout(dwp, m_cover_zoom_wnd, now_playing_bar_rect);
         if (m_lyrics_lock_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = lyrics_lock::defer_layout(dwp, m_lyrics_lock_wnd, now_playing_bar_rect);
+        if (m_vu_meter_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = vu_meter::defer_layout(dwp, m_vu_meter_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -460,6 +465,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
         if (m_lyrics_lock_wnd)
             lyrics_lock::layout(m_lyrics_lock_wnd, now_playing_bar_rect);
+        if (!m_vu_meter_wnd)
+            m_vu_meter_wnd = vu_meter::create(get_wnd());
+        if (m_vu_meter_wnd)
+            vu_meter::layout(m_vu_meter_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
@@ -471,6 +480,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_cover_zoom_wnd, nullptr));
         if (m_lyrics_lock_wnd)
             DestroyWindow(std::exchange(m_lyrics_lock_wnd, nullptr));
+        if (m_vu_meter_wnd)
+            DestroyWindow(std::exchange(m_vu_meter_wnd, nullptr));
     }
 
     layout_now_playing_side();
@@ -487,19 +498,9 @@ void FlatSplitterPanel::layout_now_playing_side()
     if (!now_playing_side || !now_playing_side->m_wnd)
         return;
 
-    std::optional<RECT> target;
-    const auto bar_width = m_now_playing_bar_rect.right - m_now_playing_bar_rect.left;
-    if (m_now_playing_expanded && !m_now_playing_animating && !m_now_playing_snapshot_wnd && bar_width > 0
-        && main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::vu)
-        target = cover_zoom::vu_rect_in_stage(bar_width, m_now_playing_bar_rect.top);
-
-    if (target) {
-        SetWindowPos(now_playing_side->m_wnd, HWND_TOP, m_now_playing_bar_rect.left + target->left, target->top,
-            target->right - target->left, target->bottom - target->top, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-    } else {
-        SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
-            SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
+    // 2026-11-11 起 VU 表改由 Columns UI 自己畫（now_playing_vu_meter，玻璃錶框、透出虛化背景），外掛 VU 面板一律藏起來
+    SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
+        SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 bool FlatSplitterPanel::s_has_now_playing_side()
@@ -524,6 +525,8 @@ void FlatSplitterPanel::s_refresh_now_playing()
             cover_zoom::layout(splitter->m_cover_zoom_wnd, splitter->m_now_playing_bar_rect);
         if (splitter->m_lyrics_lock_wnd)
             lyrics_lock::layout(splitter->m_lyrics_lock_wnd, splitter->m_now_playing_bar_rect);
+        if (splitter->m_vu_meter_wnd)
+            vu_meter::layout(splitter->m_vu_meter_wnd, splitter->m_now_playing_bar_rect);
     }
 }
 
@@ -1751,6 +1754,8 @@ void FlatSplitterPanel::finish_now_playing_slide()
     layout_now_playing_side();
     if (m_lyrics_lock_wnd)
         lyrics_lock::layout(m_lyrics_lock_wnd, m_now_playing_bar_rect);
+    if (m_vu_meter_wnd)
+        vu_meter::layout(m_vu_meter_wnd, m_now_playing_bar_rect);
 
     on_now_playing_animation_finished();
 }

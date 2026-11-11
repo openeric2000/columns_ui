@@ -314,12 +314,12 @@ void refresh_now_playing_track();
 // 變了（例如啟動時版面剛建好）就通知 ESLyric 重算
 std::atomic<bool> vu_available_for_fields{false};
 
-// VU 表模式要有「展開頁右側」面板，而且 main.xml 標記有歌詞欄位置（不然不知道放哪）。要在主執行緒呼叫
+// VU 表模式要 main.xml 標記有歌詞欄位置（不然不知道放哪）。要在主執行緒呼叫
+// 2026-11-11 起 VU 表改由 Columns UI 自己畫（now_playing_vu_meter），不再需要外掛 VU 元件與「展開頁右側」面板
 bool vu_mode_available()
 {
     // 用一個夠大的假展開頁問標記有沒有歌詞欄位置（只看有沒有，不看大小）
-    const auto available = panels::splitter::FlatSplitterPanel::s_has_now_playing_side()
-        && cover_zoom::lyrics_column_in_stage(10000, 10000).has_value();
+    const auto available = cover_zoom::lyrics_column_in_stage(10000, 10000).has_value();
     if (vu_available_for_fields.exchange(available) != available && now_playing_mode.get() == 3)
         fb2k::inMainThread([] { refresh_now_playing_track(); });
     return available;
