@@ -35,6 +35,15 @@ constexpr GUID now_playing_style_info_id{
     0x66712042, 0x47c3, 0x4379, {0xae, 0x31, 0xfb, 0x58, 0xd6, 0x68, 0xd0, 0xe3}};
 constexpr GUID cycle_now_playing_style_id{
     0x32bc0b81, 0x6f5d, 0x40f0, {0x99, 0x76, 0x1d, 0xbb, 0x7f, 0x5e, 0x13, 0x6b}};
+// 自編版新增（2026-11-11）：View/Layout/展開頁顯示內容（歌詞、純封面、VU 表）與左上角按鈕用的「切換展開頁顯示內容」
+constexpr GUID now_playing_mode_lyrics_id{
+    0xb4ae76c9, 0xc724, 0x478c, {0xac, 0x37, 0xb6, 0x48, 0xae, 0xe3, 0xf5, 0xf3}};
+constexpr GUID now_playing_mode_cover_id{
+    0xcf0b57e1, 0x32df, 0x44f8, {0xaa, 0xc0, 0x73, 0x97, 0xc3, 0x4c, 0x05, 0x38}};
+constexpr GUID now_playing_mode_vu_id{
+    0xd0539e89, 0xa2ee, 0x4314, {0xaa, 0x53, 0x55, 0x42, 0xaf, 0xe9, 0x90, 0xc7}};
+constexpr GUID now_playing_mode_button_id{
+    0xeb119c41, 0x706f, 0x4e51, {0x87, 0x5d, 0xeb, 0xc2, 0x5a, 0x2f, 0x91, 0x8d}};
 // 自編版新增：View/Layout/下一首提示（開關）
 constexpr GUID next_track_toast_toggle_id{
     0xe2b7a914, 0x35c8, 0x4d61, {0x9f, 0x0a, 0x7c, 0x48, 0xd1, 0x2e, 0xb6, 0x93}};
@@ -66,5 +75,26 @@ uint32_t get_now_playing_style();
 // 自編版新增（2026-11-09）：展開頁收合完成時呼叫：是資訊卡就直接切回封面（不做切換動畫，這時展開頁已經看不到），
 // 下次打開展開頁一定是封面
 void reset_now_playing_style_to_cover();
+
+// 自編版新增（2026-11-11，v1.5 待做清單第 4 個）：展開頁要顯示什麼，給 ESLyric 佈局的 %cui_now_playing_mode% 與 Columns UI 自己用
+// 1 歌詞（預設）、2 純封面、3 VU 表。VU 表只有版面裡有「展開頁右側」面板、main.xml 標記有 VU 位置時才算數，沒有就當成 1
+enum class NowPlayingMode : uint32_t { lyrics = 1, cover = 2, vu = 3 };
+NowPlayingMode get_now_playing_mode();
+
+// 左上角按鈕點一下的動作：false＝換下一種（預設，旁邊跳出模式名稱）、true＝跳出選單。存在 fb2k 共用設定
+namespace now_playing_mode_button {
+inline constexpr char config_key[] = "nocturne.nowPlaying.modeButtonMenu";
+inline constexpr bool opens_menu_default = false;
+
+inline bool opens_menu()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, opens_menu_default);
+}
+
+inline void set_opens_menu(bool value)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, value);
+}
+} // namespace now_playing_mode_button
 
 } // namespace cui::main_menu

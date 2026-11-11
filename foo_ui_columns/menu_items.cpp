@@ -302,6 +302,157 @@ void set_now_playing_style(uint32_t style)
     style_transition::run(apply);
 }
 
+// 自編版新增（2026-11-11，v1.5 待做清單第 4 個）：展開頁顯示內容，1 歌詞（預設）、2 純封面、3 VU 表。
+// ESLyric 佈局用 %cui_now_playing_mode% 切換歌詞欄與純封面那一塊；VU 表是 Columns UI 的另一個面板（自訂標題「展開頁右側」），
+// 由分割面板疊到歌詞欄的位置。跟封面⇄資訊卡（now_playing_style）是兩回事：模式換了樣式不動，收合也不會重設
+fbh::ConfigUint32 now_playing_mode(
+    GUID{0x0bf54940, 0x3466, 0x4045, {0x84, 0xb7, 0x54, 0x87, 0x83, 0xad, 0xe7, 0x5a}}, 1);
+
+void refresh_now_playing_track();
+
+// 標題格式欄位可能在別的執行緒算，不能在那裡查版面，所以「有沒有 VU 表」在主執行緒每次查的時候存一份給欄位用；
+// 變了（例如啟動時版面剛建好）就通知 ESLyric 重算
+std::atomic<bool> vu_available_for_fields{false};
+
+// VU 表模式要有「展開頁右側」面板，而且 main.xml 標記有歌詞欄位置（不然不知道放哪）。要在主執行緒呼叫
+bool vu_mode_available()
+{
+    // 用一個夠大的假展開頁問標記有沒有歌詞欄位置（只看有沒有，不看大小）
+    const auto available = panels::splitter::FlatSplitterPanel::s_has_now_playing_side()
+        && cover_zoom::lyrics_column_in_stage(10000, 10000).has_value();
+    if (vu_available_for_fields.exchange(available) != available && now_playing_mode.get() == 3)
+        fb2k::inMainThread([] { refresh_now_playing_track(); });
+    return available;
+}
+
+// 目前生效的模式：存的值是 VU 表但這個版面沒有 VU 表時當成歌詞
+main_menu::NowPlayingMode now_playing_mode_value()
+{
+    switch (now_playing_mode.get()) {
+    case 2:
+        return main_menu::NowPlayingMode::cover;
+    case 3:
+        return vu_mode_available() ? main_menu::NowPlayingMode::vu : main_menu::NowPlayingMode::lyrics;
+    default:
+        return main_menu::NowPlayingMode::lyrics;
+    }
+}
+
+// 給標題格式欄位用（任何執行緒）：存的值，VU 表但沒有 VU 表時當成歌詞
+uint32_t now_playing_mode_for_fields()
+{
+    const auto stored = now_playing_mode.get();
+    if (stored == 2)
+        return 2;
+    if (stored == 3 && vu_available_for_fields.load())
+        return 3;
+    return 1;
+}
+
+// 「換下一種」時左上角按鈕旁邊的提示：顯示中的模式（1～3），0＝不顯示。約 1.1 秒後自動清掉
+std::atomic<uint32_t> mode_toast{0};
+UINT_PTR mode_toast_timer{};
+constexpr UINT mode_toast_ms = 1100;
+
+void hide_mode_toast()
+{
+    if (mode_toast_timer) {
+        KillTimer(nullptr, std::exchange(mode_toast_timer, 0));
+    }
+    if (mode_toast.exchange(0) != 0)
+        refresh_now_playing_track();
+}
+
+void show_mode_toast(main_menu::NowPlayingMode mode)
+{
+    if (mode_toast_timer)
+        KillTimer(nullptr, std::exchange(mode_toast_timer, 0));
+    mode_toast = static_cast<uint32_t>(mode);
+    refresh_now_playing_track();
+    mode_toast_timer = SetTimer(nullptr, 0, mode_toast_ms, [](HWND, UINT, UINT_PTR, DWORD) { hide_mode_toast(); });
+}
+
+void set_now_playing_mode(main_menu::NowPlayingMode mode)
+{
+    if (mode == main_menu::NowPlayingMode::vu && !vu_mode_available())
+        return;
+
+    const auto apply = [mode] {
+        now_playing_mode = static_cast<uint32_t>(mode);
+        refresh_now_playing_track();
+        // 放大鈕（純封面時藏起來）、VU 表面板、歌詞防誤拖蓋層跟著重排
+        panels::splitter::FlatSplitterPanel::s_refresh_now_playing();
+    };
+
+    if (mode == now_playing_mode_value()) {
+        apply();
+        return;
+    }
+
+    // 整個展開頁淡入淡出（展開頁完全展開時才有，見 now_playing_style_transition.h）
+    style_transition::run_stage(apply);
+}
+
+// 「換下一種」的順序：歌詞 → 純封面 → VU 表（有的話）→ 歌詞
+main_menu::NowPlayingMode next_now_playing_mode()
+{
+    switch (now_playing_mode_value()) {
+    case main_menu::NowPlayingMode::lyrics:
+        return main_menu::NowPlayingMode::cover;
+    case main_menu::NowPlayingMode::cover:
+        return vu_mode_available() ? main_menu::NowPlayingMode::vu : main_menu::NowPlayingMode::lyrics;
+    default:
+        return main_menu::NowPlayingMode::lyrics;
+    }
+}
+
+// 「跳出選單」：在游標位置開一個小選單，目前的模式打勾；沒有 VU 元件時 VU 表那一項變灰並註明
+void show_now_playing_mode_menu()
+{
+    const wil::unique_hmenu menu(CreatePopupMenu());
+    if (!menu)
+        return;
+
+    const auto current = now_playing_mode_value();
+    const auto vu_available = vu_mode_available();
+    const auto add = [&](main_menu::NowPlayingMode mode, const wchar_t* text, bool enabled) {
+        UINT flags = MF_STRING;
+        if (mode == current)
+            flags |= MF_CHECKED;
+        if (!enabled)
+            flags |= MF_GRAYED;
+        AppendMenu(menu.get(), flags, static_cast<UINT_PTR>(mode), text);
+    };
+    add(main_menu::NowPlayingMode::lyrics, nocturne_text::mode_short_names[0], true);
+    add(main_menu::NowPlayingMode::cover, nocturne_text::mode_short_names[1], true);
+    add(main_menu::NowPlayingMode::vu, vu_available ? nocturne_text::mode_short_names[2] : nocturne_text::mode_short_names[3],
+        vu_available);
+
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    const auto owner = core_api::get_main_window();
+    // TrackPopupMenu 規定擁有者要在前景，不然點選單外面不會關
+    SetForegroundWindow(owner);
+    const auto chosen
+        = TrackPopupMenu(menu.get(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN, cursor.x, cursor.y, 0, owner, nullptr);
+    if (chosen >= 1 && chosen <= 3)
+        set_now_playing_mode(static_cast<main_menu::NowPlayingMode>(chosen));
+}
+
+// 左上角按鈕：依設定換下一種（旁邊提示模式名稱）或跳出選單
+void on_now_playing_mode_button()
+{
+    if (main_menu::now_playing_mode_button::opens_menu()) {
+        hide_mode_toast();
+        show_now_playing_mode_menu();
+        return;
+    }
+
+    const auto next = next_now_playing_mode();
+    set_now_playing_mode(next);
+    show_mode_toast(next);
+}
+
 // 自編版新增：暫停時凍結進度條用的位置與曲長（毫秒），沒在暫停時位置為 -1
 // Output 用 ASIO+DSD 時，暫停中 fb2k 回報的位置會每 0.2 秒往前爬又退回（2026-10-27 量測），ESLyric 的 seekbar 跟著抖，
 // 所以按下暫停時記下當下的值，ESLyric 佈局暫停時改顯示讀這兩個值的 progressbar；暫停中跳轉改記跳轉目標
@@ -451,11 +602,12 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 8; }
+    t_uint32 get_field_count() override { return 10; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
-            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg"};
+            "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
+            "cui_now_playing_mode", "cui_now_playing_mode_toast"};
         out = names[index];
     }
 
@@ -463,6 +615,21 @@ public:
     {
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style_value()));
+            return true;
+        }
+
+        // %cui_now_playing_mode%：展開頁顯示內容 1 歌詞、2 純封面、3 VU 表（2026-11-11）
+        if (index == 8) {
+            out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_mode_for_fields()));
+            return true;
+        }
+
+        // %cui_now_playing_mode_toast%：左上角按鈕「換下一種」後約 1.1 秒內是新模式的名稱，其餘時間不存在
+        if (index == 9) {
+            const auto toast = mode_toast.load();
+            if (toast < 1 || toast > 3)
+                return false;
+            out->write(titleformat_inputtypes::meta, nocturne_text::mode_toast_names[toast - 1]);
             return true;
         }
 
@@ -569,6 +736,26 @@ const MainMenuCommand now_playing_style_info{now_playing_style_info_id, nocturne
 const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, nocturne_text::cycle_style_name,
     nocturne_text::cycle_style_description,
     [] { set_now_playing_style(now_playing_style_value() == 1 ? 3 : 1); }};
+
+// 展開頁顯示內容（2026-11-11）：三種各一個選單項目（目前的打圓點），VU 表沒有時不出現
+const MainMenuCommand now_playing_mode_lyrics{now_playing_mode_lyrics_id, nocturne_text::mode_lyrics_name,
+    nocturne_text::mode_lyrics_description, [] { set_now_playing_mode(NowPlayingMode::lyrics); }, {},
+    [] { return now_playing_mode_value() == NowPlayingMode::lyrics; }};
+
+const MainMenuCommand now_playing_mode_cover{now_playing_mode_cover_id, nocturne_text::mode_cover_name,
+    nocturne_text::mode_cover_description, [] { set_now_playing_mode(NowPlayingMode::cover); }, {},
+    [] { return now_playing_mode_value() == NowPlayingMode::cover; }};
+
+const MainMenuCommand now_playing_mode_vu{.guid = now_playing_mode_vu_id,
+    .name = nocturne_text::mode_vu_name,
+    .description = nocturne_text::mode_vu_description,
+    .execute_callback = [] { set_now_playing_mode(NowPlayingMode::vu); },
+    .is_radio_selected_callback = [] { return now_playing_mode_value() == NowPlayingMode::vu; },
+    .is_available_callback = [] { return vu_mode_available(); }};
+
+// ESLyric 展開頁左上角的按鈕用 mm://View/Layout/切換展開頁顯示內容
+const MainMenuCommand now_playing_mode_button{now_playing_mode_button_id, nocturne_text::mode_button_name,
+    nocturne_text::mode_button_description, [] { on_now_playing_mode_button(); }};
 
 const MainMenuCommand focus_filter_search{
     .guid{0x9ff94c30, 0x7b34, 0x4b5f, {0x99, 0x52, 0xed, 0x14, 0x8a, 0x9a, 0x3f, 0x5c}},
@@ -710,7 +897,8 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
     stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_info, cycle_now_playing_style,
-    next_track_toast_toggle, theme_font);
+    now_playing_mode_lyrics, now_playing_mode_cover, now_playing_mode_vu, now_playing_mode_button, next_track_toast_toggle,
+    theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);
@@ -800,6 +988,11 @@ void on_lock_window_size_changed()
 uint32_t get_now_playing_style()
 {
     return commands::now_playing_style_value();
+}
+
+NowPlayingMode get_now_playing_mode()
+{
+    return commands::now_playing_mode_value();
 }
 
 void reset_now_playing_style_to_cover()

@@ -141,6 +141,36 @@ inline constexpr auto style_info_description = "Puts the cover on the left and t
 inline constexpr auto cycle_style_name = "Toggle Now Playing Style";
 inline constexpr auto cycle_style_description
     = "Switches the now playing view between \"Centered\" and \"Left + Info Card\".";
+// 展開頁顯示內容（2026-11-11，v1.5 待做清單第 4 個）：歌詞／純封面／VU 表，左上角按鈕切換
+inline constexpr auto mode_lyrics_name = "Now Playing: Lyrics";
+inline constexpr auto mode_lyrics_description = "Shows the cover and the lyrics in the now playing view.";
+inline constexpr auto mode_cover_name = "Now Playing: Cover Only";
+inline constexpr auto mode_cover_description = "Shows only a large cover in the middle of the now playing view.";
+inline constexpr auto mode_vu_name = "Now Playing: VU Meter";
+inline constexpr auto mode_vu_description
+    = "Shows the VU meter in place of the lyrics (needs the panel with the custom title \"Now Playing Side\" in the "
+      "layout).";
+inline constexpr auto mode_button_name = "Switch Now Playing Content";
+inline constexpr auto mode_button_description
+    = "Switches what the now playing view shows. Clicking moves to the next one or opens a menu, as set in Preferences.";
+// 彈出選單與切換時的提示（第 4 個是沒有 VU 元件時的灰色項目）
+inline constexpr wchar_t mode_short_names[4][32] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (not installed)"};
+inline constexpr const char* mode_toast_names[3] = {"Lyrics", "Cover only", "VU meter"};
+// 設定頁「介面」分頁、展開頁那一段
+inline constexpr wchar_t mode_button_label[] = L"Top-left button";
+inline constexpr wchar_t mode_button_names[2][32] = {L"Next on click (default)", L"Menu on click"};
+// 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
+inline constexpr auto expanded_page_tab_name = "Now Playing View";
+inline constexpr wchar_t expanded_section_background[] = L"Background";
+inline constexpr wchar_t expanded_section_content[] = L"Content";
+inline constexpr wchar_t expanded_section_lyrics[] = L"Lyrics";
+inline constexpr wchar_t mode_note[]
+    = L"Lyrics, cover only, and VU meter (only when the layout has a VU meter panel). The button sits in the top-left "
+      L"corner of the now playing view.";
+inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
+inline constexpr wchar_t lyrics_lock_note[]
+    = L"Left-clicking or dragging the lyrics no longer jumps to another time. The mouse wheel and right-click still "
+      L"work.";
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "Main Menu Button";
@@ -305,6 +335,29 @@ inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
 inline constexpr auto style_info_description = "展開頁的封面靠左，右邊顯示曲目資訊。";
 inline constexpr auto cycle_style_name = "切換展開頁樣式";
 inline constexpr auto cycle_style_description = "在展開頁樣式「置中」與「靠左＋資訊卡」之間切換。";
+// 展開頁顯示內容（2026-11-11，v1.5 待做清單第 4 個）：歌詞／純封面／VU 表，左上角按鈕切換
+inline constexpr auto mode_lyrics_name = "展開頁：歌詞";
+inline constexpr auto mode_lyrics_description = "展開頁顯示封面與歌詞。";
+inline constexpr auto mode_cover_name = "展開頁：純封面";
+inline constexpr auto mode_cover_description = "展開頁只在中間顯示放大的封面。";
+inline constexpr auto mode_vu_name = "展開頁：VU 表";
+inline constexpr auto mode_vu_description = "展開頁歌詞的位置換成 VU 表（版面裡要有自訂標題「展開頁右側」的面板）。";
+inline constexpr auto mode_button_name = "切換展開頁顯示內容";
+inline constexpr auto mode_button_description = "切換展開頁要顯示什麼；點一下換下一種或跳出選單，依設定頁的選擇。";
+// 彈出選單與切換時的提示（第 4 個是沒有 VU 元件時的灰色項目）
+inline constexpr wchar_t mode_short_names[4][32] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（沒有安裝 VU 元件）"};
+inline constexpr const char* mode_toast_names[3] = {"歌詞", "純封面", "VU 表"};
+// 設定頁「介面」分頁、展開頁那一段
+inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
+inline constexpr wchar_t mode_button_names[2][32] = {L"點一下換下一種（預設）", L"點一下跳出選單"};
+// 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
+inline constexpr auto expanded_page_tab_name = "展開頁";
+inline constexpr wchar_t expanded_section_background[] = L"背景";
+inline constexpr wchar_t expanded_section_content[] = L"顯示內容";
+inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
+inline constexpr wchar_t mode_note[] = L"可切換歌詞、純封面、VU 表（版面裡有 VU 表面板才有）。按鈕在展開頁左上角。";
+inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
+inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左鍵或拖曳不會跳到別的時間；滾輪和右鍵照常。";
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "主選單按鈕";

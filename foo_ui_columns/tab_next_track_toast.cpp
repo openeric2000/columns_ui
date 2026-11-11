@@ -13,6 +13,8 @@
 #include "thin_scrollbar.h"
 #include "playlist_marquee.h"
 #include "expanded_cover_bg.h"
+#include "menu_items.h"
+#include "now_playing_cover_zoom.h"
 
 // 建置資訊（版本種類、日期）：build_columns_ui.ps1 每次建置時產生，不進版控。
 // 沒有這個檔（例如直接從原始碼編）時，「關於」只顯示版本號，跟公開版一樣
@@ -26,8 +28,9 @@
 // - 下一首與佇列：展開頁角落的下一首提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）＋播放別首歌時保留播放佇列
 //   （佇列 11/02 起放在這一頁底下，11/05 併進「播放」，11/06 獨立成分頁，11/08 使用者說一個選項一個分頁太浪費，又併回這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
-// - 介面：細捲軸開關（11/08）、封面虛化背景與亮度上限（11/08）、主視窗等網頁面板載好再顯示（開機優化 B，11/06）。
-//   這三個原本各自一個分頁、各只有一個設定，11/08 使用者要求合併成一頁（小標題分開）
+// - 介面：細捲軸開關（11/08）、主視窗等網頁面板載好再顯示（開機優化 B，11/06）。
+//   原本各自一個分頁、各只有一個設定，11/08 使用者要求合併成一頁（小標題分開）
+// - 展開頁（2026-11-11 新增，第六個分頁）：封面虛化背景與亮度上限（從介面搬過來）、左上角按鈕的動作、歌詞防誤拖
 // - 關於：只放產品名稱與版本號（2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
 // 設定視窗下方的「Reset page」會把播放、下一首與佇列、介面三個分頁還原成預設（字型分頁不動）
@@ -492,20 +495,15 @@ void set_on_top(bool on_top)
 }
 } // namespace folder_search_position
 
+// 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁，這頁剩捲軸與資料夾樹、啟動兩段
 class TabNocturneInterface : public NocturneTab {
 public:
-    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
+    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
 
     const char* get_name() override { return nocturne_text::interface_tab_name; }
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_APPEARANCE; }
-
-    static void show_cap(HWND wnd, bool visible)
-    {
-        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
-        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
-    }
 
     // 「平常隱藏」只對細捲軸有意義：沒勾細捲軸時變灰
     static void enable_autohide(HWND wnd, bool enabled)
@@ -538,23 +536,8 @@ private:
         SetDlgItemText(wnd, IDC_PLAYLIST_MARQUEE, nocturne_text::playlist_marquee);
         CheckDlgButton(wnd, IDC_PLAYLIST_MARQUEE, check_state(playlist_marquee::is_enabled()));
 
-        // 展開頁
-        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
-        SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
-        SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
-
-        const auto cap_combo = GetDlgItem(wnd, IDC_EXPANDED_BG_CAP);
-        for (const auto& name : nocturne_text::expanded_bg_cap_names)
-            ComboBox_AddString(cap_combo, name);
-        const auto cap = std::clamp(expanded_cover_bg::cap_percent.get(), expanded_cover_bg::cap_min,
-            expanded_cover_bg::cap_max);
-        ComboBox_SetCurSel(cap_combo, gsl::narrow<int>((cap - expanded_cover_bg::cap_min) / expanded_cover_bg::cap_step));
-
-        CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
-        show_cap(wnd, expanded_cover_bg::enabled.get());
-
         // 啟動
-        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::startup_tab_title);
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::startup_tab_title);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
         CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
@@ -577,7 +560,72 @@ private:
                 folder_search_position::set_on_top(selection == 0);
         } else if (id == IDC_PLAYLIST_MARQUEE && code == BN_CLICKED) {
             playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
-        } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
+        } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
+            startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        }
+    }
+};
+
+// ---- 展開頁（2026-11-11）----
+// 使用者說設定放滿了就開新分頁、維持鬆弛度。三個小標題：
+// - 背景：封面虛化背景＋亮度上限（原本在「介面」分頁，邏輯在 expanded_cover_bg.cpp）；沒勾時亮度上限整個藏起來
+// - 顯示內容：左上角按鈕點一下是換下一種（預設）還是跳出選單（邏輯在 menu_items.cpp 的 on_now_playing_mode_button）
+// - 歌詞：歌詞防誤拖（邏輯在 now_playing_cover_zoom.cpp 的 lyrics_lock）
+// 都是改了馬上生效
+class TabNocturneExpanded : public NocturneTab {
+public:
+    TabNocturneExpanded() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
+
+    const char* get_name() override { return nocturne_text::expanded_page_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_EXPANDED; }
+
+    static void show_cap(HWND wnd, bool visible)
+    {
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
+    }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        // 背景
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::expanded_section_background);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
+        SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
+
+        const auto cap_combo = GetDlgItem(wnd, IDC_EXPANDED_BG_CAP);
+        for (const auto& name : nocturne_text::expanded_bg_cap_names)
+            ComboBox_AddString(cap_combo, name);
+        const auto cap = std::clamp(expanded_cover_bg::cap_percent.get(), expanded_cover_bg::cap_min,
+            expanded_cover_bg::cap_max);
+        ComboBox_SetCurSel(cap_combo, gsl::narrow<int>((cap - expanded_cover_bg::cap_min) / expanded_cover_bg::cap_step));
+
+        CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
+        show_cap(wnd, expanded_cover_bg::enabled.get());
+
+        // 顯示內容：0＝換下一種、1＝跳出選單
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_section_content);
+        SetDlgItemText(wnd, IDC_MODE_BUTTON_LABEL, nocturne_text::mode_button_label);
+        SetDlgItemText(wnd, IDC_MODE_NOTE, nocturne_text::mode_note);
+        const auto mode_combo = GetDlgItem(wnd, IDC_MODE_BUTTON);
+        for (const auto& name : nocturne_text::mode_button_names)
+            ComboBox_AddString(mode_combo, name);
+        ComboBox_SetCurSel(mode_combo, main_menu::now_playing_mode_button::opens_menu() ? 1 : 0);
+
+        // 歌詞
+        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::expanded_section_lyrics);
+        SetDlgItemText(wnd, IDC_LYRICS_LOCK, nocturne_text::lyrics_lock);
+        SetDlgItemText(wnd, IDC_LYRICS_LOCK_NOTE, nocturne_text::lyrics_lock_note);
+        CheckDlgButton(wnd, IDC_LYRICS_LOCK, check_state(lyrics_lock::is_enabled()));
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
             const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
             expanded_cover_bg::enabled = checked;
             show_cap(wnd, checked);
@@ -586,8 +634,12 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
-        } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
-            startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        } else if (id == IDC_MODE_BUTTON && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                main_menu::now_playing_mode_button::set_opens_menu(selection == 1);
+        } else if (id == IDC_LYRICS_LOCK && code == BN_CLICKED) {
+            lyrics_lock::set_enabled(IsDlgButtonChecked(wnd, IDC_LYRICS_LOCK) == BST_CHECKED);
         }
     }
 };
@@ -627,14 +679,16 @@ TabNocturnePlayback g_tab_nocturne_playback;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
 TabNocturneInterface g_tab_nocturne_interface;
+TabNocturneExpanded g_tab_nocturne_expanded;
 TabNocturneAbout g_tab_nocturne_about;
 
 // 分頁順序：播放、下一首與佇列、字型、介面、關於。
 // 存的「最後開啟的分頁」是這個順序的編號，所以合併或插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀與展開頁插在關於前面、
 // 11/08 晚把播放佇列／啟動／外觀／展開頁併成現在這五頁）之後，已經用過的人更新後第一次開設定頁可能停在不同的分頁
 // （編號超出範圍時由分頁架構處理），無傷大雅；之後新增分頁盡量加在最後面（關於之前）
+// 2026-11-11 在關於之前加了「展開頁」
 PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font,
-    &g_tab_nocturne_interface, &g_tab_nocturne_about};
+    &g_tab_nocturne_interface, &g_tab_nocturne_expanded, &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(
@@ -729,6 +783,8 @@ void reset_nocturne_settings()
 
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();
+    main_menu::now_playing_mode_button::set_opens_menu(main_menu::now_playing_mode_button::opens_menu_default);
+    lyrics_lock::set_enabled(lyrics_lock::enabled_default);
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）

@@ -16,4 +16,8 @@ namespace cui::style_transition {
 // 套用 apply（真正切換樣式的動作）；可以的話包一層過渡動畫。要在主執行緒呼叫
 void run(std::function<void()> apply);
 
+// 切換展開頁顯示內容（歌詞／純封面／VU 表，2026-11-11）：整個展開頁交叉淡化約 0.29 秒（舊畫面墊底、新畫面淡入），
+// 一樣先截圖蓋住、等 ESLyric 畫好再淡；展開頁沒有完全展開時直接切換
+void run_stage(std::function<void()> apply);
+
 } // namespace cui::style_transition

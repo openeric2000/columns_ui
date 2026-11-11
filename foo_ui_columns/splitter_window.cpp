@@ -380,8 +380,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_volume_chip_wnd = volume_chip::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_cover_zoom_wnd)
         m_cover_zoom_wnd = cover_zoom::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_lyrics_lock_wnd)
+        m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 4);
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 5);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -417,6 +419,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = volume_chip::defer_layout(dwp, m_volume_chip_wnd, now_playing_bar_rect);
         if (m_cover_zoom_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = cover_zoom::defer_layout(dwp, m_cover_zoom_wnd, now_playing_bar_rect);
+        if (m_lyrics_lock_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = lyrics_lock::defer_layout(dwp, m_lyrics_lock_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -452,6 +456,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_cover_zoom_wnd = cover_zoom::create(get_wnd());
         if (m_cover_zoom_wnd)
             cover_zoom::layout(m_cover_zoom_wnd, now_playing_bar_rect);
+        if (!m_lyrics_lock_wnd)
+            m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
+        if (m_lyrics_lock_wnd)
+            lyrics_lock::layout(m_lyrics_lock_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
@@ -461,16 +469,62 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
         if (m_cover_zoom_wnd)
             DestroyWindow(std::exchange(m_cover_zoom_wnd, nullptr));
+        if (m_lyrics_lock_wnd)
+            DestroyWindow(std::exchange(m_lyrics_lock_wnd, nullptr));
     }
 
-    // 展開頁樣式 2（靠左＋VU 表）已在 2026-11-07 拿掉。舊的版面裡可能還留著自訂標題「展開頁右側」的面板（VU 表），
-    // 不能讓它變成一般面板擠進版面，所以一律藏起來；版面設定檔有檔頭雜湊不能手改，要移掉它得從 Columns UI 的版面設定畫面刪
-    if (now_playing_side && now_playing_side->m_wnd) {
+    layout_now_playing_side();
+
+    RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
+}
+
+void FlatSplitterPanel::layout_now_playing_side()
+{
+    // 自訂標題「展開頁右側」的面板（VU 表）不能變成一般面板擠進版面：平常一律藏起來（版面設定檔有檔頭雜湊不能手改，
+    // 要移掉它得從 Columns UI 的版面設定畫面刪）。2026-11-11 起展開頁切到「VU 表」模式時疊到歌詞欄的位置
+    // （位置照 main.xml 標記的歌詞欄算，見 cover_zoom::vu_rect_in_stage）；展開動畫、截圖還在時先不顯示，等展開頁整塊出來
+    const auto now_playing_side = get_now_playing_side_panel();
+    if (!now_playing_side || !now_playing_side->m_wnd)
+        return;
+
+    std::optional<RECT> target;
+    const auto bar_width = m_now_playing_bar_rect.right - m_now_playing_bar_rect.left;
+    if (m_now_playing_expanded && !m_now_playing_animating && !m_now_playing_snapshot_wnd && bar_width > 0
+        && main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::vu)
+        target = cover_zoom::vu_rect_in_stage(bar_width, m_now_playing_bar_rect.top);
+
+    if (target) {
+        SetWindowPos(now_playing_side->m_wnd, HWND_TOP, m_now_playing_bar_rect.left + target->left, target->top,
+            target->right - target->left, target->bottom - target->top, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    } else {
         SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
             SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
+}
 
-    RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
+bool FlatSplitterPanel::s_has_now_playing_side()
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto side = g_instances[index]->get_now_playing_side_panel();
+        if (side && side->m_wnd)
+            return true;
+    }
+    return false;
+}
+
+void FlatSplitterPanel::s_refresh_now_playing()
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+        if (!splitter->get_now_playing_bar_panel())
+            continue;
+
+        splitter->layout_now_playing_side();
+        if (splitter->m_cover_zoom_wnd)
+            cover_zoom::layout(splitter->m_cover_zoom_wnd, splitter->m_now_playing_bar_rect);
+        if (splitter->m_lyrics_lock_wnd)
+            lyrics_lock::layout(splitter->m_lyrics_lock_wnd, splitter->m_now_playing_bar_rect);
+    }
 }
 
 void FlatSplitterPanel::on_size_changed()
@@ -1693,6 +1747,10 @@ void FlatSplitterPanel::finish_now_playing_slide()
     // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
     if (m_cover_zoom_wnd)
         cover_zoom::layout(m_cover_zoom_wnd, m_now_playing_bar_rect);
+    // VU 表模式的面板、歌詞防誤拖蓋層也是這時才出現
+    layout_now_playing_side();
+    if (m_lyrics_lock_wnd)
+        lyrics_lock::layout(m_lyrics_lock_wnd, m_now_playing_bar_rect);
 
     on_now_playing_animation_finished();
 }

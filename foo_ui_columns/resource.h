@@ -128,6 +128,7 @@
 #define IDD_PREFS_NOCTURNE_FONT         246
 #define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDD_PREFS_NOCTURNE_APPEARANCE   250
+#define IDD_PREFS_NOCTURNE_EXPANDED     251
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -442,6 +443,11 @@
 #define IDC_EXPANDED_BG                1360
 #define IDC_EXPANDED_BG_CAP_LABEL      1362
 #define IDC_EXPANDED_BG_CAP            1363
+#define IDC_MODE_BUTTON_LABEL          1364
+#define IDC_MODE_BUTTON                1365
+#define IDC_MODE_NOTE                  1366
+#define IDC_LYRICS_LOCK                1367
+#define IDC_LYRICS_LOCK_NOTE           1368
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1

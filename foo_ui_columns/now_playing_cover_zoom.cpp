@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include <charconv>
+#include <unordered_map>
 
 #include "now_playing_cover_zoom.h"
 #include "menu_items.h"
@@ -110,6 +111,13 @@ struct CoverGeometry {
     Length cover;
     Length gap;
     Length info;
+    // 歌詞欄（2026-11-11）：lyrics-left＝展開頁左緣到歌詞欄、lyrics-right＝歌詞欄右緣到展開頁右緣；
+    // vu-width（可省略）＝VU 表最寬多少。給 VU 表模式的位置與歌詞防誤拖的蓋層用
+    bool has_lyrics{};
+    Length lyrics_left;
+    Length lyrics_right;
+    bool has_vu_width{};
+    Length vu_width;
 };
 
 std::wstring layout_file_path()
@@ -148,7 +156,7 @@ CoverGeometry parse_geometry(const std::string& text)
         (end == std::string::npos ? text.size() : end) - start - marker.size());
 
     CoverGeometry geometry;
-    bool has_left{}, has_cover{}, has_gap{}, has_info{};
+    bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -179,10 +187,20 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "info") {
             geometry.info = *value;
             has_info = true;
+        } else if (key == "lyrics-left") {
+            geometry.lyrics_left = *value;
+            has_lyrics_left = true;
+        } else if (key == "lyrics-right") {
+            geometry.lyrics_right = *value;
+            has_lyrics_right = true;
+        } else if (key == "vu-width") {
+            geometry.vu_width = *value;
+            geometry.has_vu_width = geometry.vu_width.value > 0;
         }
     }
 
     geometry.valid = has_left && has_cover && has_gap && has_info && geometry.cover.value > 0;
+    geometry.has_lyrics = has_lyrics_left && has_lyrics_right;
     return geometry;
 }
 
@@ -345,8 +363,8 @@ private:
         if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
             return {};
 
-        // 資訊卡模式（樣式 3）沒有封面
-        if (main_menu::get_now_playing_style() == 3)
+        // 資訊卡模式（樣式 3）沒有封面；純封面模式的大封面不在標記的位置（而且已經夠大，點封面就是看大圖）
+        if (main_menu::get_now_playing_style() == 3 || main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover)
             return {};
 
         // GDI+ 字型表還在背景暖機時不在主執行緒建字型（同音量圖示），暖機做完會重排
@@ -579,6 +597,49 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
     return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
 }
 
+std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
+{
+    const auto& geometry = layout_geometry();
+    if (!geometry.has_lyrics || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
+        return {};
+
+    const auto resolve = [stage_width](const Length& length) {
+        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
+                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    };
+
+    const auto left = resolve(geometry.lyrics_left);
+    const auto right = stage_width - resolve(geometry.lyrics_right);
+    if (left < 0 || right - left < dip(40))
+        return {};
+
+    return RECT{left, 0, right, stage_height};
+}
+
+std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height)
+{
+    const auto column = lyrics_column_in_stage(stage_width, stage_height);
+    if (!column)
+        return {};
+
+    const auto& geometry = layout_geometry();
+    auto width = static_cast<int>(column->right - column->left);
+    if (geometry.has_vu_width) {
+        const auto cap = geometry.vu_width.percent
+            ? static_cast<int>(std::lround(stage_width * geometry.vu_width.value / 100.0))
+            : uih::scale_dpi_value(static_cast<int>(std::lround(geometry.vu_width.value)));
+        width = std::min(width, cap);
+    }
+
+    // 高度照 VU 表外觀 Modern antonyb 的比例 830×199（同 2026-11-07 拿掉的樣式 2）；在展開頁垂直置中、靠歌詞欄左緣（歌詞也是靠左）
+    const auto height = MulDiv(width, 199, 830);
+    if (width <= 0 || height <= 0 || height > stage_height)
+        return {};
+
+    const auto top = (stage_height - height) / 2;
+    return RECT{column->left, top, column->left + width, top + height};
+}
+
 void refresh_layouts()
 {
     for (const auto button : live_buttons())
@@ -649,3 +710,246 @@ HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
 }
 
 } // namespace cui::cover_zoom
+
+// ---- 歌詞防誤拖（2026-11-11）----
+// 放在這個檔案是為了共用 main.xml 標記的讀取（歌詞欄位置）與分層視窗的貼圖，免得動到專案檔
+namespace cui::lyrics_lock {
+
+namespace {
+
+constexpr wchar_t window_class_name[] = L"columns_ui_lyrics_lock";
+constexpr char eslyric_window_class[] = "uie_eslyric_wnd_class";
+
+std::vector<HWND>& live_windows()
+{
+    static std::vector<HWND> windows;
+    return windows;
+}
+
+// 每個蓋層記著上一次的播放列位置（分割面板座標），設定或模式改了用它重排
+std::unordered_map<HWND, RECT>& bar_rects()
+{
+    static std::unordered_map<HWND, RECT> rects;
+    return rects;
+}
+
+RECT compute_layout(const RECT& bar_rect)
+{
+    if (bar_rect.right <= bar_rect.left || !is_enabled())
+        return {};
+
+    // 只在展開頁完全展開、而且是歌詞模式時蓋
+    RECT stage_screen{};
+    HWND owner{};
+    if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
+        return {};
+    if (main_menu::get_now_playing_mode() != main_menu::NowPlayingMode::lyrics)
+        return {};
+
+    const auto column = cover_zoom::lyrics_column_in_stage(bar_rect.right - bar_rect.left, bar_rect.top);
+    if (!column)
+        return {};
+
+    return RECT{bar_rect.left + column->left, column->top, bar_rect.left + column->right, column->bottom};
+}
+
+// 蓋層底下那個 ESLyric 視窗（滾輪、右鍵轉給它）
+HWND find_eslyric_under(HWND wnd, POINT screen_point)
+{
+    struct Search {
+        HWND self;
+        POINT point;
+        HWND found;
+    } search{wnd, screen_point, nullptr};
+
+    EnumChildWindows(
+        GetParent(wnd),
+        [](HWND child, LPARAM lp) -> BOOL {
+            auto& state = *reinterpret_cast<Search*>(lp);
+            if (child == state.self || !IsWindowVisible(child))
+                return TRUE;
+            char name[64]{};
+            GetClassNameA(child, name, static_cast<int>(std::size(name)));
+            if (strcmp(name, eslyric_window_class) != 0)
+                return TRUE;
+            RECT rect{};
+            GetWindowRect(child, &rect);
+            if (!PtInRect(&rect, state.point))
+                return TRUE;
+            state.found = child;
+            return FALSE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+
+    return search.found;
+}
+
+// 滑鼠按鍵訊息（座標是蓋層的用戶區座標）換算成 ESLyric 視窗的座標再送過去
+void forward_client_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+    POINT screen = pt;
+    ClientToScreen(wnd, &screen);
+    const auto target = find_eslyric_under(wnd, screen);
+    if (!target)
+        return;
+    ScreenToClient(target, &screen);
+    SendMessage(target, msg, wp, MAKELPARAM(screen.x, screen.y));
+}
+
+void render(HWND wnd)
+{
+    RECT client{};
+    GetClientRect(wnd, &client);
+    if (client.right <= 0 || client.bottom <= 0)
+        return;
+
+    // 幾乎看不見的底（透明度 1/255）：整塊收得到滑鼠，看起來跟沒蓋一樣
+    cover_zoom::present_layered(wnd, client.right, client.bottom, 255, [&](Gdiplus::Graphics& g) {
+        const Gdiplus::SolidBrush brush(Gdiplus::Color(1, 0, 0, 0));
+        g.FillRectangle(&brush, 0, 0, client.right, client.bottom);
+    });
+}
+
+void apply_layout(HWND wnd)
+{
+    const auto it = bar_rects().find(wnd);
+    const auto target = it == bar_rects().end() ? RECT{} : compute_layout(it->second);
+
+    if (IsRectEmpty(&target)) {
+        if (IsWindowVisible(wnd))
+            ShowWindow(wnd, SW_HIDE);
+        return;
+    }
+
+    RECT current{};
+    GetWindowRect(wnd, &current);
+    MapWindowPoints(HWND_DESKTOP, GetParent(wnd), reinterpret_cast<POINT*>(&current), 2);
+    const auto visible = IsWindowVisible(wnd) != FALSE;
+
+    if (!visible || !EqualRect(&current, &target))
+        SetWindowPos(wnd, HWND_TOP, target.left, target.top, target.right - target.left, target.bottom - target.top,
+            SWP_NOACTIVATE);
+    // 排版批次（defer_layout）可能已經改了大小，所以每次都重貼一次（只是一塊單色，很便宜）
+    render(wnd);
+    if (!visible)
+        SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_NCCREATE:
+        live_windows().push_back(wnd);
+        break;
+    case WM_NCDESTROY: {
+        auto& windows = live_windows();
+        windows.erase(std::remove(windows.begin(), windows.end(), wnd), windows.end());
+        bar_rects().erase(wnd);
+        break;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};
+        BeginPaint(wnd, &ps);
+        EndPaint(wnd, &ps);
+        return 0;
+    }
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_SETCURSOR:
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+        return TRUE;
+    // 左鍵（拖曳、點擊、雙擊）全部吃掉：歌詞就拉不動、也不會被點到跳時間
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_MOUSEMOVE:
+        return 0;
+    // 滾輪、右鍵、中鍵照常交給底下的歌詞
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL: {
+        const POINT screen{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        if (const auto target = find_eslyric_under(wnd, screen))
+            return SendMessage(target, msg, wp, lp);
+        return 0;
+    }
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+        forward_client_message(wnd, msg, wp, lp);
+        return 0;
+    }
+    return DefWindowProc(wnd, msg, wp, lp);
+}
+
+} // namespace
+
+bool is_enabled()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, enabled_default);
+}
+
+void set_enabled(bool enabled)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, enabled);
+    refresh_layouts();
+}
+
+HWND create(HWND parent)
+{
+    static const auto class_registered = [] {
+        WNDCLASSEX window_class{};
+        window_class.cbSize = sizeof(window_class);
+        window_class.style = CS_DBLCLKS;
+        window_class.lpfnWndProc = window_proc;
+        window_class.hInstance = core_api::get_my_instance();
+        window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        window_class.lpszClassName = window_class_name;
+        return RegisterClassEx(&window_class) != 0;
+    }();
+
+    if (!class_registered)
+        return nullptr;
+
+    return CreateWindowEx(WS_EX_LAYERED, window_class_name, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent,
+        nullptr, core_api::get_my_instance(), nullptr);
+}
+
+void layout(HWND wnd, const RECT& bar_rect)
+{
+    bar_rects()[wnd] = bar_rect;
+    apply_layout(wnd);
+}
+
+HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
+{
+    bar_rects()[wnd] = bar_rect;
+    const auto target = compute_layout(bar_rect);
+
+    if (IsRectEmpty(&target)) {
+        if (IsWindowVisible(wnd))
+            return DeferWindowPos(dwp, wnd, nullptr, 0, 0, 0, 0,
+                SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return dwp;
+    }
+
+    // 還藏著的、或大小要變的不在批次裡處理：排版批次之後一定會再呼叫 layout()，由那裡貼好畫面再顯示
+    if (!IsWindowVisible(wnd))
+        return dwp;
+
+    return DeferWindowPos(dwp, wnd, HWND_TOP, target.left, target.top, target.right - target.left,
+        target.bottom - target.top, SWP_NOACTIVATE);
+}
+
+void refresh_layouts()
+{
+    for (const auto wnd : live_windows())
+        apply_layout(wnd);
+}
+
+} // namespace cui::lyrics_lock

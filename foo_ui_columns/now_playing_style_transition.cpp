@@ -69,6 +69,8 @@ struct Transition {
     ULONGLONG applied_at{};
     ULONGLONG animation_start{};
     bool animating{};
+    // 整個展開頁交叉淡化（切換展開頁顯示內容，2026-11-11）：舊畫面一直墊著、新畫面從透明淡到不透明，不縮放
+    bool whole_stage{};
 };
 
 std::unique_ptr<Transition> g_transition;
@@ -239,10 +241,18 @@ void present(Transition& transition, double progress)
         graphics.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
 
         const auto p = static_cast<float>(progress);
-        if (transition.before)
-            draw_scaled(graphics, *transition.before, transition.cover, 1.f + (old_end_scale - 1.f) * p, 1.f - p);
-        if (transition.after)
-            draw_scaled(graphics, *transition.after, transition.cover, new_start_scale + (1.f - new_start_scale) * p, p);
+        if (transition.whole_stage) {
+            if (transition.before)
+                draw_scaled(graphics, *transition.before, transition.cover, 1.f, 1.f);
+            if (transition.after)
+                draw_scaled(graphics, *transition.after, transition.cover, 1.f, p);
+        } else {
+            if (transition.before)
+                draw_scaled(graphics, *transition.before, transition.cover, 1.f + (old_end_scale - 1.f) * p, 1.f - p);
+            if (transition.after)
+                draw_scaled(
+                    graphics, *transition.after, transition.cover, new_start_scale + (1.f - new_start_scale) * p, p);
+        }
     }
 
     POINT origin{transition.screen.left, transition.screen.top};
@@ -405,6 +415,50 @@ void run(std::function<void()> apply)
     }
 
     // 先把切換前的畫面蓋上去、等它真的合成到螢幕上，才在底下切換（不然會先閃一格切換後的畫面）
+    present(*transition, 0.0);
+    ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
+    [[maybe_unused]] const auto hr = DwmFlush();
+
+    g_transition = std::move(transition);
+    apply();
+    g_transition->applied_at = GetTickCount64();
+    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+}
+
+void run_stage(std::function<void()> apply)
+{
+    if (g_transition) {
+        finish();
+        apply();
+        return;
+    }
+
+    RECT stage{};
+    HWND owner{};
+    if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage, owner)) {
+        apply();
+        return;
+    }
+
+    auto transition = std::make_unique<Transition>();
+    transition->whole_stage = true;
+    transition->screen = stage;
+    transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
+    transition->before = capture(stage);
+
+    if (!transition->before) {
+        apply();
+        return;
+    }
+
+    transition->before_signature = signature_of(*transition->before, transition->cover);
+    transition->wnd = create_overlay(owner, stage);
+
+    if (!transition->wnd) {
+        apply();
+        return;
+    }
+
     present(*transition, 0.0);
     ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
     [[maybe_unused]] const auto hr = DwmFlush();
