@@ -510,12 +510,43 @@ void set_enabled(bool enabled)
 {
     fb2k::configStore::get()->setConfigBool(config_key, enabled);
 }
+
+// 關鍵字（2026-11-11 使用者要可以自己輸入，預設先填好）：分號分隔，比對檔名與歌名。鍵名、預設值要跟 Album list 一致
+inline constexpr char keywords_config_key[] = "nocturne.folderTree.hideInstrumental.keywords";
+inline constexpr char keywords_default[]
+    = "instrumental;inst.;(inst;[inst;inst);inst];off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
+      "\xAA\xE3\x82\xB1;backing track;without vocal;\xE4\xBC\xB4\xE5\xA5\x8F"; // …;カラオケ;…;伴奏
+
+std::string get_keywords()
+{
+    return fb2k::configStore::get()->getConfigString(keywords_config_key, keywords_default)->c_str();
+}
+
+void set_keywords(const std::string& keywords)
+{
+    if (keywords != get_keywords())
+        fb2k::configStore::get()->setConfigString(keywords_config_key, keywords.c_str());
+}
+
+// 「自訂關鍵字」開關：關著（預設）Album list 一律用上面的預設值，開著才用輸入的關鍵字
+inline constexpr char custom_config_key[] = "nocturne.folderTree.hideInstrumental.customKeywords";
+inline constexpr bool custom_default = false;
+
+bool is_custom()
+{
+    return fb2k::configStore::get()->getConfigBool(custom_config_key, custom_default);
+}
+
+void set_custom(bool custom)
+{
+    fb2k::configStore::get()->setConfigBool(custom_config_key, custom);
+}
 } // namespace hide_instrumental
 
 // 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁，這頁剩捲軸與資料夾樹、啟動兩段
 class TabNocturneInterface : public NocturneTab {
 public:
-    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
+    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
 
     const char* get_name() override { return nocturne_text::interface_tab_name; }
 
@@ -558,12 +589,6 @@ private:
         SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
         CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
-
-        // 目前選取資料夾：暫時隱藏伴奏版
-        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::hide_instrumental_title);
-        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL, nocturne_text::hide_instrumental);
-        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_NOTE, nocturne_text::hide_instrumental_note);
-        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL, check_state(hide_instrumental::is_enabled()));
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -585,8 +610,72 @@ private:
             playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
         } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
             startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
-        } else if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
+        }
+    }
+};
+
+// ---- 資料夾（2026-11-11）----
+// 使用者要的：介面分頁太擠，另開一頁。預設只有「隱藏伴奏版」一個勾選；再勾「自訂關鍵字」才出現關鍵字輸入框
+// （沒勾就用預設那組）。邏輯在自編 Album list 的 playlist_utils.cpp，改了馬上用目前選的資料夾重送一次
+class TabNocturneFolder : public NocturneTab {
+public:
+    TabNocturneFolder() : NocturneTab({IDC_TITLE1}) {}
+
+    const char* get_name() override { return nocturne_text::folder_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FOLDER; }
+
+    // 「自訂關鍵字」只在勾了隱藏時能點；輸入框那一行只在勾了自訂時出現
+    static void update_controls(HWND wnd)
+    {
+        const auto hide = IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED;
+        const auto custom = IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM) == BST_CHECKED;
+        EnableWindow(GetDlgItem(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM), hide);
+        for (const auto id : {IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL, IDC_HIDE_INSTRUMENTAL_KEYWORDS, IDC_HIDE_INSTRUMENTAL_NOTE}) {
+            const auto control = GetDlgItem(wnd, id);
+            ShowWindow(control, custom ? SW_SHOW : SW_HIDE);
+            EnableWindow(control, hide);
+        }
+    }
+
+    // 關鍵字在輸入框離開時才存（每打一個字就存的話，資料夾樹會每次都重送一次清單）
+    static void save_keywords(HWND wnd)
+    {
+        const auto edit = GetDlgItem(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS);
+        std::wstring text(static_cast<size_t>(GetWindowTextLength(edit)) + 1, L'\0');
+        text.resize(static_cast<size_t>(GetWindowText(edit, text.data(), static_cast<int>(text.size()))));
+        hide_instrumental::set_keywords(mmh::to_utf8(text));
+    }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::hide_instrumental_title);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL, nocturne_text::hide_instrumental);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM, nocturne_text::hide_instrumental_custom);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL, nocturne_text::hide_instrumental_keywords_label);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_NOTE, nocturne_text::hide_instrumental_note);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS, mmh::to_utf16(hide_instrumental::get_keywords()).c_str());
+        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL, check_state(hide_instrumental::is_enabled()));
+        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM, check_state(hide_instrumental::is_custom()));
+        update_controls(wnd);
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
+            save_keywords(wnd);
             hide_instrumental::set_enabled(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED);
+            update_controls(wnd);
+        } else if (id == IDC_HIDE_INSTRUMENTAL_CUSTOM && code == BN_CLICKED) {
+            save_keywords(wnd);
+            hide_instrumental::set_custom(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM) == BST_CHECKED);
+            update_controls(wnd);
+        } else if (id == IDC_HIDE_INSTRUMENTAL_KEYWORDS && code == EN_KILLFOCUS) {
+            save_keywords(wnd);
         }
     }
 };
@@ -612,7 +701,8 @@ private:
         ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
     }
 
-    // 「展開頁要有」下拉鈕的字：勾選的模式用頓號接起來，後面一個 ▾
+    // 「展開頁要有」：外觀用跟下面一樣的下拉選單（2026-11-11 使用者說原本的按鈕是白底、跟下面的不一樣），
+    // 裡面只放一項＝勾選的模式用頓號接起來；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
     static void update_modes_text(HWND wnd)
     {
         using main_menu::NowPlayingMode;
@@ -626,8 +716,42 @@ private:
                 text += nocturne_text::modes_separator;
             text += nocturne_text::mode_short_names[i];
         }
-        text += nocturne_text::modes_dropdown_arrow;
-        SetDlgItemText(wnd, IDC_MODES, text.c_str());
+        const auto combo = GetDlgItem(wnd, IDC_MODES);
+        ComboBox_ResetContent(combo);
+        ComboBox_AddString(combo, text.c_str());
+        ComboBox_SetCurSel(combo, 0);
+    }
+
+    static LRESULT CALLBACK s_modes_combo_proc(
+        HWND combo, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
+    {
+        switch (msg) {
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+            SetFocus(combo);
+            choose_modes(GetParent(combo));
+            return 0;
+        case WM_KEYDOWN:
+            if (wp == VK_F4 || wp == VK_SPACE || wp == VK_RETURN) {
+                choose_modes(GetParent(combo));
+                return 0;
+            }
+            if (wp == VK_UP || wp == VK_DOWN || wp == VK_HOME || wp == VK_END || wp == VK_PRIOR || wp == VK_NEXT)
+                return 0;
+            break;
+        case WM_SYSKEYDOWN:
+            if (wp == VK_DOWN || wp == VK_UP) {
+                choose_modes(GetParent(combo));
+                return 0;
+            }
+            break;
+        case WM_MOUSEWHEEL:
+            return 0;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(combo, s_modes_combo_proc, id);
+            break;
+        }
+        return DefSubclassProc(combo, msg, wp, lp);
     }
 
     // 按下拉鈕：在按鈕正下方開一個可以勾選的選單；點一項就切換勾選並馬上生效，選單再開一次，點選單外面才關。
@@ -693,6 +817,7 @@ private:
         SetDlgItemText(wnd, IDC_MODE_NOTE, nocturne_text::mode_note);
         SetDlgItemText(wnd, IDC_MODES_LABEL, nocturne_text::modes_label);
         update_modes_text(wnd);
+        SetWindowSubclass(GetDlgItem(wnd, IDC_MODES), s_modes_combo_proc, 1, 0);
         const auto mode_combo = GetDlgItem(wnd, IDC_MODE_BUTTON);
         for (const auto& name : nocturne_text::mode_button_names)
             ComboBox_AddString(mode_combo, name);
@@ -719,8 +844,6 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
-        } else if (id == IDC_MODES && code == BN_CLICKED) {
-            choose_modes(wnd);
         } else if (id == IDC_MODE_BUTTON && code == CBN_SELCHANGE) {
             const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
             if (selection != CB_ERR)
@@ -767,15 +890,16 @@ TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
 TabNocturneInterface g_tab_nocturne_interface;
 TabNocturneExpanded g_tab_nocturne_expanded;
+TabNocturneFolder g_tab_nocturne_folder;
 TabNocturneAbout g_tab_nocturne_about;
 
 // 分頁順序：播放、下一首與佇列、字型、介面、關於。
 // 存的「最後開啟的分頁」是這個順序的編號，所以合併或插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀與展開頁插在關於前面、
 // 11/08 晚把播放佇列／啟動／外觀／展開頁併成現在這五頁）之後，已經用過的人更新後第一次開設定頁可能停在不同的分頁
 // （編號超出範圍時由分頁架構處理），無傷大雅；之後新增分頁盡量加在最後面（關於之前）
-// 2026-11-11 在關於之前加了「展開頁」
+// 2026-11-11 在關於之前加了「展開頁」，之後又在關於之前加了「資料夾」
 PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font,
-    &g_tab_nocturne_interface, &g_tab_nocturne_expanded, &g_tab_nocturne_about};
+    &g_tab_nocturne_interface, &g_tab_nocturne_expanded, &g_tab_nocturne_folder, &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(
@@ -867,6 +991,8 @@ void reset_nocturne_settings()
     thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
     folder_search_position::set_on_top(folder_search_position::on_top_default);
     hide_instrumental::set_enabled(hide_instrumental::enabled_default);
+    hide_instrumental::set_keywords(hide_instrumental::keywords_default);
+    hide_instrumental::set_custom(hide_instrumental::custom_default);
     playlist_marquee::set_enabled(playlist_marquee::enabled_default);
 
     expanded_cover_bg::enabled.reset();

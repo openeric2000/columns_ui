@@ -102,9 +102,10 @@ inline constexpr wchar_t playlist_marquee[] = L"Playlist: drag to box-select";
 // 暫時隱藏伴奏版（2026-11-11）：只影響「目前選取資料夾」，邏輯在自編 Album list 的 playlist_utils.cpp
 inline constexpr wchar_t hide_instrumental_title[] = L"Current folder";
 inline constexpr wchar_t hide_instrumental[] = L"Hide instrumental versions";
-inline constexpr wchar_t hide_instrumental_note[]
-    = L"Tracks whose file name or title contains Instrumental, Inst., Off Vocal, Karaoke and similar words are left out "
-      L"of the current folder playlist. Takes effect right away.";
+inline constexpr auto folder_tab_name = "Folders";
+inline constexpr wchar_t hide_instrumental_custom[] = L"Use my own keywords";
+inline constexpr wchar_t hide_instrumental_keywords_label[] = L"Keywords:";
+inline constexpr wchar_t hide_instrumental_note[] = L"eg. \"instrumental;off vocal;karaoke\"";
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"Now playing view";
 inline constexpr wchar_t expanded_bg[] = L"Blurred cover background";
@@ -309,8 +310,10 @@ inline constexpr wchar_t playlist_marquee[] = L"播放清單：按住左鍵拖�
 // 暫時隱藏伴奏版（2026-11-11）：只影響「目前選取資料夾」，邏輯在自編 Album list 的 playlist_utils.cpp
 inline constexpr wchar_t hide_instrumental_title[] = L"目前選取資料夾";
 inline constexpr wchar_t hide_instrumental[] = L"隱藏伴奏版（Instrumental）";
-inline constexpr wchar_t hide_instrumental_note[]
-    = L"檔名或歌名有 Instrumental、Inst.、Off Vocal、Karaoke、カラオケ、伴奏 這些字的歌不會放進「目前選取資料夾」。改了馬上生效。";
+inline constexpr auto folder_tab_name = "資料夾";
+inline constexpr wchar_t hide_instrumental_custom[] = L"自訂關鍵字";
+inline constexpr wchar_t hide_instrumental_keywords_label[] = L"關鍵字：";
+inline constexpr wchar_t hide_instrumental_note[] = L"例：\"instrumental;off vocal;カラオケ\"";
 // 展開頁：封面虛化背景
 inline constexpr wchar_t expanded_tab_title[] = L"展開頁";
 inline constexpr wchar_t expanded_bg[] = L"封面虛化背景";

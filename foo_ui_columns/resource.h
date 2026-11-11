@@ -129,6 +129,7 @@
 #define IDD_PREFS_NOCTURNE_ABOUT        249
 #define IDD_PREFS_NOCTURNE_APPEARANCE   250
 #define IDD_PREFS_NOCTURNE_EXPANDED     251
+#define IDD_PREFS_NOCTURNE_FOLDER       252
 #define IDC_INFOSECTIONS                1003
 #define IDC_STRING                      1006
 #define IDC_COLOUR                      1007
@@ -451,7 +452,10 @@
 #define IDC_MODES_LABEL                1369
 #define IDC_MODES                      1370
 #define IDC_HIDE_INSTRUMENTAL          1371
-#define IDC_HIDE_INSTRUMENTAL_NOTE     1372
+#define IDC_HIDE_INSTRUMENTAL_CUSTOM   1372
+#define IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL 1373
+#define IDC_HIDE_INSTRUMENTAL_KEYWORDS 1374
+#define IDC_HIDE_INSTRUMENTAL_NOTE     1375
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1
