@@ -325,28 +325,50 @@ bool vu_mode_available()
     return available;
 }
 
-// 目前生效的模式：存的值是 VU 表但這個版面沒有 VU 表時當成歌詞
-main_menu::NowPlayingMode now_playing_mode_value()
+// 設定頁勾選的模式（bit0 歌詞、bit1 純封面、bit2 VU 表）：給標題格式欄位用的副本，主執行緒每次讀設定時更新
+std::atomic<uint32_t> enabled_modes_for_fields{main_menu::now_playing_modes::all_modes};
+
+// 主執行緒：讀勾選的模式，變了就通知 ESLyric 重算
+uint32_t enabled_modes_mask()
 {
-    switch (now_playing_mode.get()) {
-    case 2:
-        return main_menu::NowPlayingMode::cover;
-    case 3:
-        return vu_mode_available() ? main_menu::NowPlayingMode::vu : main_menu::NowPlayingMode::lyrics;
-    default:
-        return main_menu::NowPlayingMode::lyrics;
-    }
+    const auto mask = main_menu::now_playing_modes::get_mask();
+    if (enabled_modes_for_fields.exchange(mask) != mask)
+        fb2k::inMainThread([] { refresh_now_playing_track(); });
+    return mask;
 }
 
-// 給標題格式欄位用（任何執行緒）：存的值，VU 表但沒有 VU 表時當成歌詞
+// 存的模式在「有沒有勾選」「VU 表能不能用」的限制下實際顯示哪一種：存的那種不能用時取第一個能用的（歌詞、純封面、VU 表的順序），
+// 都不能用時是歌詞。純函式，任何執行緒都可以用
+uint32_t effective_mode(uint32_t stored, uint32_t mask, bool vu_available)
+{
+    const auto usable = [&](uint32_t mode) { return (mask & (1u << (mode - 1))) != 0 && (mode != 3 || vu_available); };
+    if (stored >= 1 && stored <= 3 && usable(stored))
+        return stored;
+    for (uint32_t mode = 1; mode <= 3; ++mode)
+        if (usable(mode))
+            return mode;
+    return 1;
+}
+
+// 目前生效的模式（主執行緒）
+main_menu::NowPlayingMode now_playing_mode_value()
+{
+    return static_cast<main_menu::NowPlayingMode>(
+        effective_mode(now_playing_mode.get(), enabled_modes_mask(), vu_mode_available()));
+}
+
+// 這一種現在能不能選（有勾選、VU 表要版面能用）
+bool mode_usable(main_menu::NowPlayingMode mode)
+{
+    if ((enabled_modes_mask() & main_menu::now_playing_modes::bit_of(mode)) == 0)
+        return false;
+    return mode != main_menu::NowPlayingMode::vu || vu_mode_available();
+}
+
+// 給標題格式欄位用（任何執行緒）：同 now_playing_mode_value，但只讀主執行緒存好的副本
 uint32_t now_playing_mode_for_fields()
 {
-    const auto stored = now_playing_mode.get();
-    if (stored == 2)
-        return 2;
-    if (stored == 3 && vu_available_for_fields.load())
-        return 3;
-    return 1;
+    return effective_mode(now_playing_mode.get(), enabled_modes_for_fields.load(), vu_available_for_fields.load());
 }
 
 // 「換下一種」時左上角按鈕旁邊的提示：顯示中的模式（1～3），0＝不顯示。約 1.1 秒後自動清掉
@@ -374,7 +396,7 @@ void show_mode_toast(main_menu::NowPlayingMode mode)
 
 void set_now_playing_mode(main_menu::NowPlayingMode mode)
 {
-    if (mode == main_menu::NowPlayingMode::vu && !vu_mode_available())
+    if (!mode_usable(mode))
         return;
 
     const auto apply = [mode] {
@@ -393,20 +415,19 @@ void set_now_playing_mode(main_menu::NowPlayingMode mode)
     style_transition::run_stage(apply);
 }
 
-// 「換下一種」的順序：歌詞 → 純封面 → VU 表（有的話）→ 歌詞
+// 「換下一種」的順序：歌詞 → 純封面 → VU 表 → 歌詞，跳過沒勾選或不能用的；只剩一種時就是它自己
 main_menu::NowPlayingMode next_now_playing_mode()
 {
-    switch (now_playing_mode_value()) {
-    case main_menu::NowPlayingMode::lyrics:
-        return main_menu::NowPlayingMode::cover;
-    case main_menu::NowPlayingMode::cover:
-        return vu_mode_available() ? main_menu::NowPlayingMode::vu : main_menu::NowPlayingMode::lyrics;
-    default:
-        return main_menu::NowPlayingMode::lyrics;
+    const auto current = static_cast<uint32_t>(now_playing_mode_value());
+    for (uint32_t step = 1; step <= 3; ++step) {
+        const auto candidate = static_cast<main_menu::NowPlayingMode>((current - 1 + step) % 3 + 1);
+        if (mode_usable(candidate))
+            return candidate;
     }
+    return static_cast<main_menu::NowPlayingMode>(current);
 }
 
-// 「跳出選單」：在游標位置開一個小選單，目前的模式打勾；沒有 VU 元件時 VU 表那一項變灰並註明
+// 「跳出選單」：在游標位置開一個小選單，只列設定頁勾選的，目前的打勾；勾了 VU 表但沒有 VU 元件時那一項變灰並註明
 void show_now_playing_mode_menu()
 {
     const wil::unique_hmenu menu(CreatePopupMenu());
@@ -415,7 +436,10 @@ void show_now_playing_mode_menu()
 
     const auto current = now_playing_mode_value();
     const auto vu_available = vu_mode_available();
+    const auto mask = enabled_modes_mask();
     const auto add = [&](main_menu::NowPlayingMode mode, const wchar_t* text, bool enabled) {
+        if ((mask & main_menu::now_playing_modes::bit_of(mode)) == 0)
+            return;
         UINT flags = MF_STRING;
         if (mode == current)
             flags |= MF_CHECKED;
@@ -993,6 +1017,19 @@ uint32_t get_now_playing_style()
 NowPlayingMode get_now_playing_mode()
 {
     return commands::now_playing_mode_value();
+}
+
+bool is_vu_mode_available()
+{
+    return commands::vu_mode_available();
+}
+
+void on_now_playing_modes_changed()
+{
+    // 讀一次勾選（同時更新欄位用的副本），再讓 ESLyric 重算、放大鈕／VU 表／歌詞防誤拖跟著重排
+    commands::enabled_modes_mask();
+    commands::refresh_now_playing_track();
+    panels::splitter::FlatSplitterPanel::s_refresh_now_playing();
 }
 
 void reset_now_playing_style_to_cover()

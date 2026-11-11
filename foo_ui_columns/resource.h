@@ -448,6 +448,8 @@
 #define IDC_MODE_NOTE                  1366
 #define IDC_LYRICS_LOCK                1367
 #define IDC_LYRICS_LOCK_NOTE           1368
+#define IDC_MODES_LABEL                1369
+#define IDC_MODES                      1370
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1

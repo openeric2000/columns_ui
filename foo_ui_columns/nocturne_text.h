@@ -165,8 +165,11 @@ inline constexpr wchar_t expanded_section_background[] = L"Background";
 inline constexpr wchar_t expanded_section_content[] = L"Content";
 inline constexpr wchar_t expanded_section_lyrics[] = L"Lyrics";
 inline constexpr wchar_t mode_note[]
-    = L"Lyrics, cover only, and VU meter (only when the layout has a VU meter panel). The button sits in the top-left "
-      L"corner of the now playing view.";
+    = L"Only the ticked ones take part in the top-left button. The VU meter needs a VU meter panel in the layout.";
+// 「展開頁要有」勾選下拉鈕（2026-11-11）
+inline constexpr wchar_t modes_label[] = L"Show";
+inline constexpr wchar_t modes_separator[] = L", ";
+inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
     = L"Left-clicking or dragging the lyrics no longer jumps to another time. The mouse wheel and right-click still "
@@ -355,7 +358,11 @@ inline constexpr auto expanded_page_tab_name = "展開頁";
 inline constexpr wchar_t expanded_section_background[] = L"背景";
 inline constexpr wchar_t expanded_section_content[] = L"顯示內容";
 inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
-inline constexpr wchar_t mode_note[] = L"可切換歌詞、純封面、VU 表（版面裡有 VU 表面板才有）。按鈕在展開頁左上角。";
+inline constexpr wchar_t mode_note[] = L"勾選的才會出現在左上角按鈕的輪流與選單裡。VU 表要版面裡有 VU 表面板才能用。";
+// 「展開頁要有」勾選下拉鈕（2026-11-11）
+inline constexpr wchar_t modes_label[] = L"展開頁要有";
+inline constexpr wchar_t modes_separator[] = L"、";
+inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左鍵或拖曳不會跳到別的時間；滾輪和右鍵照常。";
 

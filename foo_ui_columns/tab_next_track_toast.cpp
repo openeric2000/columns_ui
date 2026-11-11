@@ -587,6 +587,64 @@ private:
         ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
     }
 
+    // 「展開頁要有」下拉鈕的字：勾選的模式用頓號接起來，後面一個 ▾
+    static void update_modes_text(HWND wnd)
+    {
+        using main_menu::NowPlayingMode;
+        const auto mask = main_menu::now_playing_modes::get_mask();
+        std::wstring text;
+        const NowPlayingMode modes[]{NowPlayingMode::lyrics, NowPlayingMode::cover, NowPlayingMode::vu};
+        for (size_t i = 0; i < std::size(modes); ++i) {
+            if ((mask & main_menu::now_playing_modes::bit_of(modes[i])) == 0)
+                continue;
+            if (!text.empty())
+                text += nocturne_text::modes_separator;
+            text += nocturne_text::mode_short_names[i];
+        }
+        text += nocturne_text::modes_dropdown_arrow;
+        SetDlgItemText(wnd, IDC_MODES, text.c_str());
+    }
+
+    // 按下拉鈕：在按鈕正下方開一個可以勾選的選單；點一項就切換勾選並馬上生效，選單再開一次，點選單外面才關。
+    // 最後一個勾選的不能取消（至少要留一種）。沒有 VU 元件時 VU 表一樣可以勾（記住喜好），只是註明沒有安裝
+    static void choose_modes(HWND wnd)
+    {
+        using main_menu::NowPlayingMode;
+        const auto button = GetDlgItem(wnd, IDC_MODES);
+        RECT rect{};
+        GetWindowRect(button, &rect);
+        const auto vu_available = main_menu::is_vu_mode_available();
+
+        for (;;) {
+            const wil::unique_hmenu menu(CreatePopupMenu());
+            if (!menu)
+                return;
+            const auto mask = main_menu::now_playing_modes::get_mask();
+            const NowPlayingMode modes[]{NowPlayingMode::lyrics, NowPlayingMode::cover, NowPlayingMode::vu};
+            for (size_t i = 0; i < std::size(modes); ++i) {
+                const auto checked = (mask & main_menu::now_playing_modes::bit_of(modes[i])) != 0;
+                const auto text = (modes[i] == NowPlayingMode::vu && !vu_available) ? nocturne_text::mode_short_names[3]
+                                                                                   : nocturne_text::mode_short_names[i];
+                AppendMenu(menu.get(), MF_STRING | (checked ? MF_CHECKED : MF_UNCHECKED), i + 1, text);
+            }
+
+            const auto chosen = TrackPopupMenu(menu.get(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN,
+                rect.left, rect.bottom, 0, wnd, nullptr);
+            if (chosen < 1 || chosen > 3)
+                return;
+
+            const auto bit = main_menu::now_playing_modes::bit_of(modes[chosen - 1]);
+            const auto next = mask ^ bit;
+            if (next == 0) {
+                MessageBeep(MB_OK);
+                continue;
+            }
+            main_menu::now_playing_modes::set_mask(next);
+            main_menu::on_now_playing_modes_changed();
+            update_modes_text(wnd);
+        }
+    }
+
     void on_init_dialog(HWND wnd) override
     {
         // 背景
@@ -608,6 +666,8 @@ private:
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_section_content);
         SetDlgItemText(wnd, IDC_MODE_BUTTON_LABEL, nocturne_text::mode_button_label);
         SetDlgItemText(wnd, IDC_MODE_NOTE, nocturne_text::mode_note);
+        SetDlgItemText(wnd, IDC_MODES_LABEL, nocturne_text::modes_label);
+        update_modes_text(wnd);
         const auto mode_combo = GetDlgItem(wnd, IDC_MODE_BUTTON);
         for (const auto& name : nocturne_text::mode_button_names)
             ComboBox_AddString(mode_combo, name);
@@ -634,6 +694,8 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
+        } else if (id == IDC_MODES && code == BN_CLICKED) {
+            choose_modes(wnd);
         } else if (id == IDC_MODE_BUTTON && code == CBN_SELCHANGE) {
             const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
             if (selection != CB_ERR)
@@ -784,6 +846,8 @@ void reset_nocturne_settings()
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();
     main_menu::now_playing_mode_button::set_opens_menu(main_menu::now_playing_mode_button::opens_menu_default);
+    main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
+    main_menu::on_now_playing_modes_changed();
     lyrics_lock::set_enabled(lyrics_lock::enabled_default);
 }
 

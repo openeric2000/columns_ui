@@ -97,4 +97,33 @@ inline void set_opens_menu(bool value)
 }
 } // namespace now_playing_mode_button
 
+// 展開頁要有哪幾種（2026-11-11 使用者要求：設定頁用下拉鈕勾選）：bit0 歌詞、bit1 純封面、bit2 VU 表，預設全勾。
+// 左上角按鈕的「換下一種」與「跳出選單」都只出現勾選的；至少留一種（設定頁擋掉全部取消）。存在 fb2k 共用設定
+namespace now_playing_modes {
+inline constexpr char config_key[] = "nocturne.nowPlaying.modes";
+inline constexpr uint32_t all_modes = 7;
+
+inline uint32_t get_mask()
+{
+    const auto mask = static_cast<uint32_t>(fb2k::configStore::get()->getConfigInt(config_key, all_modes)) & all_modes;
+    return mask ? mask : 1u;
+}
+
+inline void set_mask(uint32_t mask)
+{
+    fb2k::configStore::get()->setConfigInt(config_key, mask & all_modes ? mask & all_modes : 1u);
+}
+
+inline constexpr uint32_t bit_of(NowPlayingMode mode)
+{
+    return 1u << (static_cast<uint32_t>(mode) - 1);
+}
+} // namespace now_playing_modes
+
+// 勾選改了之後呼叫（主執行緒）：目前的模式被取消勾選就換成第一個還勾著的，並重排展開頁
+void on_now_playing_modes_changed();
+
+// 版面裡有沒有 VU 表可以用（「展開頁右側」面板＋main.xml 標記的歌詞欄位置）。主執行緒
+bool is_vu_mode_available();
+
 } // namespace cui::main_menu
