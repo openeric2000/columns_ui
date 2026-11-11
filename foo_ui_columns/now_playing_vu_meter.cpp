@@ -40,10 +40,24 @@ constexpr double lamp_fade_seconds = 0.4;
 // 二階系統：99% 到位約 300 毫秒、過衝約 1.5%（阻尼比 0.8）
 constexpr double damping_ratio = 0.8;
 constexpr double natural_frequency = 4.6 / (damping_ratio * 0.3);
+// 沒訊號（暫停、停止）時的回落：約 0.5 秒落到一半、2 秒左右回到左邊停住（阻尼比 0.8、自然頻率 3.4）。
+// 第一版用「1.1 秒停穩」算，但大部分路程在前 0.3 秒就走完，看起來還是一下就掉回去（2026-11-11 實測）
+constexpr double rest_damping_ratio = 0.8;
+constexpr double rest_frequency = 3.4;
+// 兩端擋針的位置與反彈
+constexpr double stop_low = -0.02;
+constexpr double stop_high = 1.06;
+constexpr double stop_bounce = 0.3;
+
+// 大小：照歌詞欄算出的位置（cover_zoom::vu_rect_in_stage）以中心放大這麼多倍，
+// 但左邊至少離封面 min_cover_gap_dip、右邊不超出展開頁（2026-11-11 使用者說可以再放大一點）
+constexpr double size_scale = 1.25;
+constexpr int min_cover_gap_dip = 56;
+constexpr int min_right_gap_dip = 32;
 
 // ---- 外觀（以錶框高 157 為基準的像素，實際乘上 scale）----
 constexpr float base_height = 157.f;
-constexpr float gap_px = 10.f;          // 左右兩個錶框的間距
+constexpr float gap_px = 22.f;          // 左右兩個錶框的間距（2026-11-11 使用者要再分開一點，10→22）
 constexpr float radius_px = 16.f;       // 錶框圓角
 constexpr float bezel_px = 10.f;        // 玻璃邊緣折射的寬度
 constexpr float refraction_px = 8.f;    // 邊緣最大位移
@@ -203,6 +217,34 @@ Gdiplus::PointF point_at(const Geometry& m, double angle, float r)
     return {m.cx + r * static_cast<float>(std::sin(angle)), m.cy - r * static_cast<float>(std::cos(angle))};
 }
 
+// 兩個錶框合起來的位置（展開頁左上角為原點）：歌詞欄算出的 VU 位置以中心放大 size_scale 倍，
+// 左右放不下就縮回、再往空的那邊挪
+std::optional<RECT> meter_rect_in_stage(int stage_width, int stage_height)
+{
+    const auto base = cover_zoom::vu_rect_in_stage(stage_width, stage_height);
+    if (!base)
+        return {};
+
+    auto min_left = 0;
+    if (const auto cover = cover_zoom::cover_rect_in_stage(stage_width, stage_height))
+        min_left = cover->right + uih::scale_dpi_value(min_cover_gap_dip);
+    min_left = std::min(min_left, static_cast<int>(base->left));
+    const auto max_right = std::max(stage_width - uih::scale_dpi_value(min_right_gap_dip), static_cast<int>(base->right));
+
+    const auto base_w = static_cast<int>(base->right - base->left);
+    const auto room = max_right - min_left;
+    const auto width = std::clamp(static_cast<int>(std::lround(base_w * size_scale)), base_w, std::max(base_w, room));
+    const auto height = MulDiv(width, static_cast<int>(base->bottom - base->top), base_w);
+    if (height <= 0 || height > stage_height)
+        return base;
+
+    const auto centre = (base->left + base->right) / 2;
+    auto left = static_cast<int>(centre - width / 2);
+    left = std::clamp(left, min_left, std::max(min_left, max_right - width));
+    const auto top = (stage_height - height) / 2;
+    return RECT{left, top, left + width, top + height};
+}
+
 RECT compute_window_rect(const RECT& bar_rect)
 {
     if (bar_rect.right <= bar_rect.left)
@@ -215,7 +257,7 @@ RECT compute_window_rect(const RECT& bar_rect)
     if (main_menu::get_now_playing_mode() != main_menu::NowPlayingMode::vu)
         return {};
 
-    const auto vu = cover_zoom::vu_rect_in_stage(bar_rect.right - bar_rect.left, bar_rect.top);
+    const auto vu = meter_rect_in_stage(bar_rect.right - bar_rect.left, bar_rect.top);
     if (!vu)
         return {};
 
@@ -868,7 +910,8 @@ bool update_needles(State& state, double dt)
     double targets[2]{};
     double peaks[2]{};
     const auto playback = play_control::get();
-    if (playback->is_playing() && !playback->is_paused()) {
+    const auto live = playback->is_playing() && !playback->is_paused();
+    if (live) {
         if (!state.stream) {
             try {
                 visualisation_manager::get()->create_stream(state.stream, 0);
@@ -902,7 +945,10 @@ bool update_needles(State& state, double dt)
     }
 
     const auto lamp_threshold = std::pow(10.0, peak_lamp_dbfs / 20.0);
-    const auto omega = natural_frequency;
+    // 暫停／停止時沒有訊號：改用比較慢、阻尼小一點的回落（約 1.1 秒），像錶頭的彈簧把指針慢慢拉回去
+    // （2026-11-11 使用者說暫停時指針「沒緩衝地」直接回 0，不夠真實）
+    const auto omega = live ? natural_frequency : rest_frequency;
+    const auto zeta = live ? damping_ratio : rest_damping_ratio;
     bool changed = false;
     for (int side = 0; side < 2; ++side) {
         auto& needle = state.needles[side];
@@ -913,15 +959,16 @@ bool update_needles(State& state, double dt)
         const auto h = dt / steps;
         for (int step = 0; step < steps; ++step) {
             const auto acceleration
-                = omega * omega * (target - needle.pos) - 2.0 * damping_ratio * omega * needle.velocity;
+                = omega * omega * (target - needle.pos) - 2.0 * zeta * omega * needle.velocity;
             needle.velocity += acceleration * h;
             needle.pos += needle.velocity * h;
-            if (needle.pos < -0.02) {
-                needle.pos = -0.02;
-                needle.velocity = std::max(0.0, needle.velocity);
-            } else if (needle.pos > 1.06) {
-                needle.pos = 1.06;
-                needle.velocity = std::min(0.0, needle.velocity);
+            // 碰到兩端的擋針會小彈一下（反彈三成），速度很小就停住
+            if (needle.pos < stop_low) {
+                needle.pos = stop_low;
+                needle.velocity = needle.velocity < -0.05 ? -needle.velocity * stop_bounce : std::max(0.0, needle.velocity);
+            } else if (needle.pos > stop_high) {
+                needle.pos = stop_high;
+                needle.velocity = needle.velocity > 0.05 ? -needle.velocity * stop_bounce : std::min(0.0, needle.velocity);
             }
         }
         if (peaks[side] >= lamp_threshold) {
@@ -968,8 +1015,7 @@ void apply_layout(HWND wnd)
             ShowWindow(wnd, SW_HIDE);
         state->window_rect = target;
         if (width != state->width || height != state->height || moved) {
-            const auto vu = cover_zoom::vu_rect_in_stage(
-                state->bar_rect.right - state->bar_rect.left, state->bar_rect.top);
+            const auto vu = meter_rect_in_stage(state->bar_rect.right - state->bar_rect.left, state->bar_rect.top);
             const auto scale = vu ? static_cast<float>(vu->bottom - vu->top) / base_height : 1.f;
             rebuild_geometry(*state, width, height, scale);
         }
