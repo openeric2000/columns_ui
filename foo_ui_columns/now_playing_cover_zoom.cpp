@@ -26,11 +26,13 @@ constexpr int stage_min_height_dip = 300; // main.xml 的 stage min-height：比
 // 平常不搶封面（2026-11-09 使用者看了 .45 深色圓底、再淡的圓底都說還是一圈很明顯，最後定案「平常不要圓底、只留雙箭頭」）：
 // 平常只畫箭頭（白 .24），底下墊一層往右下偏 1 DIP 的淡黑陰影，白色或很淺的封面上才認得出來；
 // 滑過、按下才出現深色圓底（.59／.71）與全白箭頭
-const Gdiplus::Color disc_hot_colour(150, 0, 0, 0);
-const Gdiplus::Color disc_pressed_colour(180, 0, 0, 0);
+// 2026-11-11 使用者說滑過時也太明顯：圓底 .59→.18、箭頭全白→.59（按下圓底 .71→.27、箭頭 .75）；淡陰影一直都畫
+const Gdiplus::Color disc_hot_colour(46, 0, 0, 0);
+const Gdiplus::Color disc_pressed_colour(70, 0, 0, 0);
 const Gdiplus::Color icon_colour(61, 241, 241, 241);
 const Gdiplus::Color icon_shadow_colour(46, 0, 0, 0);
-const Gdiplus::Color icon_hot_colour(255, 255, 255, 255);
+const Gdiplus::Color icon_hot_colour(150, 255, 255, 255);
+const Gdiplus::Color icon_pressed_colour(190, 255, 255, 255);
 
 // 出現時淡入（2026-11-09 使用者回報：展開頁滑完停住的那一格按鈕才突然冒出來，像彈一下）。
 // 展開動畫是一張往上滑的截圖，截圖時按鈕還藏著，所以按鈕沒辦法跟著滑上來；改成停住後用這段時間淡入
@@ -418,15 +420,15 @@ private:
         format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
         const Gdiplus::RectF box(0.f, 0.f, static_cast<float>(width), static_cast<float>(height));
 
-        // 平常（沒有圓底）先畫淡黑陰影，亮色封面上才看得出箭頭
-        if (!lit) {
+        // 先畫淡黑陰影，亮色封面上才看得出箭頭（滑過時圓底也很淡，所以一直都畫）
+        {
             const auto offset = dip_f(1.f);
             const Gdiplus::SolidBrush shadow(icon_shadow_colour);
             g.DrawString(L"\xE740", -1, &font, Gdiplus::RectF(box.X + offset, box.Y + offset, box.Width, box.Height),
                 &format, &shadow);
         }
 
-        const Gdiplus::SolidBrush brush(lit ? icon_hot_colour : icon_colour);
+        const Gdiplus::SolidBrush brush(m_pressed ? icon_pressed_colour : (lit ? icon_hot_colour : icon_colour));
         // E740＝全螢幕（四角往外的箭頭）
         g.DrawString(L"\xE740", -1, &font, box, &format, &brush);
     }
