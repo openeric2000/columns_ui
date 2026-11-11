@@ -37,6 +37,20 @@ inline constexpr Style style_default = Style::box;
 Style get_style();
 void set_style(Style style);
 
+// 指針設定（2026-11-12 使用者要「幾種適合的指針設定」放進右鍵挑選卡）：校準與反應速度的組合，數值見 needle_tunings
+enum class NeedlePreset : int {
+    standard = 0,  // 標準：0 VU = −7 dBFS、300 毫秒
+    lively = 1,    // 活潑：−10 dBFS、300 毫秒
+    snappy = 2,    // 靈敏：−10 dBFS、150 毫秒
+    automatic = 3, // 自動：跟著歌曲平均音量校準、300 毫秒
+};
+inline constexpr int needle_preset_count = 4;
+inline constexpr char needle_preset_config_key[] = "nocturne.vuMeter.needle";
+inline constexpr NeedlePreset needle_preset_default = NeedlePreset::standard;
+
+NeedlePreset get_needle_preset();
+void set_needle_preset(NeedlePreset preset);
+
 HWND create(HWND parent);
 void layout(HWND wnd, const RECT& bar_rect);
 HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);

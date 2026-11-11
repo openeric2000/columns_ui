@@ -184,6 +184,9 @@ inline constexpr wchar_t lyrics_lock_note[]
 inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
 inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
 inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
+inline constexpr wchar_t vu_needle_title[] = L"Needle";
+inline constexpr wchar_t vu_needle_names[4][16] = {L"Standard", L"Lively", L"Snappy", L"Auto"};
+inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"Follows the song"};
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "Main Menu Button";
@@ -386,6 +389,9 @@ inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左�
 inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
 inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
 inline constexpr wchar_t vu_backlight[] = L"暖色背光";
+inline constexpr wchar_t vu_needle_title[] = L"指針";
+inline constexpr wchar_t vu_needle_names[4][16] = {L"標準", L"活潑", L"靈敏", L"自動"};
+inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"跟著歌曲音量"};
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "主選單按鈕";

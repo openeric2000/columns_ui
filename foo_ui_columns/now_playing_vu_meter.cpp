@@ -36,19 +36,38 @@ constexpr UINT recapture_late_delay_ms = 1800;
 constexpr ULONGLONG fade_in_ms = 180;
 
 // ---- 校準與指針動態 ----
-// 平均音量（RMS）−7 dBFS＝0 VU（使用者 2026-11-11 先用 C 組：外掛 VU 增益 +7）
-constexpr double reference_dbfs = -7.0;
 // 刻度最右邊是 +3 VU
 constexpr double scale_top_vu = 3.0;
 // 峰值燈：瞬間峰值到 −1 dBFS 就亮
 constexpr double peak_lamp_dbfs = -1.0;
 constexpr double lamp_hold_seconds = 0.15;
 constexpr double lamp_fade_seconds = 0.4;
-// 二階系統：99% 到位約 300 毫秒、過衝約 1.3%（阻尼比 0.8）
-constexpr double damping_ratio = 0.8;
-// 2026-11-12 實測修正：原本用 4.6／(ζ·0.3)（「1% 包絡線」的穩定時間公式）算出 19.2，指針約 210 毫秒就到 99%，比 VU 規格快三成；
-// VU 規格是「階躍輸入 300 毫秒到 99%」，阻尼比 0.8 時自然頻率 13.2 才剛好 300 毫秒（模擬：每格 16 毫秒 300 ms、過衝 1.3%）
-constexpr double natural_frequency = 13.2;
+// 指針設定（右鍵挑選卡「指針」那排，2026-11-12）：0 VU 對到多少 dBFS（平均音量 RMS），與二階系統的自然頻率、阻尼比。
+// - 標準：−7 dBFS（使用者 2026-11-11 先用的 C 組：外掛 VU 增益 +7）、VU 規格 300 毫秒到 99%
+//   （2026-11-12 實測修正：原本用 4.6／(ζ·0.3)「1% 包絡線」公式算出 19.2，約 210 毫秒就到 99%，比規格快三成；ζ 0.8 時 13.2 才剛好 300 毫秒、過衝 1.3%）
+// - 活潑：−10 dBFS、300 毫秒（響亮的歌副歌會碰到 0、偶爾進紅區）
+// - 靈敏：−10 dBFS、150 毫秒到 99%（ζ 0.72、過衝約 3%），擺幅約大一倍，比較不像真 VU
+// - 自動：0 VU 跟著歌曲長時間平均音量走（update_auto_reference），反應同標準
+struct NeedleTuning {
+    double reference_dbfs;
+    double natural_frequency;
+    double damping_ratio;
+    bool automatic;
+};
+constexpr NeedleTuning needle_tunings[needle_preset_count] = {
+    {-7.0, 13.2, 0.8, false},
+    {-10.0, 13.2, 0.8, false},
+    {-10.0, 22.2, 0.72, false},
+    {-7.0, 13.2, 0.8, true},
+};
+// 自動校準
+constexpr double auto_gate_dbfs = -45.0;       // 比這小聲的片段不算進平均
+constexpr double auto_average_vu_offset = 3.0; // 平均音量對到 −3 VU
+constexpr double auto_reference_min = -20.0;
+constexpr double auto_reference_max = -4.0;
+constexpr double auto_fast_seconds = 1.5;
+constexpr double auto_slow_seconds = 8.0;
+constexpr double auto_warm_seconds = 3.0;
 // 沒訊號（暫停、停止）時的回落：阻尼比 0.8、自然頻率 3.4。2026-11-12 實測（從 −11 VU 暫停）：約 0.35 秒落到一半、1.1 秒回到左邊停住、不反彈。
 // 第一版用「1.1 秒停穩」算，但大部分路程在前 0.3 秒就走完，看起來還是一下就掉回去（2026-11-11 實測）
 constexpr double rest_damping_ratio = 0.8;
@@ -159,6 +178,10 @@ struct State {
     std::vector<float> specular;
 
     Needle needles[2];
+    // 「自動」校準：長時間平均功率、這首歌已經量了幾秒、目前 0 VU 對到的 dBFS
+    double auto_power{};
+    double auto_warm{};
+    double auto_reference{-7.0};
     visualisation_stream::ptr stream;
     ULONGLONG last_tick{};
     ULONGLONG shown_at{};
@@ -251,6 +274,16 @@ Style& cached_style()
         return value >= 0 && value < style_count ? static_cast<Style>(value) : style_default;
     }();
     return style;
+}
+
+NeedlePreset& cached_needle_preset()
+{
+    static NeedlePreset preset = [] {
+        const auto value
+            = fb2k::configStore::get()->getConfigInt(needle_preset_config_key, static_cast<int>(needle_preset_default));
+        return value >= 0 && value < needle_preset_count ? static_cast<NeedlePreset>(value) : needle_preset_default;
+    }();
+    return preset;
 }
 
 // ---- 版面 ----
@@ -828,7 +861,11 @@ void draw_face_text(Gdiplus::Graphics& g, const State& state, int index, const G
     const auto style = regular_style(family);
     const auto bold = bold_style(family);
     wchar_t reference[64]{};
-    swprintf_s(reference, L"0 VU = −%d dBFS", static_cast<int>(std::lround(-reference_dbfs)));
+    const auto& tuning = needle_tunings[static_cast<int>(cached_needle_preset())];
+    if (tuning.automatic)
+        swprintf_s(reference, L"0 VU = AUTO");
+    else
+        swprintf_s(reference, L"0 VU = −%d dBFS", static_cast<int>(std::lround(-tuning.reference_dbfs)));
     const Gdiplus::Color vu_colour(204, 244, 240, 230);
     const Gdiplus::Color channel_colour(158, 244, 240, 230);
     const Gdiplus::Color faint(122, 244, 240, 230);
@@ -1406,62 +1443,103 @@ void present(HWND wnd, State& state, bool content_changed = true)
 
 #if defined(NOCTURNE_BUILD_DEV)
 // 開發版才有的指針動態紀錄（2026-11-12 使用者要觀察播歌時指針跳動是否符合預期）：
-// 環境變數 NOCTURNE_VU_LOG＝CSV 檔路徑時，從第一次有訊號起記 25 秒每一格的目標值、指針位置、峰值與峰值燈，
-// 記完一次寫檔（中途不碰磁碟）；沒設環境變數就什麼都不做
+// 環境變數 NOCTURNE_VU_LOG＝CSV 檔路徑（當前綴用）時，從有訊號起每段記 25 秒每一格的原始音量、校準、目標值、指針位置、
+// 峰值與峰值燈，存成「<路徑去掉 .csv>_p<指針設定>_<第幾段>.csv」；換指針設定就結束這段、另開一段。
+// 只在段落結束時寫檔（中途不碰磁碟）；沒設環境變數就什麼都不做
 struct NeedleLog {
     bool checked{};
-    bool done{};
-    std::wstring path;
+    bool disabled{};
+    std::wstring prefix;
     LARGE_INTEGER frequency{};
     LARGE_INTEGER start{};
+    int preset{-1};
+    int segment{};
+    bool finished{}; // 這個指針設定已經記完一段，等換設定才再記
     std::string rows;
 };
 
-void log_needles(const State& state, double dt, const double* targets, const double* peaks, bool live)
+void flush_needle_log(NeedleLog& log)
+{
+    if (log.rows.empty())
+        return;
+    wchar_t path[MAX_PATH]{};
+    swprintf_s(path, L"%s_p%d_%d.csv", log.prefix.c_str(), log.preset, ++log.segment);
+    FILE* file{};
+    if (_wfopen_s(&file, path, L"w") == 0 && file) {
+        fwrite(log.rows.data(), 1, log.rows.size(), file);
+        fclose(file);
+    }
+    log.rows.clear();
+}
+
+void log_needles(const State& state, double dt, const double* rms, double reference, const double* targets,
+    const double* peaks, bool live)
 {
     static NeedleLog log;
-    if (log.done)
+    if (log.disabled)
         return;
     if (!log.checked) {
         log.checked = true;
         wchar_t path[MAX_PATH]{};
         if (!GetEnvironmentVariable(L"NOCTURNE_VU_LOG", path, MAX_PATH)) {
-            log.done = true;
+            log.disabled = true;
             return;
         }
-        log.path = path;
+        log.prefix = path;
+        if (log.prefix.size() > 4 && _wcsicmp(log.prefix.c_str() + log.prefix.size() - 4, L".csv") == 0)
+            log.prefix.resize(log.prefix.size() - 4);
         QueryPerformanceFrequency(&log.frequency);
     }
-    if (!live && log.start.QuadPart == 0)
+    const auto preset = static_cast<int>(get_needle_preset());
+    if (preset != log.preset) {
+        flush_needle_log(log);
+        log.preset = preset;
+        log.start.QuadPart = 0;
+        log.finished = false;
+    }
+    if (log.finished || (!live && log.start.QuadPart == 0))
         return;
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     if (log.start.QuadPart == 0) {
         log.start = now;
-        log.rows = "t_ms,dt_ms,live,style,target_l,pos_l,target_r,pos_r,peak_l,peak_r,lamp_l,lamp_r\n";
+        log.rows = "t_ms,dt_ms,live,style,preset,ref_db,rms_l,rms_r,target_l,pos_l,target_r,pos_r,peak_l,peak_r,lamp_l,lamp_r\n";
     }
     const auto t = (now.QuadPart - log.start.QuadPart) * 1000.0 / log.frequency.QuadPart;
-    char line[256]{};
-    sprintf_s(line, "%.1f,%.1f,%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f\n", t, dt * 1000.0, live ? 1 : 0,
-        static_cast<int>(state.style), targets[0], state.needles[0].pos, targets[1], state.needles[1].pos, peaks[0],
-        peaks[1], state.needles[0].lamp, state.needles[1].lamp);
+    char line[320]{};
+    sprintf_s(line, "%.1f,%.1f,%d,%d,%d,%.2f,%.5f,%.5f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.2f,%.2f\n", t, dt * 1000.0,
+        live ? 1 : 0, static_cast<int>(state.style), preset, reference, rms[0], rms[1], targets[0], state.needles[0].pos,
+        targets[1], state.needles[1].pos, peaks[0], peaks[1], state.needles[0].lamp, state.needles[1].lamp);
     log.rows += line;
     if (t < 25000.0)
         return;
-    log.done = true;
-    FILE* file{};
-    if (_wfopen_s(&file, log.path.c_str(), L"w") == 0 && file) {
-        fwrite(log.rows.data(), 1, log.rows.size(), file);
-        fclose(file);
-    }
+    flush_needle_log(log);
+    log.finished = true;
 }
 #endif
+
+// 「自動」校準：把長時間平均音量（功率平均，低於 −45 dBFS 的安靜片段不算）對到 −3 VU，
+// 0 VU 的位置限制在 −20～−4 dBFS。剛開始或換歌後前 3 秒用 1.5 秒時間常數快速找到位置，之後用 8 秒慢慢跟，
+// 所以一首歌裡的大小聲起伏還是看得出來（2026-11-12 用兩首實錄離線模擬：安靜配樂與響亮流行都落在 −4～−3 VU 中位）
+void update_auto_reference(State& state, double dt, const double* rms)
+{
+    const auto power = (rms[0] * rms[0] + rms[1] * rms[1]) / 2.0;
+    if (power <= std::pow(10.0, auto_gate_dbfs / 10.0))
+        return;
+    const auto tau = state.auto_warm < auto_warm_seconds ? auto_fast_seconds : auto_slow_seconds;
+    state.auto_power = state.auto_power <= 0 ? power : state.auto_power + (power - state.auto_power) * std::min(1.0, dt / tau);
+    state.auto_warm += dt;
+    state.auto_reference
+        = std::clamp(10.0 * std::log10(state.auto_power) + auto_average_vu_offset, auto_reference_min, auto_reference_max);
+}
 
 // 讀這一格的音量，更新兩支指針；有動到要重畫就傳回 true
 bool update_needles(State& state, double dt)
 {
+    double rms[2]{};
     double targets[2]{};
     double peaks[2]{};
+    const auto& tuning = needle_tunings[static_cast<int>(get_needle_preset())];
     const auto playback = play_control::get();
     const auto live = playback->is_playing() && !playback->is_paused();
     if (live) {
@@ -1480,7 +1558,6 @@ bool update_needles(State& state, double dt)
             const auto samples = static_cast<size_t>(chunk.get_sample_count());
             const auto* data = chunk.get_data();
             if (channels > 0 && samples > 0 && data) {
-                const auto gain = std::pow(10.0, -reference_dbfs / 20.0) / std::pow(10.0, scale_top_vu / 20.0);
                 for (int side = 0; side < 2; ++side) {
                     const auto channel = std::min(side, channels - 1);
                     double sum = 0;
@@ -1490,18 +1567,25 @@ bool update_needles(State& state, double dt)
                         sum += value * value;
                         peak = std::max(peak, std::abs(value));
                     }
-                    targets[side] = std::sqrt(sum / samples) * gain;
+                    rms[side] = std::sqrt(sum / samples);
                     peaks[side] = peak;
                 }
+                if (tuning.automatic)
+                    update_auto_reference(state, dt, rms);
             }
         }
     }
 
+    const auto reference = tuning.automatic ? state.auto_reference : tuning.reference_dbfs;
+    const auto gain = std::pow(10.0, -reference / 20.0) / std::pow(10.0, scale_top_vu / 20.0);
+    for (int side = 0; side < 2; ++side)
+        targets[side] = rms[side] * gain;
+
     const auto lamp_threshold = std::pow(10.0, peak_lamp_dbfs / 20.0);
     // 暫停／停止時沒有訊號：改用比較慢、阻尼小一點的回落（約 1.1 秒），像錶頭的彈簧把指針慢慢拉回去
     // （2026-11-11 使用者說暫停時指針「沒緩衝地」直接回 0，不夠真實）
-    const auto omega = live ? natural_frequency : rest_frequency;
-    const auto zeta = live ? damping_ratio : rest_damping_ratio;
+    const auto omega = live ? tuning.natural_frequency : rest_frequency;
+    const auto zeta = live ? tuning.damping_ratio : rest_damping_ratio;
     bool changed = false;
     for (int side = 0; side < 2; ++side) {
         auto& needle = state.needles[side];
@@ -1536,7 +1620,7 @@ bool update_needles(State& state, double dt)
             changed = true;
     }
 #if defined(NOCTURNE_BUILD_DEV)
-    log_needles(state, dt, targets, peaks, live);
+    log_needles(state, dt, rms, reference, targets, peaks, live);
 #endif
     return changed;
 }
@@ -1705,7 +1789,11 @@ constexpr float tile_gap_dip = 12.f;
 constexpr float label_h_dip = 30.f;
 constexpr float row_h_dip = 40.f;
 constexpr float radius_dip = 14.f;
-constexpr int backlight_hit = style_count;
+constexpr int backlight_hit = 50;
+constexpr int needle_hit_base = 100; // 指針設定那排：100＋第幾個
+constexpr float section_h_dip = 26.f;
+constexpr float chip_h_dip = 46.f;
+constexpr float chip_gap_dip = 8.f;
 // 縮圖由左到右的順序（2026-11-12 使用者要單錶雙指針跟圓形互換位置）；存的設定值仍是 Style 的數字
 constexpr Style display_order[style_count] = {Style::box, Style::dual, Style::round};
 
@@ -1718,6 +1806,8 @@ struct Picker {
     Gdiplus::RectF card;
     Gdiplus::RectF tiles[style_count];
     float divider_y{};
+    Gdiplus::RectF chips[needle_preset_count];
+    float divider2_y{};
     Gdiplus::RectF backlight_row;
     int thumb_w{};
     int thumb_h{};
@@ -1805,7 +1895,8 @@ void build_layout(Picker& p)
     p.thumb_h = static_cast<int>(px(tile_h_dip));
     const auto gap = px(tile_gap_dip);
     const auto card_w = 2 * pad + style_count * p.thumb_w + (style_count - 1) * gap;
-    const auto card_h = px(title_h_dip) + p.thumb_h + px(label_h_dip) + px(8) + px(row_h_dip) + px(10);
+    const auto card_h = px(title_h_dip) + p.thumb_h + px(label_h_dip) + px(4) + px(section_h_dip) + px(chip_h_dip)
+        + px(14) + px(row_h_dip) + px(10);
     p.card = {sh, sh - px(4), card_w, card_h};
     p.width = static_cast<int>(card_w + 2 * sh);
     p.height = static_cast<int>(card_h + 2 * sh);
@@ -1813,7 +1904,15 @@ void build_layout(Picker& p)
         p.tiles[i] = {p.card.X + pad + i * (p.thumb_w + gap), p.card.Y + px(title_h_dip),
             static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
     p.divider_y = p.tiles[0].Y + p.thumb_h + px(label_h_dip) + px(4);
-    p.backlight_row = {p.card.X + px(8), p.divider_y + px(5), card_w - px(16), px(row_h_dip) - px(6)};
+    // 指針設定：小標題＋一排四個按鈕（跟縮圖同寬）
+    const auto chips_y = p.divider_y + px(section_h_dip);
+    const auto chip_gap = px(chip_gap_dip);
+    const auto inner_w = card_w - 2 * pad;
+    const auto chip_w = std::floor((inner_w - (needle_preset_count - 1) * chip_gap) / needle_preset_count);
+    for (int i = 0; i < needle_preset_count; ++i)
+        p.chips[i] = {p.card.X + pad + i * (chip_w + chip_gap), chips_y, chip_w, px(chip_h_dip)};
+    p.divider2_y = chips_y + px(chip_h_dip) + px(10);
+    p.backlight_row = {p.card.X + px(8), p.divider2_y + px(5), card_w - px(16), px(row_h_dip) - px(6)};
 
     // 陰影：卡片形狀往下 6、模糊
     std::vector<float> mask(static_cast<size_t>(p.width) * p.height, 0.f);
@@ -1841,6 +1940,11 @@ int hit_test(const Picker& p, POINT pt)
         if (fx >= t.X - half_gap && fx < t.X + t.Width + half_gap && fy >= t.Y - 4.f * p.k
             && fy < t.Y + t.Height + label_h_dip * p.k)
             return i;
+    }
+    for (int i = 0; i < needle_preset_count; ++i) {
+        const auto& c = p.chips[i];
+        if (fx >= c.X && fx < c.X + c.Width && fy >= c.Y && fy < c.Y + c.Height)
+            return needle_hit_base + i;
     }
     const auto& r = p.backlight_row;
     if (fx >= r.X && fx < r.X + r.Width && fy >= r.Y && fy < r.Y + r.Height)
@@ -1928,6 +2032,31 @@ void render(Picker& p)
         const Gdiplus::Pen divider(rgba(255, 255, 255, 0.08), 1.f * k);
         g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider_y, p.card.X + p.card.Width - pad_dip * k, p.divider_y);
 
+        // 指針設定：小標題＋四個按鈕（名稱＋一行小字說明），選中的暖色框
+        draw_text(g, nocturne_text::vu_needle_title, title_font, rgba(244, 240, 230, 0.55),
+            {p.card.X + pad_dip * k, p.divider_y + section_h_dip * k / 2.f + 1.f * k}, Gdiplus::StringAlignmentNear, k);
+        const Gdiplus::Font detail_font(family.get(), 11.f * k, regular_style(*family), Gdiplus::UnitPixel);
+        const auto chosen = static_cast<int>(get_needle_preset());
+        for (int i = 0; i < needle_preset_count; ++i) {
+            const auto& c = p.chips[i];
+            const auto hovered = p.hover == needle_hit_base + i;
+            Gdiplus::GraphicsPath chip_path;
+            add_panel_path(chip_path, c, 10.f * k);
+            const Gdiplus::SolidBrush chip_fill(
+                i == chosen ? rgba(240, 190, 120, 0.14) : rgba(255, 255, 255, hovered ? 0.07 : 0.035));
+            g.FillPath(&chip_fill, &chip_path);
+            const Gdiplus::Pen chip_pen(i == chosen ? rgba(240, 190, 120, 0.95) : rgba(255, 255, 255, hovered ? 0.30 : 0.10),
+                (i == chosen ? 1.5f : 1.f) * k);
+            g.DrawPath(&chip_pen, &chip_path);
+            draw_text(g, nocturne_text::vu_needle_names[i], i == chosen ? label_bold : label_font,
+                i == chosen ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.65),
+                {c.X + c.Width / 2.f, c.Y + 16.f * k}, Gdiplus::StringAlignmentCenter, k);
+            draw_text(g, nocturne_text::vu_needle_details[i], detail_font,
+                rgba(244, 240, 230, i == chosen ? 0.70 : 0.42), {c.X + c.Width / 2.f, c.Y + 33.f * k},
+                Gdiplus::StringAlignmentCenter, k);
+        }
+        g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider2_y, p.card.X + p.card.Width - pad_dip * k, p.divider2_y);
+
         // 暖色背光：開關＋文字，整行都可以點
         const auto& row = p.backlight_row;
         if (p.hover == backlight_hit) {
@@ -2009,6 +2138,9 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (hit >= 0 && hit < style_count) {
             if (display_order[hit] != get_style())
                 set_style(display_order[hit]);
+            render(p);
+        } else if (hit >= needle_hit_base && hit < needle_hit_base + needle_preset_count) {
+            set_needle_preset(static_cast<NeedlePreset>(hit - needle_hit_base));
             render(p);
         } else if (hit == backlight_hit) {
             set_backlight_enabled(!is_backlight_enabled());
@@ -2306,6 +2438,9 @@ public:
             SetTimer(wnd, recapture_timer_id, recapture_delay_ms, nullptr);
             SetTimer(wnd, recapture_late_timer_id, recapture_late_delay_ms, nullptr);
         }
+        // 換歌：「自動」校準重新快速找位置（保留上一首的平均當起點，同一張專輯不會跳）
+        for (const auto& [wnd, state] : states())
+            state->auto_warm = 0;
     }
     void on_playback_starting(play_control::t_track_command command, bool paused) override {}
     void on_playback_stop(play_control::t_stop_reason reason) override {}
@@ -2330,6 +2465,23 @@ bool is_backlight_enabled()
 void set_backlight_enabled(bool enabled)
 {
     fb2k::configStore::get()->setConfigBool(backlight_config_key, enabled);
+    for (const auto& [wnd, state] : states())
+        state->static_dirty = true;
+    refresh_layouts();
+}
+
+NeedlePreset get_needle_preset()
+{
+    return cached_needle_preset();
+}
+
+void set_needle_preset(NeedlePreset preset)
+{
+    if (static_cast<int>(preset) < 0 || static_cast<int>(preset) >= needle_preset_count)
+        preset = needle_preset_default;
+    cached_needle_preset() = preset;
+    fb2k::configStore::get()->setConfigInt(needle_preset_config_key, static_cast<int>(preset));
+    // 錶面的校準字（0 VU = …）要重畫
     for (const auto& [wnd, state] : states())
         state->static_dirty = true;
     refresh_layouts();
