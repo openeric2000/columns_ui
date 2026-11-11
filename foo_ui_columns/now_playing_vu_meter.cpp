@@ -1465,6 +1465,7 @@ int track_serial{};
 // 環境變數 NOCTURNE_VU_LOG＝CSV 檔路徑（當前綴用）時，從有訊號起每段記 60 秒每一格的原始音量、校準、目標值、指針位置、
 // 峰值與峰值燈，存成「<路徑去掉 .csv>_t<第幾首>_p<指針設定>.csv」；換歌或換指針設定就結束這段、另開一段
 // （2026-11-12 用三十幾首歌調指針與峰值燈時改成每首一段）。
+// 每段長度預設 60 秒，可用環境變數 NOCTURNE_VU_LOG_SECONDS 指定（同天使用者要看副歌與整首，設成 900 就是整首）。
 // 只在段落結束時寫檔（中途不碰磁碟）；沒設環境變數就什麼都不做
 struct NeedleLog {
     bool checked{};
@@ -1475,6 +1476,7 @@ struct NeedleLog {
     int preset{-1};
     int track{-1};
     bool finished{}; // 這個指針設定已經記完一段，等換設定才再記
+    double max_ms{60000.0};
     std::string rows;
 };
 
@@ -1509,6 +1511,9 @@ void log_needles(const State& state, double dt, const double* rms, double refere
         if (log.prefix.size() > 4 && _wcsicmp(log.prefix.c_str() + log.prefix.size() - 4, L".csv") == 0)
             log.prefix.resize(log.prefix.size() - 4);
         QueryPerformanceFrequency(&log.frequency);
+        wchar_t seconds[32]{};
+        if (GetEnvironmentVariable(L"NOCTURNE_VU_LOG_SECONDS", seconds, 32) && _wtof(seconds) > 0)
+            log.max_ms = _wtof(seconds) * 1000.0;
     }
     const auto preset = static_cast<int>(get_needle_preset());
     if (preset != log.preset || track_serial != log.track) {
@@ -1532,7 +1537,7 @@ void log_needles(const State& state, double dt, const double* rms, double refere
         live ? 1 : 0, static_cast<int>(state.style), preset, reference, rms[0], rms[1], targets[0], state.needles[0].pos,
         targets[1], state.needles[1].pos, peaks[0], peaks[1], state.needles[0].lamp, state.needles[1].lamp);
     log.rows += line;
-    if (t < 60000.0)
+    if (t < log.max_ms)
         return;
     flush_needle_log(log);
     log.finished = true;
