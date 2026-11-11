@@ -38,7 +38,7 @@ constexpr ULONGLONG fade_in_ms = 180;
 // ---- 校準與指針動態 ----
 // 刻度最右邊是 +3 VU
 constexpr double scale_top_vu = 3.0;
-// 峰值燈：瞬間峰值到 −1 dBFS 就亮
+// 峰值燈：固定校準的設定是瞬間峰值到 −1 dBFS 就亮（破音警示）；「自動」改看短時間音量，見 auto_lamp_vu
 constexpr double peak_lamp_dbfs = -1.0;
 constexpr double lamp_hold_seconds = 0.15;
 constexpr double lamp_fade_seconds = 0.4;
@@ -62,12 +62,18 @@ constexpr NeedleTuning needle_tunings[needle_preset_count] = {
 };
 // 自動校準
 constexpr double auto_gate_dbfs = -45.0;       // 比這小聲的片段不算進平均
-constexpr double auto_average_vu_offset = 3.0; // 平均音量對到 −3 VU
+constexpr double auto_average_vu_offset = 2.0; // 平均音量對到 −2 VU
 constexpr double auto_reference_min = -20.0;
 constexpr double auto_reference_max = -4.0;
 constexpr double auto_fast_seconds = 1.5;
 constexpr double auto_slow_seconds = 8.0;
+constexpr double auto_rise_seconds = 3.0; // 變大聲時跟得快一點
 constexpr double auto_warm_seconds = 3.0;
+// 「自動」的峰值燈：這一格（約 16 毫秒）的音量超過刻度右端 +3 VU 就亮＝「這一下大聲到爆表」。
+// 2026-11-12 使用者要燈跟著自動一起調整。原本看瞬間峰值：169 的歌疑似開 ReplayGain、母帶又壓到天花板，
+// 峰值幾乎全卡在同一個值（nazonazo 全在 −4.2 dBFS），門檻設在那之下就一直亮、之上就完全不亮，怎麼設都沒意義。
+// 用實錄離線模擬：nazonazo 約每分鐘 2 次、BRIDGES 漸強處約 5 次，前奏轉大聲的歌（Fighting My Way）轉折處會比較常亮
+constexpr double auto_lamp_vu = 3.0;
 // 沒訊號（暫停、停止）時的回落：阻尼比 0.8、自然頻率 3.4。2026-11-12 實測（從 −11 VU 暫停）：約 0.35 秒落到一半、1.1 秒回到左邊停住、不反彈。
 // 第一版用「1.1 秒停穩」算，但大部分路程在前 0.3 秒就走完，看起來還是一下就掉回去（2026-11-11 實測）
 constexpr double rest_damping_ratio = 0.8;
@@ -1518,15 +1524,19 @@ void log_needles(const State& state, double dt, const double* rms, double refere
 }
 #endif
 
-// 「自動」校準：把長時間平均音量（功率平均，低於 −45 dBFS 的安靜片段不算）對到 −3 VU，
-// 0 VU 的位置限制在 −20～−4 dBFS。剛開始或換歌後前 3 秒用 1.5 秒時間常數快速找到位置，之後用 8 秒慢慢跟，
-// 所以一首歌裡的大小聲起伏還是看得出來（2026-11-12 用兩首實錄離線模擬：安靜配樂與響亮流行都落在 −4～−3 VU 中位）
+// 「自動」校準：把長時間平均音量（功率平均，低於 −45 dBFS 的安靜片段不算）對到 −2 VU，
+// 0 VU 的位置限制在 −20～−4 dBFS。剛開始或換歌後前 3 秒用 1.5 秒時間常數快速找到位置，之後變大聲用 3 秒、變小聲用 8 秒跟，
+// 所以一首歌裡的大小聲起伏還是看得出來。2026-11-12 用三首實錄離線模擬調的：
+// 原本上下都 8 秒、對到 −3 VU 時，安靜前奏轉爆發的歌（Fighting My Way）轉折後好幾秒都偏高、峰值燈亮 19% 的時間；
+// 改成變大聲 3 秒、對到 −2 VU 後三首中位都在 −2.6～−3.3 VU，那首降到 16.5%，壓得很滿的 nazonazo 每分鐘閃約 2 次
 void update_auto_reference(State& state, double dt, const double* rms)
 {
     const auto power = (rms[0] * rms[0] + rms[1] * rms[1]) / 2.0;
     if (power <= std::pow(10.0, auto_gate_dbfs / 10.0))
         return;
-    const auto tau = state.auto_warm < auto_warm_seconds ? auto_fast_seconds : auto_slow_seconds;
+    const auto tau = state.auto_warm < auto_warm_seconds
+        ? auto_fast_seconds
+        : (state.auto_power > 0 && power > state.auto_power ? auto_rise_seconds : auto_slow_seconds);
     state.auto_power = state.auto_power <= 0 ? power : state.auto_power + (power - state.auto_power) * std::min(1.0, dt / tau);
     state.auto_warm += dt;
     state.auto_reference
@@ -1608,7 +1618,10 @@ bool update_needles(State& state, double dt)
                 needle.velocity = needle.velocity > 0.05 ? -needle.velocity * stop_bounce : std::min(0.0, needle.velocity);
             }
         }
-        if (peaks[side] >= lamp_threshold) {
+        const auto lamp_on = tuning.automatic
+            ? rms[side] > 0 && 20.0 * std::log10(rms[side]) - reference >= auto_lamp_vu
+            : peaks[side] >= lamp_threshold;
+        if (lamp_on) {
             needle.lamp = 1.0;
             needle.lamp_hold = lamp_hold_seconds;
         } else if (needle.lamp_hold > 0) {
