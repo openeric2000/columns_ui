@@ -10,8 +10,9 @@
 // - 指針：平均音量（RMS），0 VU＝−7 dBFS（同使用者先前選的 C 組：外掛 VU 增益 +7）；二階系統 300 毫秒到位、過衝 1.5%，左右分開
 // - 峰值燈：瞬間峰值到 −1 dBFS 亮紅，亮 150 毫秒後 0.4 秒內熄
 // - 只在展開頁完全展開、VU 表模式、版面標記有歌詞欄位置時顯示（位置同 cover_zoom::vu_rect_in_stage）；
-//   不擋滑鼠（點擊照常落到底下的 ESLyric）
+//   錶框以外不擋滑鼠（點擊照常落到底下的 ESLyric）；錶框上按右鍵開自己的樣式挑選卡（2026-11-12），滾輪照常轉給 ESLyric
 // - 視窗由 FlatSplitterPanel 在有播放列時建立，跟放大鈕同一批排版
+// - 2026-11-12 加了圓形錶頭、單錶雙指針兩種樣式（Style），共用同一套玻璃、指針動態與背景截取
 
 namespace cui::vu_meter {
 
@@ -21,6 +22,20 @@ inline constexpr bool backlight_default = true;
 
 bool is_backlight_enabled();
 void set_backlight_enabled(bool enabled);
+
+// 樣式（2026-11-12 使用者看五種預覽後選：方框雙錶之外加圓形錶頭與單錶雙指針，在錶上按右鍵、從挑選卡挑；使用者說不要放設定頁）
+// 存 fb2k 共用設定的整數；數字順序就是挑選卡縮圖的順序，之後新增只能加在後面
+enum class Style : int {
+    box = 0,   // 方框雙錶（原本這版）
+    round = 1, // 圓形錶頭：兩顆圓形玻璃錶，亮面軸心蓋
+    dual = 2,  // 單錶雙指針：一個寬錶，左聲道白、右聲道琥珀
+};
+inline constexpr int style_count = 3;
+inline constexpr char style_config_key[] = "nocturne.vuMeter.style";
+inline constexpr Style style_default = Style::box;
+
+Style get_style();
+void set_style(Style style);
 
 HWND create(HWND parent);
 void layout(HWND wnd, const RECT& bar_rect);

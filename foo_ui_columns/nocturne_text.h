@@ -180,6 +180,10 @@ inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
     = L"Left-clicking or dragging the lyrics no longer jumps to another time. The mouse wheel and right-click still "
       L"work.";
+// VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
+inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
+inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
+inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "Main Menu Button";
@@ -378,6 +382,10 @@ inline constexpr wchar_t modes_separator[] = L"、";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左鍵或拖曳不會跳到別的時間；滾輪和右鍵照常。";
+// VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
+inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
+inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
+inline constexpr wchar_t vu_backlight[] = L"暖色背光";
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "主選單按鈕";
