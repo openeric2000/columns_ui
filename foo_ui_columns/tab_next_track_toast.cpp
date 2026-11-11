@@ -495,10 +495,27 @@ void set_on_top(bool on_top)
 }
 } // namespace folder_search_position
 
+// 暫時隱藏伴奏版（2026-11-11 使用者要求）：存在 fb2k 共用設定，自編 Album list 讀它、送「目前選取資料夾」時略過伴奏版，
+// 也登記了變更通知，寫入就用目前的資料夾重送一次。鍵名、預設值要跟 Album list 的 playlist_utils.h 一致；預設 false＝不隱藏
+namespace hide_instrumental {
+inline constexpr char config_key[] = "nocturne.folderTree.hideInstrumental";
+inline constexpr bool enabled_default = false;
+
+bool is_enabled()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, enabled_default);
+}
+
+void set_enabled(bool enabled)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, enabled);
+}
+} // namespace hide_instrumental
+
 // 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁，這頁剩捲軸與資料夾樹、啟動兩段
 class TabNocturneInterface : public NocturneTab {
 public:
-    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
+    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
 
     const char* get_name() override { return nocturne_text::interface_tab_name; }
 
@@ -541,6 +558,12 @@ private:
         SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
         SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
         CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
+
+        // 目前選取資料夾：暫時隱藏伴奏版
+        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::hide_instrumental_title);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL, nocturne_text::hide_instrumental);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_NOTE, nocturne_text::hide_instrumental_note);
+        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL, check_state(hide_instrumental::is_enabled()));
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -562,6 +585,8 @@ private:
             playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
         } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
             startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        } else if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
+            hide_instrumental::set_enabled(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED);
         }
     }
 };
@@ -841,6 +866,7 @@ void reset_nocturne_settings()
     thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
     thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
     folder_search_position::set_on_top(folder_search_position::on_top_default);
+    hide_instrumental::set_enabled(hide_instrumental::enabled_default);
     playlist_marquee::set_enabled(playlist_marquee::enabled_default);
 
     expanded_cover_bg::enabled.reset();

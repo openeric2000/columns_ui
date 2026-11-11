@@ -882,6 +882,9 @@ BEGIN
     LTEXT           "Startup",IDC_TITLE2,7,138,313,17
     CONTROL         "Show the window only when the page is ready",IDC_STARTUP_HOLD,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,164,313,10
     LTEXT           "",IDC_STARTUP_HOLD_NOTE,7,180,313,20
+    LTEXT           "Current folder",IDC_TITLE3,7,210,313,17
+    CONTROL         "Hide instrumental versions",IDC_HIDE_INSTRUMENTAL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,236,313,10
+    LTEXT           "",IDC_HIDE_INSTRUMENTAL_NOTE,7,252,313,20
 END
 
 // 「展開頁」分頁（2026-11-11 使用者要求開新分頁、不要擠在「介面」裡）：背景、左上角按鈕、歌詞三個小標題
