@@ -80,6 +80,8 @@ protected:
     virtual UINT dialog_id() const = 0;
     virtual void on_init_dialog(HWND wnd) = 0;
     virtual void on_command(HWND wnd, WPARAM wp) = 0;
+    // 自繪控制項（SS_OWNERDRAW）；畫了就傳回 true
+    virtual bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) { return false; }
 
     // 填值時控制項會送出變更通知，先擋掉，免得把還沒填完的值寫回設定
     bool m_initialising{};
@@ -97,6 +99,8 @@ private:
             if (!m_initialising)
                 on_command(wnd, wp);
             break;
+        case WM_DRAWITEM:
+            return on_draw_item(wnd, *reinterpret_cast<const DRAWITEMSTRUCT*>(lp)) ? TRUE : FALSE;
         }
         return 0;
     }
@@ -307,6 +311,20 @@ private:
     }
 
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FONT; }
+
+    // 「全部區塊」下面的分隔線（2026-11-12 使用者要求）：在控制項中間畫一條 1 像素的線，用工具列分隔線的顏色（深色時灰 88；分頁框線色跟底色一樣看不到）
+    bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) override
+    {
+        if (item.CtlID != IDC_FONT_ROW_DIVIDER)
+            return false;
+        const auto& rect = item.rcItem;
+        const auto colour = dark::get_colour(dark::ColourID::ToolbarDivider, colours::is_dark_mode_active());
+        const wil::unique_hbrush brush(CreateSolidBrush(colour));
+        const auto mid = (rect.top + rect.bottom) / 2;
+        const RECT line{rect.left, mid, rect.right, mid + 1};
+        FillRect(item.hDC, &line, brush.get());
+        return true;
+    }
 
     void on_init_dialog(HWND wnd) override
     {

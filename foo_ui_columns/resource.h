@@ -450,6 +450,7 @@
 #define IDC_HIDE_INSTRUMENTAL_KEYWORDS 1374
 #define IDC_HIDE_INSTRUMENTAL_NOTE     1375
 #define IDC_FOLDER_AUTOHIDE_NOTE       1376
+#define IDC_FONT_ROW_DIVIDER           1377
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1
