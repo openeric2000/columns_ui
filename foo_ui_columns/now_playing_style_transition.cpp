@@ -27,6 +27,11 @@ constexpr ULONGLONG settle_limit_ms = 450;
 // 封面方塊裡取樣點的平均色差（0～255）：跟切換前差超過這個才算換過去了；連續兩張差小於這個才算畫好了
 constexpr double changed_threshold = 6.0;
 constexpr double stable_threshold = 1.5;
+// 整個展開頁（換模式）用的門檻，見 poll_ready
+constexpr int stage_cell_threshold = 72;
+constexpr int stage_changed_cells = 2;
+constexpr double stage_changed_average = 0.5;
+constexpr double stage_stable_average = 1.0;
 
 // 跟 CSS 的 cubic-bezier(x1, y1, x2, y2) 相同（同 splitter_window.cpp），給時間比例 x 求進度
 double cubic_bezier(double x1, double y1, double x2, double y2, double x)
@@ -67,9 +72,11 @@ struct Transition {
     Signature last_signature;
     std::unique_ptr<Gdiplus::Bitmap> last_capture;
     ULONGLONG applied_at{};
-    ULONGLONG animation_start{};
-    bool animating{};
-    // 整個展開頁交叉淡化（切換展開頁顯示內容，2026-11-11）：舊畫面一直墊著、新畫面從透明淡到不透明，不縮放
+    // ESLyric 畫好切換後畫面的時間（新的一面從這時開始淡入）；畫好之前舊的一面已經開始動（2026-11-12）
+    ULONGLONG ready_at{};
+    bool ready{};
+    // 整個展開頁淡出（切換展開頁顯示內容，2026-11-11）：蓋層放舊畫面，ESLyric 畫好後整個蓋層淡出、透出底下真的新畫面，不縮放
+    // （2026-11-12 起不再截新畫面每格合成兩張全頁圖：一格 15 ms、偶爾卡 50 ms）
     bool whole_stage{};
 };
 
@@ -207,8 +214,9 @@ void draw_scaled(Gdiplus::Graphics& graphics, Gdiplus::Bitmap& image, const RECT
     graphics.DrawImage(&image, destination, 0.f, 0.f, width, height, Gdiplus::UnitPixel, &attributes);
 }
 
-// 畫一格：progress 0＝完全是切換前、1＝完全是切換後
-void present(Transition& transition, double progress)
+// 畫一格：old_progress＝舊的一面縮小淡出到哪（0～1）、new_progress＝新的一面放大淡入到哪（0～1）。
+// 整個展開頁只在一開始畫一次舊畫面（之後用整個蓋層的透明度淡出，見 on_frame）
+void present(Transition& transition, double old_progress, double new_progress)
 {
     const auto width = wil::rect_width(transition.screen);
     const auto height = wil::rect_height(transition.screen);
@@ -240,18 +248,17 @@ void present(Transition& transition, double progress)
             graphics.Clear(Gdiplus::Color(255, 24, 24, 24));
         graphics.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
 
-        const auto p = static_cast<float>(progress);
+        const auto o = static_cast<float>(old_progress);
+        const auto n = static_cast<float>(new_progress);
         if (transition.whole_stage) {
             if (transition.before)
                 draw_scaled(graphics, *transition.before, transition.cover, 1.f, 1.f);
-            if (transition.after)
-                draw_scaled(graphics, *transition.after, transition.cover, 1.f, p);
         } else {
             if (transition.before)
-                draw_scaled(graphics, *transition.before, transition.cover, 1.f + (old_end_scale - 1.f) * p, 1.f - p);
+                draw_scaled(graphics, *transition.before, transition.cover, 1.f + (old_end_scale - 1.f) * o, 1.f - o);
             if (transition.after)
                 draw_scaled(
-                    graphics, *transition.after, transition.cover, new_start_scale + (1.f - new_start_scale) * p, p);
+                    graphics, *transition.after, transition.cover, new_start_scale + (1.f - new_start_scale) * n, n);
         }
     }
 
@@ -274,6 +281,66 @@ void finish()
     }
 }
 
+// 整個蓋層的不透明度（畫面內容不變，只改透明度，幾乎不花時間）
+void set_overlay_alpha(HWND wnd, double alpha)
+{
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, static_cast<BYTE>(std::lround(std::clamp(alpha, 0.0, 1.0) * 255)), AC_SRC_ALPHA};
+    UpdateLayeredWindow(wnd, nullptr, nullptr, nullptr, nullptr, nullptr, 0, &blend, ULW_ALPHA);
+}
+
+double eased(ULONGLONG now, ULONGLONG start)
+{
+    const auto linear = std::clamp(static_cast<double>(now - start) / duration_ms, 0.0, 1.0);
+    return cubic_bezier(0.4, 0.0, 0.2, 1.0, linear);
+}
+
+// ESLyric 畫好切換後的畫面了沒（2026-11-12 改）：
+// - 封面方塊：跟切換前不一樣、而且跟上一張差不多（封面是靜態圖，兩三張就穩定）
+// - 整個展開頁：門檻另外訂（見下面），原本用封面的門檻永遠判斷不到，每次都等滿上限 0.45 秒（2026-11-12 實測）
+// 實測 169：點下去後約 0.14 秒內 ESLyric 重排版面佔住主執行緒，一格都畫不了；新畫面約 0.19～0.23 秒定下來
+void poll_ready(Transition& transition, ULONGLONG now)
+{
+    const auto elapsed = now - transition.applied_at;
+    if (elapsed < settle_min_ms)
+        return;
+
+    bool ready = false;
+    if (auto shot = capture(transition.screen)) {
+        auto signature = signature_of(*shot, transition.cover);
+        const bool changed = difference(signature, transition.before_signature) > changed_threshold;
+        if (transition.whole_stage) {
+            // 整個展開頁換模式通常只換右邊那一塊，16×16 取樣點平均色差只有 1～2（實測），用封面的門檻 6 永遠判斷不到。
+            // 改成：有幾個取樣點明顯不同（三色合計差 72 以上）或平均差超過 0.5，而且跟上一張幾乎一樣（平均差 1 以下）
+            int cells = 0;
+            for (size_t i = 0; i + 2 < signature.size() && i + 2 < transition.before_signature.size(); i += 3) {
+                const auto d = std::abs(signature[i] - transition.before_signature[i])
+                    + std::abs(signature[i + 1] - transition.before_signature[i + 1])
+                    + std::abs(signature[i + 2] - transition.before_signature[i + 2]);
+                if (d > stage_cell_threshold)
+                    cells++;
+            }
+            const auto from_before = difference(signature, transition.before_signature);
+            const bool stage_changed = cells >= stage_changed_cells || from_before > stage_changed_average;
+            const bool stage_stable = difference(signature, transition.last_signature) < stage_stable_average;            ready = stage_changed && stage_stable;
+        } else {
+            const bool stable = difference(signature, transition.last_signature) < stable_threshold;
+            ready = changed && stable;
+        }
+        transition.last_signature = std::move(signature);
+        transition.last_capture = std::move(shot);
+    }
+
+    if (!ready && elapsed < settle_limit_ms)
+        return;
+
+    transition.ready = true;
+    transition.ready_at = now;
+    // 整個展開頁不用切換後的截圖：舊畫面淡出時直接透出底下真的展開頁（VU 指針、頻譜淡入時也照樣在動）
+    if (!transition.whole_stage)
+        transition.after = std::move(transition.last_capture);
+    transition.last_capture.reset();
+}
+
 void on_frame()
 {
     if (!g_transition)
@@ -282,39 +349,26 @@ void on_frame()
     auto& transition = *g_transition;
     const auto now = GetTickCount64();
 
-    if (!transition.animating) {
-        const auto elapsed = now - transition.applied_at;
-        if (elapsed < settle_min_ms)
+    if (!transition.ready)
+        poll_ready(transition, now);
+
+    if (transition.whole_stage) {
+        // 畫好之前舊畫面整張蓋著；畫好之後整張淡出
+        if (!transition.ready)
             return;
-
-        // ESLyric 畫好了沒：跟切換前不一樣，而且跟上一張差不多
-        bool ready = false;
-        if (auto shot = capture(transition.screen)) {
-            auto signature = signature_of(*shot, transition.cover);
-            const bool changed = difference(signature, transition.before_signature) > changed_threshold;
-            const bool stable = difference(signature, transition.last_signature) < stable_threshold;
-            transition.last_signature = std::move(signature);
-            transition.last_capture = std::move(shot);
-            ready = changed && stable;
-        }
-
-        if (!ready && elapsed < settle_limit_ms)
-            return;
-
-        if (!transition.last_capture) {
+        const auto progress = eased(now, transition.ready_at);
+        set_overlay_alpha(transition.wnd, 1.0 - progress);
+        if (progress >= 1.0)
             finish();
-            return;
-        }
-
-        transition.after = std::move(transition.last_capture);
-        transition.animating = true;
-        transition.animation_start = now;
+        return;
     }
 
-    const auto linear = std::clamp(static_cast<double>(now - transition.animation_start) / duration_ms, 0.0, 1.0);
-    present(transition, cubic_bezier(0.4, 0.0, 0.2, 1.0, linear));
+    // 封面方塊：舊的一面一按就開始縮小淡出，新的一面等 ESLyric 畫好才放大淡入
+    const auto old_progress = eased(now, transition.applied_at);
+    const auto new_progress = transition.ready ? eased(now, transition.ready_at) : 0.0;
+    present(transition, old_progress, new_progress);
 
-    if (linear >= 1.0)
+    if (transition.ready && new_progress >= 1.0)
         finish();
 }
 
@@ -415,14 +469,13 @@ void run(std::function<void()> apply)
     }
 
     // 先把切換前的畫面蓋上去、等它真的合成到螢幕上，才在底下切換（不然會先閃一格切換後的畫面）
-    present(*transition, 0.0);
+    present(*transition, 0.0, 0.0);
     ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
     [[maybe_unused]] const auto hr = DwmFlush();
 
     g_transition = std::move(transition);
     apply();
-    g_transition->applied_at = GetTickCount64();
-    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    g_transition->applied_at = GetTickCount64();    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
 }
 
 void run_stage(std::function<void()> apply)
@@ -459,14 +512,13 @@ void run_stage(std::function<void()> apply)
         return;
     }
 
-    present(*transition, 0.0);
+    present(*transition, 0.0, 0.0);
     ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
     [[maybe_unused]] const auto hr = DwmFlush();
 
     g_transition = std::move(transition);
     apply();
-    g_transition->applied_at = GetTickCount64();
-    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    g_transition->applied_at = GetTickCount64();    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
 }
 
 } // namespace cui::style_transition
