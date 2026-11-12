@@ -114,7 +114,7 @@ constexpr float shadow_offset_px = 10.f;
 constexpr float shadow_blur_px = 9.f; // 三次方塊模糊的半徑
 
 // 方框雙錶
-constexpr float box_gap_px = 22.f;        // 左右兩個錶框的間距（2026-11-11 使用者要再分開一點，10→22）
+constexpr float box_gap_px = 44.f;        // 左右兩個錶框的間距（2026-11-11 使用者要再分開一點，10→22；2026-11-12 在 219 看了又說再分開，22→44）
 constexpr float box_radius_px = 16.f;     // 錶框圓角
 constexpr float box_bezel_px = 10.f;      // 玻璃邊緣折射的寬度
 constexpr float box_refraction_px = 8.f;  // 邊緣最大位移
