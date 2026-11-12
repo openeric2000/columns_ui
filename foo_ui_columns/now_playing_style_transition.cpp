@@ -4,19 +4,25 @@
 #include "nocturne_build_info.h"
 #endif
 
+#include <d3d11.h>
+#include <dcomp.h>
+
 #include "now_playing_style_transition.h"
 #include "now_playing_cover_zoom.h"
 #include "splitter.h"
 
-// 展開頁封面⇄資訊卡的切換動畫，說明見 now_playing_style_transition.h
+#pragma comment(lib, "dcomp.lib")
+
+// 展開頁封面⇄資訊卡、切換顯示內容的過渡動畫，說明見 now_playing_style_transition.h
 
 namespace cui::style_transition {
 
 namespace {
 
 constexpr wchar_t window_class_name[] = L"columns_ui_style_transition";
-constexpr UINT_PTR frame_timer_id = 1;
-constexpr UINT frame_interval_ms = 10;
+// 等 ESLyric 畫好的檢查計時器（動畫本身由 DWM 跑，不靠這個）
+constexpr UINT_PTR poll_timer_id = 1;
+constexpr UINT poll_interval_ms = 15;
 
 // 封面外圍多截一圈（封面有陰影）；封面下緣到歌名只有 24 DIP，不能超過，不然歌名的跑馬燈會被蓋住的那一小條凍住
 constexpr int pad_dip = 20;
@@ -24,6 +30,8 @@ constexpr int pad_dip = 20;
 constexpr double duration_ms = 290;
 constexpr float old_end_scale = 0.96f;
 constexpr float new_start_scale = 1.04f;
+// 動畫跑完後再多等一點才拿掉蓋層（DWM 最後一格要先合成上去）
+constexpr ULONGLONG finish_margin_ms = 40;
 
 // 等 ESLyric 畫好切換後的畫面：至少等一下再截，最多等這麼久（到了還沒穩定就用最後一張）
 constexpr ULONGLONG settle_min_ms = 30;
@@ -61,26 +69,177 @@ double cubic_bezier(double x1, double y1, double x2, double y2, double x)
     return sample(y1, y2, t);
 }
 
+double eased(double x)
+{
+    return cubic_bezier(0.4, 0.0, 0.2, 1.0, std::clamp(x, 0.0, 1.0));
+}
+
 using Signature = std::vector<int>;
+
+// ---- DirectComposition（2026-11-12 起）----
+// 原本每格用 GDI+ 把兩張封面大小的圖縮放、調透明度再 UpdateLayeredWindow：219 實測一格 16～33 ms，
+// 加上等新畫面時每次截圖約 30 ms，整段只有約 14 格、格間隔 34～50 ms（使用者說不順）。
+// 改成把舊、新兩張圖各上傳一次，縮放與透明度交給 DWM 的動畫（IDCompositionAnimation）：每格不花 CPU、照螢幕更新跑，
+// 主執行緒忙（ESLyric 重排版面、截圖判斷）也不會停住
+struct Graphics {
+    wil::com_ptr<ID3D11Device> d3d;
+    wil::com_ptr<ID3D11DeviceContext> context;
+    wil::com_ptr<IDCompositionDevice> dcomp;
+};
+
+Graphics* graphics()
+{
+    // 不在結束時釋放（DLL 卸載時再碰 D3D 可能出事），整個行程共用一份
+    static auto* shared = new Graphics;
+    if (shared->dcomp) {
+        BOOL valid{};
+        if (SUCCEEDED(shared->dcomp->CheckDeviceState(&valid)) && valid)
+            return shared;
+        *shared = {};
+    }
+
+    for (const auto driver : {D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP}) {
+        if (SUCCEEDED(D3D11CreateDevice(nullptr, driver, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                D3D11_SDK_VERSION, shared->d3d.put(), nullptr, shared->context.put())))
+            break;
+    }
+    if (!shared->d3d)
+        return nullptr;
+
+    const auto dxgi = shared->d3d.try_query<IDXGIDevice>();
+    if (!dxgi || FAILED(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(shared->dcomp.put())))) {
+        *shared = {};
+        return nullptr;
+    }
+    return shared;
+}
+
+// 一張圖（預乘透明度的 BGRA）上傳成 DirectComposition 的內容
+wil::com_ptr<IDCompositionSurface> make_surface(Graphics& g, Gdiplus::Bitmap& bitmap)
+{
+    const auto width = bitmap.GetWidth();
+    const auto height = bitmap.GetHeight();
+    if (width == 0 || height == 0)
+        return {};
+
+    wil::com_ptr<IDCompositionSurface> surface;
+    if (FAILED(g.dcomp->CreateSurface(
+            width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, surface.put())))
+        return {};
+
+    Gdiplus::BitmapData data{};
+    const Gdiplus::Rect all(0, 0, static_cast<INT>(width), static_cast<INT>(height));
+    if (bitmap.LockBits(&all, Gdiplus::ImageLockModeRead, PixelFormat32bppPARGB, &data) != Gdiplus::Ok)
+        return {};
+    const auto unlock = wil::scope_exit([&] { bitmap.UnlockBits(&data); });
+
+    wil::com_ptr<ID3D11Texture2D> texture;
+    POINT offset{};
+    if (FAILED(surface->BeginDraw(nullptr, IID_PPV_ARGS(texture.put()), &offset)))
+        return {};
+    const D3D11_BOX box{static_cast<UINT>(offset.x), static_cast<UINT>(offset.y), 0, static_cast<UINT>(offset.x) + width,
+        static_cast<UINT>(offset.y) + height, 1};
+    g.context->UpdateSubresource(texture.get(), 0, &box, data.Scan0, static_cast<UINT>(data.Stride), 0);
+    if (FAILED(surface->EndDraw()))
+        return {};
+    return surface;
+}
+
+// 一層：圖＋以封面中心為準的縮放＋透明度
+struct Layer {
+    wil::com_ptr<IDCompositionVisual> visual;
+    wil::com_ptr<IDCompositionScaleTransform> scale;
+    wil::com_ptr<IDCompositionEffectGroup> effect;
+};
+
+std::optional<Layer> make_layer(Graphics& g, Gdiplus::Bitmap& bitmap, const RECT& cover)
+{
+    const auto surface = make_surface(g, bitmap);
+    if (!surface)
+        return {};
+
+    Layer layer;
+    if (FAILED(g.dcomp->CreateVisual(layer.visual.put())) || FAILED(g.dcomp->CreateScaleTransform(layer.scale.put()))
+        || FAILED(g.dcomp->CreateEffectGroup(layer.effect.put())))
+        return {};
+
+    layer.visual->SetContent(surface.get());
+    layer.visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+    layer.scale->SetCenterX(static_cast<float>(cover.left + cover.right) / 2.f);
+    layer.scale->SetCenterY(static_cast<float>(cover.top + cover.bottom) / 2.f);
+    layer.visual->SetTransform(layer.scale.get());
+    layer.visual->SetEffect(layer.effect.get());
+    return layer;
+}
+
+// from → to、照 cubic-bezier(0.4, 0, 0.2, 1) 走 duration_ms 的動畫：DirectComposition 只吃分段三次多項式，
+// 所以把曲線切 12 段，每段用兩端的值與斜率做 Hermite 內插（跟真曲線差不到 0.1%）
+wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to)
+{
+    wil::com_ptr<IDCompositionAnimation> animation;
+    if (FAILED(g.dcomp->CreateAnimation(animation.put())))
+        return {};
+
+    const double total = duration_ms / 1000.0;
+    const auto value = [&](double x) { return from + (to - from) * eased(x); };
+    const auto slope = [&](double x) {
+        constexpr double h = 1e-4;
+        const auto a = std::max(0.0, x - h);
+        const auto b = std::min(1.0, x + h);
+        return (value(b) - value(a)) / ((b - a) * total);
+    };
+
+    constexpr int segments = 12;
+    for (int i = 0; i < segments; ++i) {
+        const auto x0 = static_cast<double>(i) / segments;
+        const auto x1 = static_cast<double>(i + 1) / segments;
+        const auto h = (x1 - x0) * total;
+        const auto v0 = value(x0);
+        const auto v1 = value(x1);
+        const auto d0 = slope(x0);
+        const auto d1 = slope(x1);
+        const auto c = (3 * (v1 - v0) / h - 2 * d0 - d1) / h;
+        const auto d = (2 * (v0 - v1) / h + d0 + d1) / (h * h);
+        animation->AddCubic(x0 * total, static_cast<float>(v0), static_cast<float>(d0), static_cast<float>(c),
+            static_cast<float>(d));
+    }
+    animation->End(total, to);
+    return animation;
+}
+
+// 讓一層照動畫縮放、淡入淡出（scale_from == scale_to 就不縮放）
+void animate(Graphics& g, Layer& layer, float scale_from, float scale_to, float opacity_from, float opacity_to)
+{
+    if (scale_from != scale_to) {
+        if (const auto scale = make_animation(g, scale_from, scale_to)) {
+            layer.scale->SetScaleX(scale.get());
+            layer.scale->SetScaleY(scale.get());
+        }
+    }
+    if (const auto opacity = make_animation(g, opacity_from, opacity_to))
+        layer.effect->SetOpacity(opacity.get());
+}
 
 struct Transition {
     HWND wnd{};
     // 蓋層視窗在螢幕上的位置（封面方塊加外圍一圈）、封面在蓋層裡的位置
     RECT screen{};
     RECT cover{};
-    std::unique_ptr<Gdiplus::Bitmap> before;
-    std::unique_ptr<Gdiplus::Bitmap> after;
-    // 舊的一面縮小時露出來的邊：用外圍一圈的背景色內插出來的底（虛化背景很平滑，看不出接縫）
-    std::unique_ptr<Gdiplus::Bitmap> base;
     Signature before_signature;
     Signature last_signature;
     std::unique_ptr<Gdiplus::Bitmap> last_capture;
+    wil::com_ptr<IDCompositionTarget> target;
+    wil::com_ptr<IDCompositionVisual> root;
+    // 舊的一面縮小時露出來的邊：用外圍一圈的背景色內插出來的底（虛化背景很平滑，看不出接縫）
+    wil::com_ptr<IDCompositionVisual> base;
+    std::optional<Layer> old_layer;
+    std::optional<Layer> new_layer;
     ULONGLONG applied_at{};
     // ESLyric 畫好切換後畫面的時間（新的一面從這時開始淡入）；畫好之前舊的一面已經開始動（2026-11-12）
     ULONGLONG ready_at{};
+    ULONGLONG finish_at{};
     bool ready{};
     // 整個展開頁淡出（切換展開頁顯示內容，2026-11-11）：蓋層放舊畫面，ESLyric 畫好後整個蓋層淡出、透出底下真的新畫面，不縮放
-    // （2026-11-12 起不再截新畫面每格合成兩張全頁圖：一格 15 ms、偶爾卡 50 ms）
     bool whole_stage{};
 };
 
@@ -88,15 +247,14 @@ std::unique_ptr<Transition> g_transition;
 
 #if defined(NOCTURNE_BUILD_DEV)
 // 開發版才有的動畫紀錄（2026-11-12 使用者說封面⇄資訊卡的淡出＋微縮放不順，先量再改）：
-// 環境變數 NOCTURNE_ANIM_LOG＝文字檔路徑時，每次切換記一段：每一格的時間、跟上一格的間隔、合成花多久、截圖判斷花多久，
-// 結束時記總結（格數、最長間隔、超過 25／50 毫秒的次數）。動畫跑完才一次寫檔；沒設環境變數就什麼都不做
+// 環境變數 NOCTURNE_ANIM_LOG＝文字檔路徑時，每次切換記一段：截圖、蓋上、切換、畫好、拿掉蓋層的時間，
+// 以及這段期間 DWM 合成了幾格、掉了幾格（DirectComposition 的動畫在 DWM 跑，掉格只會發生在那邊）。動畫跑完才一次寫檔
 struct AnimLog {
     bool checked{};
     std::wstring path;
     LARGE_INTEGER frequency{};
     LARGE_INTEGER start{};
-    double last_frame{-1};
-    std::vector<double> gaps;
+    DWM_TIMING_INFO dwm_start{};
     std::string text;
 
     bool enabled()
@@ -116,43 +274,33 @@ struct AnimLog {
         QueryPerformanceCounter(&value);
         return static_cast<double>(value.QuadPart - start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
     }
+    static DWM_TIMING_INFO timing()
+    {
+        DWM_TIMING_INFO info{};
+        info.cbSize = sizeof(info);
+        DwmGetCompositionTimingInfo(nullptr, &info);
+        return info;
+    }
     void begin(const char* kind)
     {
         if (!enabled())
             return;
         QueryPerformanceCounter(&start);
-        last_frame = -1;
-        gaps.clear();
+        dwm_start = timing();
         text = fmt::format("== {}\n", kind);
     }
     void line(const std::string& value)
     {
-        if (!path.empty())
+        if (!path.empty() && !text.empty())
             text += value + "\n";
-    }
-    void frame(double present_ms, double poll_ms, bool ready)
-    {
-        if (path.empty())
-            return;
-        const auto t = now();
-        const auto gap = last_frame < 0 ? 0.0 : t - last_frame;
-        if (last_frame >= 0)
-            gaps.push_back(gap);
-        last_frame = t;
-        text += fmt::format("frame t={:.1f} gap={:.1f} present={:.1f} poll={:.1f} ready={}\n", t, gap, present_ms, poll_ms, ready ? 1 : 0);
     }
     void end()
     {
         if (path.empty() || text.empty())
             return;
-        double max_gap{};
-        int over25{}, over50{};
-        for (const auto gap : gaps) {
-            max_gap = std::max(max_gap, gap);
-            over25 += gap > 25 ? 1 : 0;
-            over50 += gap > 50 ? 1 : 0;
-        }
-        text += fmt::format("end t={:.1f} frames={} max_gap={:.1f} over25={} over50={}\n", now(), gaps.size() + 1, max_gap, over25, over50);
+        const auto dwm = timing();
+        text += fmt::format("end t={:.1f} dwm_frames={} dropped={} missed={}\n", now(), dwm.cFrame - dwm_start.cFrame,
+            dwm.cFramesDropped - dwm_start.cFramesDropped, dwm.cFramesMissed - dwm_start.cFramesMissed);
         FILE* file{};
         if (_wfopen_s(&file, path.c_str(), L"ab") == 0 && file) {
             fwrite(text.data(), 1, text.size(), file);
@@ -165,13 +313,11 @@ AnimLog g_anim_log;
 #define ANIM_LOG_BEGIN(kind) g_anim_log.begin(kind)
 #define ANIM_LOG_LINE(value) g_anim_log.line(value)
 #define ANIM_LOG_NOW() g_anim_log.now()
-#define ANIM_LOG_FRAME(present, poll, ready) g_anim_log.frame(present, poll, ready)
 #define ANIM_LOG_END() g_anim_log.end()
 #else
 #define ANIM_LOG_BEGIN(kind) ((void)0)
 #define ANIM_LOG_LINE(value) ((void)0)
 #define ANIM_LOG_NOW() 0.0
-#define ANIM_LOG_FRAME(present, poll, ready) ((void)0)
 #define ANIM_LOG_END() ((void)0)
 #endif
 
@@ -288,80 +434,6 @@ std::unique_ptr<Gdiplus::Bitmap> make_base(Gdiplus::Bitmap& source)
     return result;
 }
 
-// 以封面中心為準縮放、帶透明度畫上去
-void draw_scaled(Gdiplus::Graphics& graphics, Gdiplus::Bitmap& image, const RECT& cover, float scale, float alpha)
-{
-    if (alpha <= 0.002f)
-        return;
-
-    const auto width = static_cast<float>(image.GetWidth());
-    const auto height = static_cast<float>(image.GetHeight());
-    const auto cx = static_cast<float>(cover.left + cover.right) / 2.f;
-    const auto cy = static_cast<float>(cover.top + cover.bottom) / 2.f;
-
-    Gdiplus::ColorMatrix matrix = {{{1, 0, 0, 0, 0}, {0, 1, 0, 0, 0}, {0, 0, 1, 0, 0}, {0, 0, 0, alpha, 0}, {0, 0, 0, 0, 1}}};
-    Gdiplus::ImageAttributes attributes;
-    attributes.SetColorMatrix(&matrix);
-
-    const Gdiplus::RectF destination(cx - cx * scale, cy - cy * scale, width * scale, height * scale);
-    graphics.DrawImage(&image, destination, 0.f, 0.f, width, height, Gdiplus::UnitPixel, &attributes);
-}
-
-// 畫一格：old_progress＝舊的一面縮小淡出到哪（0～1）、new_progress＝新的一面放大淡入到哪（0～1）。
-// 整個展開頁只在一開始畫一次舊畫面（之後用整個蓋層的透明度淡出，見 on_frame）
-void present(Transition& transition, double old_progress, double new_progress)
-{
-    const auto width = wil::rect_width(transition.screen);
-    const auto height = wil::rect_height(transition.screen);
-
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = width;
-    info.bmiHeader.biHeight = -height;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void* bits{};
-    const wil::unique_hdc_window screen_dc(GetDC(nullptr));
-    const wil::unique_hdc memory_dc(CreateCompatibleDC(screen_dc.get()));
-    const wil::unique_hbitmap bitmap(CreateDIBSection(screen_dc.get(), &info, DIB_RGB_COLORS, &bits, nullptr, 0));
-    if (!bitmap || !bits)
-        return;
-    const auto _select_bitmap = wil::SelectObject(memory_dc.get(), bitmap.get());
-
-    {
-        Gdiplus::Bitmap canvas(width, height, width * 4, PixelFormat32bppPARGB, static_cast<BYTE*>(bits));
-        Gdiplus::Graphics graphics(&canvas);
-        graphics.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
-        graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
-        graphics.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-        if (transition.base)
-            graphics.DrawImage(transition.base.get(), 0, 0, width, height);
-        else
-            graphics.Clear(Gdiplus::Color(255, 24, 24, 24));
-        graphics.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
-
-        const auto o = static_cast<float>(old_progress);
-        const auto n = static_cast<float>(new_progress);
-        if (transition.whole_stage) {
-            if (transition.before)
-                draw_scaled(graphics, *transition.before, transition.cover, 1.f, 1.f);
-        } else {
-            if (transition.before)
-                draw_scaled(graphics, *transition.before, transition.cover, 1.f + (old_end_scale - 1.f) * o, 1.f - o);
-            if (transition.after)
-                draw_scaled(
-                    graphics, *transition.after, transition.cover, new_start_scale + (1.f - new_start_scale) * n, n);
-        }
-    }
-
-    POINT origin{transition.screen.left, transition.screen.top};
-    SIZE size{width, height};
-    POINT source{0, 0};
-    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-    UpdateLayeredWindow(transition.wnd, screen_dc.get(), &origin, &size, memory_dc.get(), &source, 0, &blend, ULW_ALPHA);
-}
-
 void finish()
 {
     if (!g_transition)
@@ -369,29 +441,22 @@ void finish()
 
     auto transition = std::move(g_transition);
     ANIM_LOG_END();
-    if (transition->wnd) {
-        KillTimer(transition->wnd, frame_timer_id);
+    if (transition->wnd)
+        KillTimer(transition->wnd, poll_timer_id);
+    // 先拆掉 DirectComposition 的內容再關視窗
+    transition->old_layer.reset();
+    transition->new_layer.reset();
+    transition->base.reset();
+    transition->root.reset();
+    transition->target.reset();
+    if (transition->wnd)
         DestroyWindow(transition->wnd);
-    }
-}
-
-// 整個蓋層的不透明度（畫面內容不變，只改透明度，幾乎不花時間）
-void set_overlay_alpha(HWND wnd, double alpha)
-{
-    BLENDFUNCTION blend{AC_SRC_OVER, 0, static_cast<BYTE>(std::lround(std::clamp(alpha, 0.0, 1.0) * 255)), AC_SRC_ALPHA};
-    UpdateLayeredWindow(wnd, nullptr, nullptr, nullptr, nullptr, nullptr, 0, &blend, ULW_ALPHA);
-}
-
-double eased(ULONGLONG now, ULONGLONG start)
-{
-    const auto linear = std::clamp(static_cast<double>(now - start) / duration_ms, 0.0, 1.0);
-    return cubic_bezier(0.4, 0.0, 0.2, 1.0, linear);
 }
 
 // ESLyric 畫好切換後的畫面了沒（2026-11-12 改）：
 // - 封面方塊：跟切換前不一樣、而且跟上一張差不多（封面是靜態圖，兩三張就穩定）
 // - 整個展開頁：門檻另外訂（見下面），原本用封面的門檻永遠判斷不到，每次都等滿上限 0.45 秒（2026-11-12 實測）
-// 實測 169：點下去後約 0.14 秒內 ESLyric 重排版面佔住主執行緒，一格都畫不了；新畫面約 0.19～0.23 秒定下來
+// 截圖一次約 30 ms（219），會佔住主執行緒，但動畫在 DWM 跑，不受影響
 void poll_ready(Transition& transition, ULONGLONG now)
 {
     const auto elapsed = now - transition.applied_at;
@@ -415,7 +480,8 @@ void poll_ready(Transition& transition, ULONGLONG now)
             }
             const auto from_before = difference(signature, transition.before_signature);
             const bool stage_changed = cells >= stage_changed_cells || from_before > stage_changed_average;
-            const bool stage_stable = difference(signature, transition.last_signature) < stage_stable_average;            ready = stage_changed && stage_stable;
+            const bool stage_stable = difference(signature, transition.last_signature) < stage_stable_average;
+            ready = stage_changed && stage_stable;
         } else {
             const bool stable = difference(signature, transition.last_signature) < stable_threshold;
             ready = changed && stable;
@@ -429,13 +495,37 @@ void poll_ready(Transition& transition, ULONGLONG now)
 
     transition.ready = true;
     transition.ready_at = now;
-    // 整個展開頁不用切換後的截圖：舊畫面淡出時直接透出底下真的展開頁（VU 指針、頻譜淡入時也照樣在動）
-    if (!transition.whole_stage)
-        transition.after = std::move(transition.last_capture);
-    transition.last_capture.reset();
 }
 
-void on_frame()
+// ESLyric 畫好了：封面方塊時新的一面從 104% 縮回、淡入（疊在舊的一面上面）；整個展開頁時舊畫面整張淡出
+void start_second_half(Transition& transition)
+{
+    auto* g = graphics();
+    if (g) {
+        if (transition.whole_stage) {
+            if (transition.old_layer)
+                animate(*g, *transition.old_layer, 1.f, 1.f, 1.f, 0.f);
+        } else if (transition.last_capture) {
+            transition.new_layer = make_layer(*g, *transition.last_capture, transition.cover);
+            if (transition.new_layer) {
+                transition.new_layer->effect->SetOpacity(0.f);
+                transition.new_layer->scale->SetScaleX(new_start_scale);
+                transition.new_layer->scale->SetScaleY(new_start_scale);
+                transition.root->AddVisual(transition.new_layer->visual.get(), TRUE,
+                    transition.old_layer ? transition.old_layer->visual.get() : nullptr);
+                animate(*g, *transition.new_layer, new_start_scale, 1.f, 0.f, 1.f);
+            }
+        }
+        g->dcomp->Commit();
+    }
+    transition.last_capture.reset();
+
+    // 舊的一面在切換時就開始動；兩段都跑完才拿掉蓋層
+    const auto end = std::max(transition.applied_at, transition.ready_at) + static_cast<ULONGLONG>(duration_ms);
+    transition.finish_at = std::max(end, transition.applied_at + static_cast<ULONGLONG>(duration_ms)) + finish_margin_ms;
+}
+
+void on_timer()
 {
     if (!g_transition)
         return;
@@ -443,37 +533,17 @@ void on_frame()
     auto& transition = *g_transition;
     const auto now = GetTickCount64();
 
-    [[maybe_unused]] const auto poll_start = ANIM_LOG_NOW();
-    const bool was_ready = transition.ready;
-    if (!transition.ready)
+    if (!transition.ready) {
         poll_ready(transition, now);
-    [[maybe_unused]] const auto poll_ms = was_ready ? 0.0 : ANIM_LOG_NOW() - poll_start;
-    if (!was_ready && transition.ready)
-        ANIM_LOG_LINE(fmt::format("ready t={:.1f} (since apply {} ms)", ANIM_LOG_NOW(), transition.ready_at - transition.applied_at));
-
-    if (transition.whole_stage) {
-        // 畫好之前舊畫面整張蓋著；畫好之後整張淡出
-        if (!transition.ready) {
-            ANIM_LOG_FRAME(0.0, poll_ms, false);
-            return;
+        if (transition.ready) {
+            ANIM_LOG_LINE(fmt::format("ready t={:.1f} (since apply {} ms)", ANIM_LOG_NOW(), transition.ready_at - transition.applied_at));
+            start_second_half(transition);
+            ANIM_LOG_LINE(fmt::format("second half committed t={:.1f}", ANIM_LOG_NOW()));
         }
-        [[maybe_unused]] const auto present_start = ANIM_LOG_NOW();
-        const auto progress = eased(now, transition.ready_at);
-        set_overlay_alpha(transition.wnd, 1.0 - progress);
-        ANIM_LOG_FRAME(ANIM_LOG_NOW() - present_start, poll_ms, true);
-        if (progress >= 1.0)
-            finish();
         return;
     }
 
-    // 封面方塊：舊的一面一按就開始縮小淡出，新的一面等 ESLyric 畫好才放大淡入
-    const auto old_progress = eased(now, transition.applied_at);
-    const auto new_progress = transition.ready ? eased(now, transition.ready_at) : 0.0;
-    [[maybe_unused]] const auto present_start = ANIM_LOG_NOW();
-    present(transition, old_progress, new_progress);
-    ANIM_LOG_FRAME(ANIM_LOG_NOW() - present_start, poll_ms, transition.ready);
-
-    if (transition.ready && new_progress >= 1.0)
+    if (now >= transition.finish_at)
         finish();
 }
 
@@ -486,8 +556,8 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_TIMER:
-        if (wp == frame_timer_id) {
-            on_frame();
+        if (wp == poll_timer_id) {
+            on_timer();
             return 0;
         }
         break;
@@ -510,9 +580,10 @@ HWND create_overlay(HWND owner, const RECT& screen)
     if (!class_registered)
         return nullptr;
 
-    const auto wnd = CreateWindowEx(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        window_class_name, L"", WS_POPUP, screen.left, screen.top, wil::rect_width(screen), wil::rect_height(screen),
-        owner, nullptr, core_api::get_my_instance(), nullptr);
+    // 沒有重新導向點陣圖：畫面完全由 DirectComposition 提供，沒放內容的地方是透明的
+    const auto wnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, window_class_name, L"",
+        WS_POPUP, screen.left, screen.top, wil::rect_width(screen), wil::rect_height(screen), owner, nullptr,
+        core_api::get_my_instance(), nullptr);
 
     if (wnd) {
         // 關掉 Windows 開視窗時的淡入動畫，一出現就要跟原本的畫面一模一樣
@@ -520,6 +591,78 @@ HWND create_overlay(HWND owner, const RECT& screen)
         DwmSetWindowAttribute(wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
     }
     return wnd;
+}
+
+// 蓋層：截下來的舊畫面（封面方塊時底下再墊一層內插的底），蓋上去、等它真的合成到螢幕上才回傳
+bool show_overlay(Graphics& g, Transition& transition, HWND owner, Gdiplus::Bitmap& before, Gdiplus::Bitmap* base)
+{
+    transition.wnd = create_overlay(owner, transition.screen);
+    if (!transition.wnd)
+        return false;
+
+    if (FAILED(g.dcomp->CreateTargetForHwnd(transition.wnd, TRUE, transition.target.put()))
+        || FAILED(g.dcomp->CreateVisual(transition.root.put())) || FAILED(transition.target->SetRoot(transition.root.get())))
+        return false;
+
+    if (base) {
+        const auto surface = make_surface(g, *base);
+        if (surface && SUCCEEDED(g.dcomp->CreateVisual(transition.base.put()))) {
+            transition.base->SetContent(surface.get());
+            transition.root->AddVisual(transition.base.get(), FALSE, nullptr);
+        }
+    }
+
+    transition.old_layer = make_layer(g, before, transition.cover);
+    if (!transition.old_layer)
+        return false;
+    transition.root->AddVisual(
+        transition.old_layer->visual.get(), TRUE, transition.base ? transition.base.get() : nullptr);
+
+    if (FAILED(g.dcomp->Commit()))
+        return false;
+    ShowWindow(transition.wnd, SW_SHOWNOACTIVATE);
+    g.dcomp->WaitForCommitCompletion();
+    [[maybe_unused]] const auto hr = DwmFlush();
+    return true;
+}
+
+// 共用：截圖、蓋上、切換、舊的一面開始動、開始等 ESLyric 畫好
+void start(std::unique_ptr<Transition> transition, HWND owner, std::function<void()>& apply)
+{
+    auto* g = graphics();
+    auto before = g ? capture(transition->screen) : nullptr;
+    if (!before) {
+        apply();
+        return;
+    }
+    ANIM_LOG_LINE(fmt::format("captured t={:.1f} size={}x{}", ANIM_LOG_NOW(), wil::rect_width(transition->screen),
+        wil::rect_height(transition->screen)));
+
+    transition->before_signature = signature_of(*before, transition->cover);
+    const auto base = transition->whole_stage ? nullptr : make_base(*before);
+
+    if (!show_overlay(*g, *transition, owner, *before, base.get())) {
+        ANIM_LOG_LINE("overlay failed");
+        const auto wnd = transition->wnd;
+        transition.reset();
+        if (wnd)
+            DestroyWindow(wnd);
+        apply();
+        return;
+    }
+    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
+
+    g_transition = std::move(transition);
+    apply();
+    g_transition->applied_at = GetTickCount64();
+    ANIM_LOG_LINE(fmt::format("applied t={:.1f}", ANIM_LOG_NOW()));
+
+    // 封面方塊：舊的一面一切換就開始縮小淡出（DWM 照螢幕更新跑，主執行緒忙也不停）
+    if (!g_transition->whole_stage && g_transition->old_layer) {
+        animate(*g, *g_transition->old_layer, 1.f, old_end_scale, 1.f, 0.f);
+        g->dcomp->Commit();
+    }
+    SetTimer(g_transition->wnd, poll_timer_id, poll_interval_ms, nullptr);
 }
 
 } // namespace
@@ -558,34 +701,7 @@ void run(std::function<void()> apply)
     transition->screen = screen;
     transition->cover = cover_screen;
     OffsetRect(&transition->cover, -screen.left, -screen.top);
-    transition->before = capture(screen);
-    ANIM_LOG_LINE(fmt::format("captured t={:.1f} size={}x{}", ANIM_LOG_NOW(), wil::rect_width(screen), wil::rect_height(screen)));
-
-    if (!transition->before) {
-        apply();
-        return;
-    }
-
-    transition->before_signature = signature_of(*transition->before, transition->cover);
-    transition->base = make_base(*transition->before);
-    transition->wnd = create_overlay(owner, screen);
-
-    if (!transition->wnd) {
-        apply();
-        return;
-    }
-
-    // 先把切換前的畫面蓋上去、等它真的合成到螢幕上，才在底下切換（不然會先閃一格切換後的畫面）
-    present(*transition, 0.0, 0.0);
-    ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
-    [[maybe_unused]] const auto hr = DwmFlush();
-
-    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
-    g_transition = std::move(transition);
-    apply();
-    ANIM_LOG_LINE(fmt::format("applied t={:.1f}", ANIM_LOG_NOW()));
-    g_transition->applied_at = GetTickCount64();
-    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    start(std::move(transition), owner, apply);
 }
 
 void run_stage(std::function<void()> apply)
@@ -603,37 +719,12 @@ void run_stage(std::function<void()> apply)
         return;
     }
 
-    auto transition = std::make_unique<Transition>();
     ANIM_LOG_BEGIN("stage");
+    auto transition = std::make_unique<Transition>();
     transition->whole_stage = true;
     transition->screen = stage;
     transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
-    transition->before = capture(stage);
-    ANIM_LOG_LINE(fmt::format("captured t={:.1f} size={}x{}", ANIM_LOG_NOW(), wil::rect_width(stage), wil::rect_height(stage)));
-
-    if (!transition->before) {
-        apply();
-        return;
-    }
-
-    transition->before_signature = signature_of(*transition->before, transition->cover);
-    transition->wnd = create_overlay(owner, stage);
-
-    if (!transition->wnd) {
-        apply();
-        return;
-    }
-
-    present(*transition, 0.0, 0.0);
-    ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
-    [[maybe_unused]] const auto hr = DwmFlush();
-
-    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
-    g_transition = std::move(transition);
-    apply();
-    ANIM_LOG_LINE(fmt::format("applied t={:.1f}", ANIM_LOG_NOW()));
-    g_transition->applied_at = GetTickCount64();
-    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    start(std::move(transition), owner, apply);
 }
 
 } // namespace cui::style_transition
