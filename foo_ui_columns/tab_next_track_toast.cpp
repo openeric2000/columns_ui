@@ -3,6 +3,7 @@
 #include "config.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "nocturne_tooltip.h"
 #include "dark_mode_dialog.h"
 #include "main_window.h"
 #include "now_playing_progress.h"
@@ -1032,6 +1033,69 @@ constexpr std::string_view open_preferences_marker = "[Nocturne] open-preference
 // - 「[Nocturne] ready」：網頁第一次載入完成（標頭、封面都套用了）。主視窗啟動時先不顯示，收到這句才顯示（開機優化 B，2026-11-06）；
 //   視窗不在等的時候（網頁重新載入、已經顯示）收到只是忽略
 constexpr std::string_view page_ready_marker = "[Nocturne] ready";
+// - 「[Nocturne] tip show <左> <上> <右> <下> <網頁寬> <網頁高> <文字>」：網頁元件的滑鼠提示（2026-11-12）。
+//   座標是網頁裡的實體像素（CSS 像素×devicePixelRatio）；用網頁寬高找出是哪個網頁面板，換成螢幕座標後畫在元件正下方
+//   （nocturne_tooltip.h）。「[Nocturne] tip hide」收起
+constexpr std::string_view web_tip_show_marker = "[Nocturne] tip show ";
+constexpr std::string_view web_tip_hide_marker = "[Nocturne] tip hide";
+
+// 主視窗底下、網頁內容大小等於 width×height（容許 2 像素誤差）的 WebView2 內容視窗
+HWND find_web_content_window(int width, int height)
+{
+    struct Search {
+        int width, height;
+        HWND found;
+    } search{width, height, nullptr};
+    EnumChildWindows(
+        core_api::get_main_window(),
+        [](HWND wnd, LPARAM lp) -> BOOL {
+            auto& s = *reinterpret_cast<Search*>(lp);
+            wchar_t name[64]{};
+            GetClassName(wnd, name, static_cast<int>(std::size(name)));
+            if (wcscmp(name, L"Chrome_RenderWidgetHostHWND") != 0 || !IsWindowVisible(wnd))
+                return TRUE;
+            RECT client{};
+            GetClientRect(wnd, &client);
+            if (std::abs(client.right - s.width) <= 2 && std::abs(client.bottom - s.height) <= 2) {
+                s.found = wnd;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+void handle_web_tip(std::string_view args)
+{
+    std::array<int, 6> numbers{};
+    auto cursor = args.data();
+    const auto end = args.data() + args.size();
+    for (auto& number : numbers) {
+        const auto result = std::from_chars(cursor, end, number);
+        if (result.ec != std::errc{} || result.ptr == end || *result.ptr != ' ')
+            return;
+        cursor = result.ptr + 1;
+    }
+    std::string text(cursor, end);
+    while (!text.empty() && (text.back() == '\r' || text.back() == '\n'))
+        text.pop_back();
+    if (text.empty())
+        return;
+
+    fb2k::inMainThread([numbers, text = std::move(text)] {
+        const auto content = find_web_content_window(numbers[4], numbers[5]);
+        if (!content)
+            return;
+        POINT top_left{numbers[0], numbers[1]};
+        POINT bottom_right{numbers[2], numbers[3]};
+        ClientToScreen(content, &top_left);
+        ClientToScreen(content, &bottom_right);
+        const RECT anchor{top_left.x, top_left.y, bottom_right.x, bottom_right.y};
+        nocturne_tooltip::show_below(
+            anchor, pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr(), GetDpiForWindow(content));
+    });
+}
 
 class WebKeyFromConsole : public console_receiver {
 public:
@@ -1040,6 +1104,15 @@ public:
         // SDK 的 console::print(const char*) 對所有 receiver 都傳 SIZE_MAX（＝以 \0 結尾、沒給長度），
         // 直接當長度用，字串搜尋會往記憶體後面一路讀下去（2026-11-05 實測：std::string_view::find 內部 memmove 寫爆堆疊，fb2k 啟動就崩潰）
         const std::string_view text(message, length == SIZE_MAX ? std::strlen(message) : length);
+
+        if (const auto position = text.find(web_tip_show_marker); position != std::string_view::npos) {
+            handle_web_tip(text.substr(position + web_tip_show_marker.size()));
+            return;
+        }
+        if (text.find(web_tip_hide_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { nocturne_tooltip::hide_below(); });
+            return;
+        }
 
         if (text.find(open_preferences_marker) != std::string_view::npos) {
             // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
