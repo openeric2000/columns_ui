@@ -33,6 +33,9 @@ void refresh_layouts();
 // 版面沒有標記、展開頁太矮或封面放不下時傳回空的。不看展開頁樣式（資訊卡也在同一塊），給封面⇄資訊卡的切換動畫用
 std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height);
 
+// 純封面模式的大封面位置（2026-11-12）：照標記的 solo-cover／solo-info 算，水平置中、封面＋gap＋solo-info 垂直置中；沒寫時傳回空的
+std::optional<RECT> solo_cover_rect_in_stage(int stage_width, int stage_height);
+
 // 歌詞欄在展開頁裡的位置（展開頁左上角為原點、實際像素，整個展開頁高），照標記的 lyrics-left／lyrics-right 算（2026-11-11）；
 // 例如 <!-- nocturne-cover-zoom: left=472 cover=600 gap=24 info=119 lyrics-left=1312 lyrics-right=100 vu-width=640 -->。
 // 標記沒有這兩個值、或展開頁太矮時傳回空的

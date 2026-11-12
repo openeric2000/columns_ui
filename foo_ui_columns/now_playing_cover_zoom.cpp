@@ -128,6 +128,11 @@ struct CoverGeometry {
     bool has_vu_column{};
     Length vu_left;
     Length vu_right;
+    // solo-cover／solo-info（2026-11-12，可省略）：純封面模式的大封面邊長、封面下面（gap 之後）歌名＋藝人的排版高度。
+    // 大封面水平置中、封面＋gap＋solo-info 在展開頁垂直置中；有寫才在純封面模式顯示放大鈕
+    bool has_solo{};
+    Length solo_cover;
+    Length solo_info;
 };
 
 std::wstring layout_file_path()
@@ -166,7 +171,8 @@ CoverGeometry parse_geometry(const std::string& text)
         (end == std::string::npos ? text.size() : end) - start - marker.size());
 
     CoverGeometry geometry;
-    bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{};
+    bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{},
+        has_solo_cover{}, has_solo_info{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -215,12 +221,19 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "vu-right") {
             geometry.vu_right = *value;
             has_vu_right = true;
+        } else if (key == "solo-cover") {
+            geometry.solo_cover = *value;
+            has_solo_cover = true;
+        } else if (key == "solo-info") {
+            geometry.solo_info = *value;
+            has_solo_info = true;
         }
     }
 
     geometry.valid = has_left && has_cover && has_gap && has_info && geometry.cover.value > 0;
     geometry.has_lyrics = has_lyrics_left && has_lyrics_right;
     geometry.has_vu_column = has_vu_left && has_vu_right;
+    geometry.has_solo = has_solo_cover && has_solo_info && geometry.solo_cover.value > 0;
     return geometry;
 }
 
@@ -383,8 +396,10 @@ private:
         if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
             return {};
 
-        // 資訊卡模式（樣式 3）沒有封面；純封面模式的大封面不在標記的位置（而且已經夠大，點封面就是看大圖）
-        if (main_menu::get_now_playing_style() == 3 || main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover)
+        // 純封面模式（2026-11-12 使用者要求跟封面＋歌詞一樣用右下角小按鈕看大圖）：位置照標記的 solo-cover／solo-info，
+        // 沒寫就不顯示（舊版面靠點封面開大圖）。其他模式的資訊卡（樣式 3）沒有封面
+        const auto solo = main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover;
+        if (!solo && main_menu::get_now_playing_style() == 3)
             return {};
 
         // GDI+ 字型表還在背景暖機時不在主執行緒建字型（同音量圖示），暖機做完會重排
@@ -394,7 +409,8 @@ private:
         // 展開頁＝分割面板扣掉底部播放列那一段（播放列視窗跟分割面板一樣大、在 (0, 0)）
         const auto stage_width = m_bar_rect.right - m_bar_rect.left;
         const auto stage_height = m_bar_rect.top;
-        const auto cover_rect = cover_rect_in_stage(stage_width, stage_height);
+        const auto cover_rect
+            = solo ? solo_cover_rect_in_stage(stage_width, stage_height) : cover_rect_in_stage(stage_width, stage_height);
         if (!cover_rect)
             return {};
 
@@ -612,6 +628,29 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
 
     // 跑出展開頁（視窗太小）就當作沒有
     if (cover <= 0 || cover_left + cover > stage_width || cover_top < 0 || cover_top + cover > stage_height)
+        return {};
+
+    return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
+}
+
+std::optional<RECT> solo_cover_rect_in_stage(int stage_width, int stage_height)
+{
+    const auto& geometry = layout_geometry();
+    if (!geometry.valid || !geometry.has_solo || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
+        return {};
+
+    const auto resolve = [stage_width](const Length& length) {
+        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
+                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    };
+
+    // 大封面水平置中；封面＋gap＋solo-info 在展開頁垂直置中（main.xml 的 stage-solo justify=middle）
+    const auto cover = resolve(geometry.solo_cover);
+    const auto cover_left = (stage_width - cover) / 2;
+    const auto group_height = cover + resolve(geometry.gap) + resolve(geometry.solo_info);
+    const auto cover_top = (stage_height - group_height) / 2;
+
+    if (cover <= 0 || cover_left < 0 || cover_top < 0 || cover_top + cover > stage_height)
         return {};
 
     return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
