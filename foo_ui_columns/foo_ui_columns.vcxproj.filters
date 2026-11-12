@@ -695,6 +695,9 @@
     <ClCompile Include="now_playing_mode_picker.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="popup_dismiss.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="now_playing_style_transition.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -1092,6 +1095,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="now_playing_mode_picker.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="popup_dismiss.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="now_playing_style_transition.h">

@@ -12,6 +12,7 @@
 #include "menu_items.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "popup_dismiss.h"
 #include "splitter.h"
 
 // 展開頁自繪 VU 表，說明見 now_playing_vu_meter.h
@@ -2909,7 +2910,6 @@ constexpr float spectrum_row_label_dip = 104.f;
 constexpr float spectrum_chip_h_dip = 32.f;
 constexpr int frame_hit_base = 200;
 constexpr int close_hit = 900;
-constexpr UINT_PTR watch_timer_id = 1;
 constexpr int bands_hit_base = 300;
 constexpr int fall_hit_base = 400;
 
@@ -2926,7 +2926,6 @@ struct Picker {
     float row_y[3]{};
     std::vector<uint32_t> spectrum_thumbs[spectrum_style_count];
     Gdiplus::RectF close_box;
-    HHOOK mouse_hook{};
     float k{1.f}; // DPI 倍率
     int width{};
     int height{};
@@ -3470,6 +3469,10 @@ void render(Picker& p)
 
 LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    // 點外面、切走程式、失去啟用、VU 表／頻譜藏起來時關（見 popup_dismiss.h）
+    if (popup_dismiss::handle_message(wnd, msg, wp, lp))
+        return 0;
+
     auto& picker = current();
     if (!picker || picker->wnd != wnd)
         return DefWindowProc(wnd, msg, wp, lp);
@@ -3539,27 +3542,10 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (wp == VK_ESCAPE)
             PostMessage(wnd, WM_CLOSE, 0, 0);
         return 0;
-    case WM_ACTIVATE:
-        if (LOWORD(wp) == WA_INACTIVE)
-            PostMessage(wnd, WM_CLOSE, 0, 0);
-        return 0;
-    case WM_TIMER:
-        // 2026-11-12 使用者遇到關不掉：卡片沒拿到焦點時點外面不會觸發 WA_INACTIVE。
-        // 每 0.25 秒檢查：前景換成別的程式、或 VU 表／頻譜藏起來（換模式、收合）就關
-        if (wp == watch_timer_id) {
-            DWORD process{};
-            GetWindowThreadProcessId(GetForegroundWindow(), &process);
-            if (process != GetCurrentProcessId() || !IsWindow(p.meter) || !IsWindowVisible(p.meter))
-                PostMessage(wnd, WM_CLOSE, 0, 0);
-        }
-        return 0;
     case WM_CLOSE:
         DestroyWindow(wnd);
         return 0;
     case WM_NCDESTROY:
-        KillTimer(wnd, watch_timer_id);
-        if (p.mouse_hook)
-            UnhookWindowsHookEx(p.mouse_hook);
         picker.reset();
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -3570,27 +3556,6 @@ void close()
 {
     if (auto& picker = current(); picker && picker->wnd)
         DestroyWindow(picker->wnd);
-}
-
-// 這個執行緒的滑鼠：卡片外面任何一個按鍵按下就關（點 fb2k 其他地方、VU 表本身、標題列都算）
-LRESULT CALLBACK mouse_hook_proc(int code, WPARAM wp, LPARAM lp)
-{
-    if (code == HC_ACTION) {
-        switch (wp) {
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN:
-        case WM_NCLBUTTONDOWN:
-        case WM_NCRBUTTONDOWN:
-        case WM_NCMBUTTONDOWN: {
-            const auto* info = reinterpret_cast<const MOUSEHOOKSTRUCT*>(lp);
-            if (const auto& picker = current(); picker && picker->wnd && info->hwnd != picker->wnd)
-                PostMessage(picker->wnd, WM_CLOSE, 0, 0);
-            break;
-        }
-        }
-    }
-    return CallNextHookEx(nullptr, code, wp, lp);
 }
 
 // 在滑鼠位置開卡片（卡片左上角對齊滑鼠，超出螢幕工作區就往內挪）
@@ -3641,8 +3606,9 @@ void open(HWND meter, POINT at)
         return;
     }
     current()->wnd = wnd;
-    current()->mouse_hook = SetWindowsHookEx(WH_MOUSE, mouse_hook_proc, nullptr, GetCurrentThreadId());
-    SetTimer(wnd, watch_timer_id, 250, nullptr);
+    // 自動關閉（點外面、切走程式、失去啟用；2026-11-12 使用者遇到卡片沒拿到焦點時點外面關不掉，所以有定時檢查）：
+    // VU 表／頻譜藏起來（換模式、收合）也關
+    popup_dismiss::attach(wnd, [meter] { return IsWindow(meter) && IsWindowVisible(meter); });
     render(*current());
     ShowWindow(wnd, SW_SHOW);
     SetForegroundWindow(wnd);

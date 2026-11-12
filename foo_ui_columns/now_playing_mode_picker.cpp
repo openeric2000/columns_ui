@@ -2,6 +2,7 @@
 
 #include "now_playing_mode_picker.h"
 #include "next_track_toast.h"
+#include "popup_dismiss.h"
 #include "nocturne_text.h"
 #include "splitter.h"
 #include "wic.h"
@@ -49,7 +50,7 @@ constexpr float appear_slide_dip = 6.f;
 // 點外面關掉後這麼短時間內又被叫開＝使用者是點左上角按鈕想把它關掉
 constexpr ULONGLONG reopen_guard_ms = 400;
 
-constexpr UINT_PTR watch_timer_id = 1;
+// 自動關閉的檢查計時器在 popup_dismiss 裡
 constexpr UINT_PTR appear_timer_id = 2;
 
 // 縮圖裡歌詞色條的長短（同預覽頁）
@@ -302,7 +303,6 @@ struct Picker {
     POINT origin{}; // 停好時視窗左上角（螢幕座標）
     ULONGLONG appear_start{};
     BYTE alpha{};
-    HHOOK mouse_hook{};
 };
 
 std::unique_ptr<Picker>& current_picker()
@@ -739,6 +739,10 @@ void update_appear(Picker& p)
 
 LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    // 點外面、切走程式、失去啟用、展開頁收合時關（見 popup_dismiss.h）
+    if (popup_dismiss::handle_message(wnd, msg, wp, lp))
+        return 0;
+
     auto& picker = current_picker();
     if (!picker || picker->wnd != wnd)
         return DefWindowProc(wnd, msg, wp, lp);
@@ -808,59 +812,19 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_GETDLGCODE:
         return DLGC_WANTALLKEYS;
-    case WM_ACTIVATE:
-        if (LOWORD(wp) == WA_INACTIVE)
-            PostMessage(wnd, WM_CLOSE, 0, 0);
-        return 0;
     case WM_TIMER:
-        if (wp == appear_timer_id) {
+        if (wp == appear_timer_id)
             update_appear(p);
-        } else if (wp == watch_timer_id) {
-            // 前景換成別的程式、或展開頁收合／換版面時關
-            DWORD process{};
-            GetWindowThreadProcessId(GetForegroundWindow(), &process);
-            RECT stage{};
-            HWND owner{};
-            if (process != GetCurrentProcessId()
-                || (p.on_stage && !panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage, owner)))
-                PostMessage(wnd, WM_CLOSE, 0, 0);
-        }
         return 0;
     case WM_CLOSE:
         DestroyWindow(wnd);
         return 0;
     case WM_NCDESTROY:
-        KillTimer(wnd, watch_timer_id);
         KillTimer(wnd, appear_timer_id);
-        if (p.mouse_hook)
-            UnhookWindowsHookEx(p.mouse_hook);
         picker.reset();
         return DefWindowProc(wnd, msg, wp, lp);
     }
     return DefWindowProc(wnd, msg, wp, lp);
-}
-
-// 這個執行緒的滑鼠：卡片外面任何一個按鍵按下就關，記下時間（緊接著的左上角按鈕指令當成「關掉」）
-LRESULT CALLBACK mouse_hook_proc(int code, WPARAM wp, LPARAM lp)
-{
-    if (code == HC_ACTION) {
-        switch (wp) {
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN:
-        case WM_NCLBUTTONDOWN:
-        case WM_NCRBUTTONDOWN:
-        case WM_NCMBUTTONDOWN: {
-            const auto* info = reinterpret_cast<const MOUSEHOOKSTRUCT*>(lp);
-            if (const auto& picker = current_picker(); picker && picker->wnd && info->hwnd != picker->wnd) {
-                last_outside_close() = GetTickCount64();
-                PostMessage(picker->wnd, WM_CLOSE, 0, 0);
-            }
-            break;
-        }
-        }
-    }
-    return CallNextHookEx(nullptr, code, wp, lp);
 }
 
 } // namespace
@@ -950,14 +914,21 @@ bool open(std::vector<Item> items, main_menu::NowPlayingMode current,
     }
     picker.wnd = wnd;
     picker.alpha = 0;
-    picker.mouse_hook = SetWindowsHookEx(WH_MOUSE, mouse_hook_proc, nullptr, GetCurrentThreadId());
+    // 自動關閉：在展開頁開的，展開頁收合／換版面時也關；點外面關掉時記下時間（緊接著的左上角按鈕指令當成「關掉」）
+    popup_dismiss::attach(
+        wnd,
+        [on_stage = picker.on_stage] {
+            RECT stage{};
+            HWND stage_owner{};
+            return !on_stage || panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage, stage_owner);
+        },
+        &last_outside_close());
     render(picker);
     ShowWindow(wnd, SW_SHOW);
     SetForegroundWindow(wnd);
     SetFocus(wnd);
     picker.appear_start = GetTickCount64();
     SetTimer(wnd, appear_timer_id, 15, nullptr);
-    SetTimer(wnd, watch_timer_id, 250, nullptr);
     return true;
 }
 
