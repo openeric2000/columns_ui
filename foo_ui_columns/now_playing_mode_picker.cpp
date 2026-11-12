@@ -3,6 +3,7 @@
 #include "now_playing_mode_picker.h"
 #include "next_track_toast.h"
 #include "popup_dismiss.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "splitter.h"
 #include "wic.h"
@@ -27,7 +28,7 @@ constexpr float thumb_w_dip = 138.f;
 constexpr float thumb_h_dip = 68.f;
 constexpr float label_gap_dip = 7.f;
 constexpr float label_h_dip = 20.f;
-constexpr float card_radius_dip = 16.f;
+constexpr float card_radius_dip = nocturne_surface::card_radius_dip; // 統一圓角（原本 16），霧面玻璃材質保留
 constexpr float tile_radius_dip = 11.f;
 constexpr float thumb_radius_dip = 7.f;
 constexpr float label_font_dip = 15.f;
@@ -565,8 +566,11 @@ void render(Picker& p)
                     pixels[index] = static_cast<uint32_t>(shadow_a * 255.f + 0.5f) << 24;
                     continue;
                 }
-                uint32_t fill = 0xF718191D; // 實心深色 rgba(24,25,29,.97)（預乘前）
-                float fill_a = 0.97f;
+                // 截不到背後畫面時的實心底，跟其他浮動元件統一（nocturne_surface.h，預乘前）
+                uint32_t fill = static_cast<uint32_t>(nocturne_surface::fill_alpha) << 24
+                    | static_cast<uint32_t>(nocturne_surface::fill_grey) << 16
+                    | static_cast<uint32_t>(nocturne_surface::fill_grey) << 8 | nocturne_surface::fill_grey;
+                float fill_a = nocturne_surface::fill_alpha / 255.f;
                 const auto bx = x - card_left;
                 const auto by = y - card_top;
                 if (!p.backdrop.empty() && bx >= 0 && by >= 0 && bx < p.backdrop_w && by < p.backdrop_h) {
@@ -595,7 +599,7 @@ void render(Picker& p)
         // 卡片細白邊＋上緣一道亮線
         const auto card_radius = px(p, card_radius_dip);
         {
-            const Gdiplus::Pen border(rgba(255, 255, 255, 0.10), 1.f);
+            const Gdiplus::Pen border(nocturne_surface::edge_colour(), 1.f);
             stroke_rounded(g, border, {p.card.X + 0.5f, p.card.Y + 0.5f, p.card.Width - 1.f, p.card.Height - 1.f}, card_radius);
             Gdiplus::GraphicsPath card_path;
             add_rounded(card_path, p.card, card_radius);

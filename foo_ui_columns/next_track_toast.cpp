@@ -7,6 +7,7 @@
 #include "next_track_toast.h"
 #include "font_utils.h"
 #include "menu_items.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "nocturne_timing.h"
 #include "splitter.h"
@@ -84,7 +85,7 @@ struct Layout {
         pad_left = px(21);
         pad_right = px(24);
         gap = px(16);
-        radius = px(16);
+        radius = px(nocturne_surface::card_radius_dip); // 統一圓角（原本 16）
         ring = px(46);
         cover = px(67);
         cover_radius = px(8);
@@ -352,11 +353,12 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
     const auto width = static_cast<float>(layout.width);
     const auto height = static_cast<float>(layout.height);
 
+    // 底色、細邊跟其他浮動元件統一（nocturne_surface.h），不透明度維持 card_alpha（半透明，透出展開頁背景色）
     Gdiplus::GraphicsPath card;
     add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, width - 1, height - 1), static_cast<float>(layout.radius));
-    Gdiplus::SolidBrush background(rgba(card_alpha, 30, 31, 33));
+    Gdiplus::SolidBrush background(nocturne_surface::fill_colour(card_alpha));
     g.FillPath(&background, &card);
-    Gdiplus::Pen border(rgba(26, 255, 255, 255), 1.f);
+    Gdiplus::Pen border(nocturne_surface::edge_colour(), 1.f);
     g.DrawPath(&border, &card);
 
     auto x = static_cast<float>(layout.pad_left + layout.ring + layout.gap);

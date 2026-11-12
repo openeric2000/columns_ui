@@ -505,6 +505,7 @@
     <ClInclude Include="now_playing_vu_meter.h" />
     <ClInclude Include="now_playing_mode_picker.h" />
     <ClInclude Include="popup_dismiss.h" />
+    <ClInclude Include="nocturne_surface.h" />
     <ClInclude Include="now_playing_style_transition.h" />
     <ClInclude Include="nocturne_default_stub.h" />
     <ClInclude Include="thin_scrollbar.h" />

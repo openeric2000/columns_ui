@@ -11,6 +11,7 @@
 #include "now_playing_cover_zoom.h"
 #include "menu_items.h"
 #include "next_track_toast.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "popup_dismiss.h"
 #include "splitter.h"
@@ -2894,7 +2895,7 @@ constexpr float tile_h_dip = 96.f;
 constexpr float tile_gap_dip = 12.f;
 constexpr float label_h_dip = 30.f;
 constexpr float row_h_dip = 40.f;
-constexpr float radius_dip = 14.f;
+constexpr float radius_dip = nocturne_surface::card_radius_dip; // 統一圓角（原本 14）
 constexpr int backlight_hit = 50;
 constexpr int needle_hit_base = 100; // 指針設定那排：100＋第幾個
 constexpr float section_h_dip = 26.f;
@@ -3247,10 +3248,10 @@ void render(Picker& p)
         g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
         g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
 
-        // 卡片：深色、上緣一點光澤、細白邊
+        // 卡片：底與細邊跟其他浮動元件統一（nocturne_surface.h），上緣保留一點光澤
         Gdiplus::GraphicsPath card_path;
         add_panel_path(card_path, p.card, radius_dip * k);
-        const Gdiplus::SolidBrush card_fill(rgba(24, 25, 29, 0.97));
+        const Gdiplus::SolidBrush card_fill(nocturne_surface::fill_colour());
         g.FillPath(&card_fill, &card_path);
         {
             Gdiplus::LinearGradientBrush sheen(Gdiplus::PointF(0, p.card.Y), Gdiplus::PointF(0, p.card.Y + 60.f * k),
@@ -3259,7 +3260,7 @@ void render(Picker& p)
             g.FillRectangle(&sheen, p.card.X, p.card.Y, p.card.Width, 60.f * k);
             g.ResetClip();
         }
-        const Gdiplus::Pen card_border(rgba(255, 255, 255, 0.10), 1.f * k);
+        const Gdiplus::Pen card_border(nocturne_surface::edge_colour(), 1.f * k);
         g.DrawPath(&card_border, &card_path);
 
         std::unique_ptr<Gdiplus::FontFamily> family = theme_family();

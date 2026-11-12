@@ -4,6 +4,7 @@
 #include "font_utils.h"
 #include "menu_items.h"
 #include "next_track_toast.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "output_chip.h"
 
@@ -60,8 +61,7 @@ constexpr float wheel_step_db = 2.0f;
 const Gdiplus::Color icon_colour(255, 216, 216, 216);
 // 靜音：柔和的玫瑰紅（跟輸出裝置顯示的靜音同色）
 const Gdiplus::Color mute_colour(255, 214, 134, 134);
-const Gdiplus::Color pill_fill_colour(230, 24, 24, 24);
-const Gdiplus::Color pill_border_colour(26, 255, 255, 255);
+// 膠囊的底與邊統一在 nocturne_surface.h（2026-11-12，原本灰 24／90% 不透明）
 const Gdiplus::Color track_colour(255, 74, 74, 74);
 const Gdiplus::Color bright_colour(255, 241, 241, 241);
 const Gdiplus::Color muted_grey_colour(255, 138, 138, 138);
@@ -503,24 +503,8 @@ private:
 
         const Gdiplus::RectF body(static_cast<float>(m_pill_x), static_cast<float>(m_pill_y), static_cast<float>(m_pill_w),
             static_cast<float>(m_pill_h));
-        const auto radius = static_cast<float>(m_pill_w) / 2.0f;
-
-        // 柔和陰影：往外擴的幾層很淡的圓角框
-        for (int i = m_shadow; i >= 1; i -= std::max(1, m_shadow / 5)) {
-            Gdiplus::GraphicsPath path;
-            add_round_rect(path,
-                Gdiplus::RectF(body.X - i, body.Y - i + m_shadow / 3.f, body.Width + 2.f * i, body.Height + 2.f * i),
-                radius + i);
-            const Gdiplus::SolidBrush brush(Gdiplus::Color(static_cast<BYTE>(10 + (m_shadow - i) * 2), 0, 0, 0));
-            g.FillPath(&brush, &path);
-        }
-
-        Gdiplus::GraphicsPath body_path;
-        add_round_rect(body_path, body, radius);
-        const Gdiplus::SolidBrush fill(pill_fill_colour);
-        g.FillPath(&fill, &body_path);
-        const Gdiplus::Pen border(pill_border_colour, 1.f);
-        g.DrawPath(&border, &body_path);
+        // 統一外觀（nocturne_surface.h）：柔和陰影＋實心底＋細邊，膠囊形
+        nocturne_surface::paint_panel(g, body, static_cast<float>(m_pill_w) / 2.0f, m_shadow);
 
         // 軌道、已填的部分、圓點
         const auto track_w = std::max(2.0f, dip_f(track_width_dip));
@@ -581,12 +565,8 @@ private:
         const auto right = static_cast<float>(m_pill_x - dip(bubble_gap_dip));
         const Gdiplus::RectF rect(right - width, thumb_y - height / 2, width, height);
 
-        Gdiplus::GraphicsPath path;
-        add_round_rect(path, rect, static_cast<float>(dip(6)));
-        const Gdiplus::SolidBrush fill(Gdiplus::Color(230, 24, 24, 24));
-        g.FillPath(&fill, &path);
-        const Gdiplus::Pen border(Gdiplus::Color(31, 255, 255, 255), 1.f);
-        g.DrawPath(&border, &path);
+        // dB 提示泡跟滑鼠提示同一種樣子（nocturne_surface.h 的提示泡圓角，不加陰影）
+        nocturne_surface::paint_panel(g, rect, dip_f(nocturne_surface::tip_radius_dip), 0);
 
         const Gdiplus::SolidBrush brush(muted ? mute_colour : bubble_text_colour);
         g.DrawString(text.c_str(), -1, &font, rect, &format, &brush);

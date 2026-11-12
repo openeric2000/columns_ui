@@ -6,6 +6,7 @@
 #include "fb2k_misc.h"
 #include "font_utils.h"
 #include "next_track_toast.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "volume_chip.h"
 
@@ -59,7 +60,7 @@ constexpr int panel_padding_x = 14;
 constexpr int panel_padding_top = 10;
 constexpr int panel_padding_bottom = 11;
 constexpr int panel_min_width = 250;
-constexpr int panel_radius = 10;
+// 面板圓角統一在 nocturne_surface.h（2026-11-12，原本 10）
 constexpr int panel_shadow = 10;
 constexpr int panel_gap_above_chip = 8;
 constexpr float panel_small_font_dip = 12;
@@ -523,24 +524,8 @@ private:
 
             const Gdiplus::RectF body(static_cast<float>(shadow), static_cast<float>(shadow),
                 static_cast<float>(body_width), static_cast<float>(body_height));
-            const auto radius = static_cast<float>(dip(panel_radius));
-
-            // 柔和陰影：往外擴的幾層很淡的圓角框
-            for (int i = shadow; i >= 1; i -= std::max(1, shadow / 5)) {
-                Gdiplus::GraphicsPath path;
-                add_round_rect(path,
-                    Gdiplus::RectF(body.X - i, body.Y - i + shadow / 3.f, body.Width + 2.f * i, body.Height + 2.f * i),
-                    radius + i);
-                const Gdiplus::SolidBrush brush(Gdiplus::Color(static_cast<BYTE>(10 + (shadow - i) * 2), 0, 0, 0));
-                g.FillPath(&brush, &path);
-            }
-
-            Gdiplus::GraphicsPath body_path;
-            add_round_rect(body_path, body, radius);
-            const Gdiplus::SolidBrush fill(Gdiplus::Color(255, 38, 38, 38));
-            g.FillPath(&fill, &body_path);
-            const Gdiplus::Pen border(Gdiplus::Color(255, 72, 72, 72), 1.f);
-            g.DrawPath(&border, &body_path);
+            // 統一外觀（nocturne_surface.h）：柔和陰影＋實心底＋細邊
+            nocturne_surface::paint_panel(g, body, dip_f(nocturne_surface::card_radius_dip), shadow);
 
             Gdiplus::StringFormat format(Gdiplus::StringFormat::GenericTypographic());
             format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap | Gdiplus::StringFormatFlagsNoClip);
@@ -632,26 +617,10 @@ void present_layered(HWND wnd, const POINT* origin, int width, int height, const
     UpdateLayeredWindow(wnd, screen_dc.get(), const_cast<POINT*>(origin), &size, memory_dc.get(), &source, 0, &blend, ULW_ALPHA);
 }
 
-// 面板底：柔和陰影＋圓角底＋細框（滑過面板與清單共用的樣子）
+// 面板底：柔和陰影＋圓角底＋細框（滑過面板與清單共用的樣子，外觀統一在 nocturne_surface.h）
 void draw_panel_body(Gdiplus::Graphics& g, const Gdiplus::RectF& body, int shadow)
 {
-    const auto radius = static_cast<float>(dip(panel_radius));
-
-    for (int i = shadow; i >= 1; i -= std::max(1, shadow / 5)) {
-        Gdiplus::GraphicsPath path;
-        add_round_rect(path,
-            Gdiplus::RectF(body.X - i, body.Y - i + shadow / 3.f, body.Width + 2.f * i, body.Height + 2.f * i),
-            radius + i);
-        const Gdiplus::SolidBrush brush(Gdiplus::Color(static_cast<BYTE>(10 + (shadow - i) * 2), 0, 0, 0));
-        g.FillPath(&brush, &path);
-    }
-
-    Gdiplus::GraphicsPath body_path;
-    add_round_rect(body_path, body, radius);
-    const Gdiplus::SolidBrush fill(Gdiplus::Color(255, 38, 38, 38));
-    g.FillPath(&fill, &body_path);
-    const Gdiplus::Pen border(Gdiplus::Color(255, 72, 72, 72), 1.f);
-    g.DrawPath(&border, &body_path);
+    nocturne_surface::paint_panel(g, body, dip_f(nocturne_surface::card_radius_dip), shadow);
 }
 
 class DeviceMenu {

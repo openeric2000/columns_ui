@@ -1097,6 +1097,9 @@
     <ClInclude Include="popup_dismiss.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="nocturne_surface.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="now_playing_style_transition.h">
       <Filter>Utilities</Filter>
     </ClInclude>
