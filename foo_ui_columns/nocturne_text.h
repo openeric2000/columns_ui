@@ -161,13 +161,10 @@ inline constexpr auto mode_lyrics_spectrum_name = "Now Playing: Lyrics + Spectru
 inline constexpr auto mode_lyrics_spectrum_description = "Shows the lyrics with a smaller spectrum analyser below them.";
 inline constexpr auto mode_button_name = "Switch Now Playing Content";
 inline constexpr auto mode_button_description = "Moves the now playing view to the next content.";
-// 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
+// 彈出卡、設定頁與「換下一種」時按鈕旁的提示共用（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
 inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (not in this layout)",
     L"Spectrum", L"Spectrum (not in this layout)", L"Lyrics + VU meter", L"Lyrics + VU meter (not in this layout)",
     L"Lyrics + spectrum", L"Lyrics + spectrum (not in this layout)"};
-// 依模式數字 1～6
-inline constexpr const char* mode_toast_names[6]
-    = {"Lyrics", "Cover only", "VU meter", "Spectrum", "Lyrics + VU meter", "Lyrics + spectrum"};
 // 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
 inline constexpr wchar_t mode_picker_unavailable[] = L"Not in this layout";
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
@@ -371,11 +368,9 @@ inline constexpr auto mode_lyrics_spectrum_name = "展開頁：歌詞＋頻譜";
 inline constexpr auto mode_lyrics_spectrum_description = "展開頁歌詞往上，下面放縮小的頻譜。";
 inline constexpr auto mode_button_name = "切換展開頁顯示內容";
 inline constexpr auto mode_button_description = "展開頁換成下一種顯示內容。";
-// 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
+// 彈出卡、設定頁與「換下一種」時按鈕旁的提示共用（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
 inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（版面不支援）", L"頻譜",
     L"頻譜（版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（版面不支援）"};
-// 依模式數字 1～6
-inline constexpr const char* mode_toast_names[6] = {"歌詞", "純封面", "VU 表", "頻譜", "歌詞＋VU 表", "歌詞＋頻譜"};
 // 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
 inline constexpr wchar_t mode_picker_unavailable[] = L"版面不支援";
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段

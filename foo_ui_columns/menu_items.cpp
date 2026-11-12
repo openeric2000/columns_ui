@@ -676,7 +676,10 @@ public:
             const auto toast = mode_toast.load();
             if (toast < 1 || toast > main_menu::now_playing_mode_count)
                 return false;
-            out->write(titleformat_inputtypes::meta, nocturne_text::mode_toast_names[toast - 1]);
+            // 名稱跟彈出卡、設定頁共用 mode_short_names（2026-11-12 拿掉重複的 mode_toast_names）
+            const pfc::stringcvt::string_utf8_from_wide name(
+                nocturne_text::mode_short_names[main_menu::mode_name_index(static_cast<main_menu::NowPlayingMode>(toast))]);
+            out->write(titleformat_inputtypes::meta, name.get_ptr());
             return true;
         }
 
