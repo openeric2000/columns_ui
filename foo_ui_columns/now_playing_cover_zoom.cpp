@@ -100,12 +100,23 @@ const Gdiplus::FontFamily* icon_family()
 }
 
 // ---- main.xml 裡的封面位置標記 ----
-// <!-- nocturne-cover-zoom: left=472 cover=600 gap=24 info=190 -->；數字是 DIP，加 % 是展開頁寬度的百分比
+// <!-- nocturne-cover-zoom: left=472 cover=600 gap=24 info=190 -->；數字是 DIP，加 % 是展開頁寬度的百分比，
+// 加 %h 是展開頁高度的百分比（2026-11-12：169 封面改照高度算，縮放比例大時才不會頂到播放列）
 // 版面檔位置跟 volume_chip.cpp 相同；檔案最後修改時間變了才重讀，而且最多每秒檢查一次
 struct Length {
     double value{};
     bool percent{};
+    bool of_height{}; // percent 為 true 時才有意義：true＝展開頁高的百分比
 };
+
+// 把標記的長度換成實際像素（展開頁寬高也是實際像素）
+int resolve_length(const Length& length, int stage_width, int stage_height)
+{
+    if (!length.percent)
+        return uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto base = length.of_height ? stage_height : stage_width;
+    return static_cast<int>(std::lround(base * length.value / 100.0));
+}
 
 struct CoverGeometry {
     bool valid{};
@@ -145,7 +156,11 @@ std::wstring layout_file_path()
 std::optional<Length> parse_length(std::string_view text)
 {
     Length length;
-    if (!text.empty() && text.back() == '%') {
+    if (text.size() >= 2 && text.substr(text.size() - 2) == "%h") {
+        length.percent = true;
+        length.of_height = true;
+        text.remove_suffix(2);
+    } else if (!text.empty() && text.back() == '%') {
         length.percent = true;
         text.remove_suffix(1);
     }
@@ -615,9 +630,8 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
     if (!geometry.valid || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
         return {};
 
-    const auto resolve = [stage_width](const Length& length) {
-        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto resolve = [stage_width, stage_height](const Length& length) {
+        return resolve_length(length, stage_width, stage_height);
     };
 
     // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）
@@ -639,9 +653,8 @@ std::optional<RECT> solo_cover_rect_in_stage(int stage_width, int stage_height)
     if (!geometry.valid || !geometry.has_solo || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
         return {};
 
-    const auto resolve = [stage_width](const Length& length) {
-        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto resolve = [stage_width, stage_height](const Length& length) {
+        return resolve_length(length, stage_width, stage_height);
     };
 
     // 大封面水平置中；封面＋gap＋solo-info 在展開頁垂直置中（main.xml 的 stage-solo justify=middle）
@@ -662,8 +675,7 @@ std::optional<int> info_top_in_stage(int stage_width, int stage_height)
     if (!cover)
         return {};
     const auto& geometry = layout_geometry();
-    const auto gap = geometry.gap.percent ? static_cast<int>(std::lround(stage_width * geometry.gap.value / 100.0))
-                                          : uih::scale_dpi_value(static_cast<int>(std::lround(geometry.gap.value)));
+    const auto gap = resolve_length(geometry.gap, stage_width, stage_height);
     return static_cast<int>(cover->bottom) + gap;
 }
 
@@ -673,9 +685,8 @@ std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
     if (!cover)
         return {};
     const auto& geometry = layout_geometry();
-    const auto resolve = [stage_width](const Length& length) {
-        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto resolve = [stage_width, stage_height](const Length& length) {
+        return resolve_length(length, stage_width, stage_height);
     };
     return static_cast<int>(cover->bottom) + resolve(geometry.gap) + resolve(geometry.info);
 }
@@ -686,9 +697,8 @@ std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
     if (!geometry.has_lyrics || stage_width <= 0 || stage_height < dip(stage_min_height_dip))
         return {};
 
-    const auto resolve = [stage_width](const Length& length) {
-        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto resolve = [stage_width, stage_height](const Length& length) {
+        return resolve_length(length, stage_width, stage_height);
     };
 
     const auto left = resolve(geometry.lyrics_left);
@@ -711,9 +721,8 @@ std::optional<RECT> vu_column_in_stage(int stage_width, int stage_height)
     const auto& geometry = layout_geometry();
     if (!geometry.has_vu_column || !lyrics_column_in_stage(stage_width, stage_height))
         return {};
-    const auto resolve = [stage_width](const Length& length) {
-        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
-                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    const auto resolve = [stage_width, stage_height](const Length& length) {
+        return resolve_length(length, stage_width, stage_height);
     };
     const auto left = resolve(geometry.vu_left);
     const auto right = stage_width - resolve(geometry.vu_right);
@@ -734,9 +743,7 @@ std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height)
         column = vu_column;
     auto width = static_cast<int>(column->right - column->left);
     if (geometry.has_vu_width) {
-        const auto cap = geometry.vu_width.percent
-            ? static_cast<int>(std::lround(stage_width * geometry.vu_width.value / 100.0))
-            : uih::scale_dpi_value(static_cast<int>(std::lround(geometry.vu_width.value)));
+        const auto cap = resolve_length(geometry.vu_width, stage_width, stage_height);
         width = std::min(width, cap);
     }
 
