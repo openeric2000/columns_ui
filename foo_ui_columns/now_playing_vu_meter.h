@@ -46,7 +46,8 @@ enum class NeedlePreset : int {
 };
 inline constexpr int needle_preset_count = 4;
 inline constexpr char needle_preset_config_key[] = "nocturne.vuMeter.needle";
-inline constexpr NeedlePreset needle_preset_default = NeedlePreset::standard;
+// 預設「自動」（2026-11-12 使用者同意：各曲母帶音量差很多，固定校準忽高忽低；已存過設定的環境照存的值）
+inline constexpr NeedlePreset needle_preset_default = NeedlePreset::automatic;
 
 NeedlePreset get_needle_preset();
 void set_needle_preset(NeedlePreset preset);
