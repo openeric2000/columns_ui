@@ -39,8 +39,12 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height);
 std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height);
 
 // VU 表模式時「展開頁右側」面板（VU 表）的位置：歌詞欄左緣、寬度＝歌詞欄寬（標記有 vu-width 時不超過它）、
-// 高度照 VU 外觀比例 830×199、在展開頁垂直置中。沒有歌詞欄位置時傳回空的（＝這個版面沒有 VU 表模式）
+// 高度照 VU 外觀比例 830×199、在展開頁垂直置中。沒有歌詞欄位置時傳回空的（＝這個版面沒有 VU 表模式）。
+// 標記另外寫了 vu-left／vu-right（2026-11-12）時改用那一欄，不跟歌詞欄連動
 std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height);
+
+// 標記的 vu-left／vu-right 那一欄（2026-11-12，整個展開頁高）；沒寫時傳回空的
+std::optional<RECT> vu_column_in_stage(int stage_width, int stage_height);
 
 // 「歌詞＋VU 表」「歌詞＋頻譜」時歌詞在歌詞欄上半、下半放 VU 表／頻譜（2026-11-12）：歌詞那塊的下緣（展開頁左上角為原點、實際像素）。
 // 照標記的 lyrics-split（展開頁高的百分比，main.xml 裡上半那塊的高度要一致），沒寫時是 56%

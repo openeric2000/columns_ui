@@ -123,6 +123,11 @@ struct CoverGeometry {
     // lyrics-split（2026-11-12）：歌詞＋VU 表／頻譜時，歌詞那塊佔展開頁高的百分比
     bool has_lyrics_split{};
     Length lyrics_split;
+    // vu-left／vu-right（2026-11-12，可省略）：單獨 VU 表／頻譜模式改照這一欄放，不跟歌詞欄綁在一起
+    // （219 使用者要歌詞往右、VU 維持原位）。沒寫時照歌詞欄
+    bool has_vu_column{};
+    Length vu_left;
+    Length vu_right;
 };
 
 std::wstring layout_file_path()
@@ -161,7 +166,7 @@ CoverGeometry parse_geometry(const std::string& text)
         (end == std::string::npos ? text.size() : end) - start - marker.size());
 
     CoverGeometry geometry;
-    bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{};
+    bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -204,11 +209,18 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "lyrics-split") {
             geometry.lyrics_split = *value;
             geometry.has_lyrics_split = value->percent && value->value > 10 && value->value < 90;
+        } else if (key == "vu-left") {
+            geometry.vu_left = *value;
+            has_vu_left = true;
+        } else if (key == "vu-right") {
+            geometry.vu_right = *value;
+            has_vu_right = true;
         }
     }
 
     geometry.valid = has_left && has_cover && has_gap && has_info && geometry.cover.value > 0;
     geometry.has_lyrics = has_lyrics_left && has_lyrics_right;
+    geometry.has_vu_column = has_vu_left && has_vu_right;
     return geometry;
 }
 
@@ -655,13 +667,32 @@ int lyrics_split_y(int stage_height)
     return static_cast<int>(std::lround(stage_height * percent / 100.0));
 }
 
+std::optional<RECT> vu_column_in_stage(int stage_width, int stage_height)
+{
+    const auto& geometry = layout_geometry();
+    if (!geometry.has_vu_column || !lyrics_column_in_stage(stage_width, stage_height))
+        return {};
+    const auto resolve = [stage_width](const Length& length) {
+        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
+                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    };
+    const auto left = resolve(geometry.vu_left);
+    const auto right = stage_width - resolve(geometry.vu_right);
+    if (left < 0 || right - left < dip(40))
+        return {};
+    return RECT{left, 0, right, stage_height};
+}
+
 std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height)
 {
-    const auto column = lyrics_column_in_stage(stage_width, stage_height);
+    auto column = lyrics_column_in_stage(stage_width, stage_height);
     if (!column)
         return {};
 
     const auto& geometry = layout_geometry();
+    // 標記有 vu-left／vu-right 時，單獨 VU 表／頻譜改照這一欄放（歌詞欄另外調不會連動）
+    if (const auto vu_column = vu_column_in_stage(stage_width, stage_height))
+        column = vu_column;
     auto width = static_cast<int>(column->right - column->left);
     if (geometry.has_vu_width) {
         const auto cap = geometry.vu_width.percent
