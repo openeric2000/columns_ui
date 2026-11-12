@@ -181,6 +181,12 @@ constexpr float combined_scale = 0.7f;
 constexpr int combined_overlap_dip = 28;
 // 標記的 info 是排版高度，最後一行字實際畫到再下面約 12 DIP（2026-11-12 在 169 截圖量的）
 constexpr int combined_info_overhang_dip = 12;
+// 歌詞＋VU 表（2026-11-12 使用者看了說 VU 太小、左右兩個錶太靠近）：高度一樣跟左邊資訊同高，改往橫向長——
+// 方框雙錶用滿歌詞欄寬的 combined_width_ratio、兩錶間距 combined_box_gap_px（×s）；單錶雙指針寬到高的 1/combined_dual_aspect；
+// 圓形錶頭被高度限制，只把兩顆拉開
+constexpr float combined_width_ratio = 0.92f;
+constexpr float combined_box_gap_px = 64.f;
+constexpr float combined_dual_aspect = 0.25f;
 constexpr float spec_min_label_px = 10.f; // 頻譜頻率字（13u）最小 10 DIP → u ≥ 10/13
 
 double pos_of_db(double db)
@@ -420,6 +426,12 @@ struct Dial {
     double half_span;
 };
 
+// 單錶雙指針的基準單位（原本＝錶寬 ÷ 600，錶高是寬的 0.35）：錶比 600:210 寬時改用高度，字與燈不會跑出錶框
+float dual_unit(const Gdiplus::RectF& panel)
+{
+    return std::min(panel.Width / 600.f, panel.Height / 210.f);
+}
+
 double angle_of_pos(const Dial& dial, double pos)
 {
     return -dial.half_span + 2.0 * dial.half_span * std::clamp(pos, -0.02, 1.04);
@@ -446,8 +458,10 @@ Dial dial_of(const State& state, const Gdiplus::RectF& panel)
         return {panel.X + rc, panel.Y + rc + drop, std::max(label - 18.f * s, rc * 0.4f), round_half_span};
     }
     case Style::dual: {
-        const auto u = panel.Width / 600.f;
-        const auto r = 300.f * u;
+        // 刻度弧半徑：原本 300u；錶比較寬時用寬度放大，但弧的兩端不能低於錶框底往上 18u（照原比例反推）
+        const auto u = dual_unit(panel);
+        const auto sag = static_cast<float>(1.0 - std::cos(dual_half_span));
+        const auto r = std::max(300.f * u, std::min(panel.Width / 2.f, (panel.Height - 70.f * u) / sag));
         return {panel.X + panel.Width / 2.f, panel.Y + 52.f * u + r, r, dual_half_span};
     }
     default: {
@@ -608,15 +622,26 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
         if (box_h <= 0.f || full_w <= 0.f || full_h <= 0.f)
             return {};
         if (!content.spectrum) {
-            // VU 表：錶本體（視窗扣掉陰影邊）等比例縮到 box_h 高
-            const auto body_h = full_h - (margin_top_px + margin_bottom_px) * plan->scale;
-            const auto f = box_h / body_h;
-            const auto scale = plan->scale * f;
+            // VU 表：錶本體高＝box_h（字與線條倍率 s 照方框錶框高 157 換算），寬度依樣式往橫向長
+            const auto scale = box_h / base_height;
+            const auto col_w = static_cast<float>(column->right - column->left) * combined_width_ratio;
+            float body_w{};
+            switch (style) {
+            case Style::round:
+                body_w = 2.f * box_h + combined_box_gap_px * scale;
+                break;
+            case Style::dual:
+                body_w = std::min(col_w, box_h / combined_dual_aspect);
+                break;
+            default:
+                body_w = col_w;
+                break;
+            }
             const auto left = column->left - static_cast<LONG>(std::lround(margin_x_px * scale));
             const auto top = static_cast<LONG>(std::lround(box_top - margin_top_px * scale));
-            return WindowPlan{RECT{left, top, left + static_cast<LONG>(std::lround(full_w * f)),
-                                  top + static_cast<LONG>(std::lround(full_h * f))},
-                scale};
+            const auto width = static_cast<LONG>(std::lround(body_w + 2.f * margin_x_px * scale));
+            const auto height = static_cast<LONG>(std::lround(box_h + (margin_top_px + margin_bottom_px) * scale));
+            return WindowPlan{RECT{left, top, left + width, top + height}, scale};
         }
         // 頻譜：寬度照舊（縮 combined_scale 倍），高度依 box 算
         const auto panel_w = spec_ref_w * plan->scale * combined_scale;
@@ -719,7 +744,11 @@ void rebuild_geometry(State& state, int width, int height, float scale)
     const auto mx = margin_x_px * s;
     const auto mt = margin_top_px * s;
     const auto vu_w = width - 2.f * mx;
-    const auto max_h = std::max(1.f, std::floor(height - mt));
+    // 歌詞＋VU 表：錶本體高＝視窗扣掉上下陰影邊（左邊資訊的高度）
+    const auto max_h = state.combined ? std::max(1.f, std::floor(height - mt - margin_bottom_px * s))
+                                      : std::max(1.f, std::floor(height - mt));
+    const auto box_gap = (state.combined ? combined_box_gap_px : box_gap_px) * s;
+    const auto ring_gap = (state.combined ? combined_box_gap_px : round_gap_px) * s;
 
     if (state.spectrum) {
         // 頻譜：一個錶框（不要框時不畫玻璃與陰影，但位置照樣算，接右鍵用），裡面的 plot 是畫頻譜的範圍
@@ -752,7 +781,7 @@ void rebuild_geometry(State& state, int width, int height, float scale)
         state.glow.assign(static_cast<size_t>(state.glow_w) * state.glow_h * 4, 0.f);
     } else switch (state.style) {
     case Style::round: {
-        const auto gap = round_gap_px * s;
+        const auto gap = ring_gap;
         const auto d = std::max(1.f, std::min(std::floor((vu_w - gap) / 2.f), max_h));
         state.panel_count = 2;
         state.panels[0] = {std::round(mx), std::round(mt), d, d};
@@ -775,10 +804,10 @@ void rebuild_geometry(State& state, int width, int height, float scale)
     }
     default: {
         const auto ph = std::max(1.f, std::min(std::round(base_height * s), max_h));
-        const auto pw = std::max(1.f, std::floor((vu_w - box_gap_px * s) / 2.f));
+        const auto pw = std::max(1.f, std::floor((vu_w - box_gap) / 2.f));
         state.panel_count = 2;
         state.panels[0] = {std::round(mx), std::round(mt), pw, ph};
-        state.panels[1] = {std::round(mx + pw + box_gap_px * s), std::round(mt), pw, ph};
+        state.panels[1] = {std::round(mx + pw + box_gap), std::round(mt), pw, ph};
         state.panel_radius = box_radius_px * s;
         state.bezel = box_bezel_px * s;
         state.refraction = box_refraction_px * s;
@@ -1115,7 +1144,7 @@ int lamps_of(const State& state, int index, Lamp* out)
         return 1;
     }
     case Style::dual: {
-        const auto u = panel.Width / 600.f;
+        const auto u = dual_unit(panel);
         out[0] = {{panel.X + panel.Width - 46.f * u, panel.Y + 26.f * u}, 0};
         out[1] = {{panel.X + panel.Width - 26.f * u, panel.Y + 26.f * u}, 1};
         return 2;
@@ -1170,7 +1199,7 @@ void draw_face_text(Gdiplus::Graphics& g, const State& state, int index, const G
     }
     case Style::dual: {
         // 雙指針：左下角是聲道圖例（白點 L、琥珀點 R），右下角校準字，右上角 PEAK 和兩顆燈
-        const auto u = panel.Width / 600.f;
+        const auto u = dual_unit(panel);
         const auto bottom = panel.Y + panel.Height - 22.f * u;
         const Gdiplus::Font dual_vu_font(&family, 27.f * s, bold, Gdiplus::UnitPixel);
         draw_text(g, L"VU", dual_vu_font, vu_colour, {panel.X + panel.Width / 2.f, panel.Y + panel.Height * 0.62f},
@@ -1215,7 +1244,7 @@ void draw_backlight(Gdiplus::Graphics& g, const State& state, const Gdiplus::Rec
         cy = panel.Y + rc + (round_pivot_drop + 0.2f) * rc;
         r = 1.1f * rc;
     } else if (state.style == Style::dual) {
-        cy = panel.Y + panel.Height + 10.f * panel.Width / 600.f;
+        cy = panel.Y + panel.Height + 10.f * dual_unit(panel);
         r = panel.Width * 0.5f;
     }
     Gdiplus::GraphicsPath glow_path;
@@ -2061,7 +2090,7 @@ void draw_dynamic(State& state, const RECT* region = nullptr)
             break;
         case Style::dual: {
             // 右聲道（琥珀）先畫，左聲道（白）疊在上面
-            const auto u = panel.Width / 600.f;
+            const auto u = dual_unit(panel);
             draw_needle(g, m, state.needles[1].pos, base_r, tip_r, amber, s);
             draw_needle(g, m, state.needles[0].pos, base_r, tip_r, white, s);
             draw_half_cap(g, m.cx, panel.Y + panel.Height, 40.f * u, 24.f * u, s);
@@ -2876,6 +2905,8 @@ constexpr float spectrum_row_h_dip = 44.f;
 constexpr float spectrum_row_label_dip = 104.f;
 constexpr float spectrum_chip_h_dip = 32.f;
 constexpr int frame_hit_base = 200;
+constexpr int close_hit = 900;
+constexpr UINT_PTR watch_timer_id = 1;
 constexpr int bands_hit_base = 300;
 constexpr int fall_hit_base = 400;
 
@@ -2889,6 +2920,8 @@ struct Picker {
     Gdiplus::RectF fall_chips[spectrum_fall_count];
     float row_y[3]{};
     std::vector<uint32_t> spectrum_thumbs[spectrum_style_count];
+    Gdiplus::RectF close_box;
+    HHOOK mouse_hook{};
     float k{1.f}; // DPI 倍率
     int width{};
     int height{};
@@ -3060,6 +3093,7 @@ void build_spectrum_layout(Picker& p)
     p.card = {sh, sh - px(4), card_w, card_h};
     p.width = static_cast<int>(card_w + 2 * sh);
     p.height = static_cast<int>(card_h + 2 * sh);
+    p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
     for (int i = 0; i < spectrum_style_count; ++i)
         p.spectrum_tiles[i] = {p.card.X + pad + (i % 3) * (p.thumb_w + gap), p.card.Y + px(title_h_dip) + (i / 3) * tile_block,
             static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
@@ -3109,6 +3143,7 @@ void build_layout(Picker& p)
     p.card = {sh, sh - px(4), card_w, card_h};
     p.width = static_cast<int>(card_w + 2 * sh);
     p.height = static_cast<int>(card_h + 2 * sh);
+    p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
     for (int i = 0; i < style_count; ++i)
         p.tiles[i] = {p.card.X + pad + i * (p.thumb_w + gap), p.card.Y + px(title_h_dip),
             static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
@@ -3148,6 +3183,8 @@ int hit_test(const Picker& p, POINT pt)
 {
     const auto fx = static_cast<float>(pt.x);
     const auto fy = static_cast<float>(pt.y);
+    if (inside(p.close_box, fx, fy))
+        return close_hit;
     if (p.spectrum) {
         for (int i = 0; i < spectrum_style_count; ++i) {
             const auto& t = p.spectrum_tiles[i];
@@ -3224,6 +3261,19 @@ void render(Picker& p)
         draw_text(g, p.spectrum ? nocturne_text::spectrum_picker_title : nocturne_text::vu_picker_title, title_font,
             rgba(244, 240, 230, 0.55), {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear,
             k);
+
+        // 右上角關閉鈕
+        {
+            const auto& c = p.close_box;
+            if (p.hover == close_hit) {
+                const Gdiplus::SolidBrush hover_fill(rgba(255, 255, 255, 0.10));
+                g.FillEllipse(&hover_fill, c);
+            }
+            const Gdiplus::Pen cross(rgba(244, 240, 230, p.hover == close_hit ? 0.9 : 0.55), 1.6f * k);
+            const auto m = 8.5f * k;
+            g.DrawLine(&cross, c.X + m, c.Y + m, c.X + c.Width - m, c.Y + c.Height - m);
+            g.DrawLine(&cross, c.X + c.Width - m, c.Y + m, c.X + m, c.Y + c.Height - m);
+        }
 
         const auto draw_tile = [&](const Gdiplus::RectF& t, const std::vector<uint32_t>& thumb, const wchar_t* name,
                                    bool selected, bool hovered) {
@@ -3436,6 +3486,10 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_LBUTTONUP: {
         const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+        if (hit == close_hit) {
+            PostMessage(wnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
         if (p.spectrum) {
             if (hit >= 0 && hit < spectrum_style_count) {
                 set_spectrum_style(static_cast<SpectrumStyle>(hit));
@@ -3474,10 +3528,23 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (LOWORD(wp) == WA_INACTIVE)
             PostMessage(wnd, WM_CLOSE, 0, 0);
         return 0;
+    case WM_TIMER:
+        // 2026-11-12 使用者遇到關不掉：卡片沒拿到焦點時點外面不會觸發 WA_INACTIVE。
+        // 每 0.25 秒檢查：前景換成別的程式、或 VU 表／頻譜藏起來（換模式、收合）就關
+        if (wp == watch_timer_id) {
+            DWORD process{};
+            GetWindowThreadProcessId(GetForegroundWindow(), &process);
+            if (process != GetCurrentProcessId() || !IsWindow(p.meter) || !IsWindowVisible(p.meter))
+                PostMessage(wnd, WM_CLOSE, 0, 0);
+        }
+        return 0;
     case WM_CLOSE:
         DestroyWindow(wnd);
         return 0;
     case WM_NCDESTROY:
+        KillTimer(wnd, watch_timer_id);
+        if (p.mouse_hook)
+            UnhookWindowsHookEx(p.mouse_hook);
         picker.reset();
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -3488,6 +3555,27 @@ void close()
 {
     if (auto& picker = current(); picker && picker->wnd)
         DestroyWindow(picker->wnd);
+}
+
+// 這個執行緒的滑鼠：卡片外面任何一個按鍵按下就關（點 fb2k 其他地方、VU 表本身、標題列都算）
+LRESULT CALLBACK mouse_hook_proc(int code, WPARAM wp, LPARAM lp)
+{
+    if (code == HC_ACTION) {
+        switch (wp) {
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_NCLBUTTONDOWN:
+        case WM_NCRBUTTONDOWN:
+        case WM_NCMBUTTONDOWN: {
+            const auto* info = reinterpret_cast<const MOUSEHOOKSTRUCT*>(lp);
+            if (const auto& picker = current(); picker && picker->wnd && info->hwnd != picker->wnd)
+                PostMessage(picker->wnd, WM_CLOSE, 0, 0);
+            break;
+        }
+        }
+    }
+    return CallNextHookEx(nullptr, code, wp, lp);
 }
 
 // 在滑鼠位置開卡片（卡片左上角對齊滑鼠，超出螢幕工作區就往內挪）
@@ -3536,6 +3624,8 @@ void open(HWND meter, POINT at)
         return;
     }
     current()->wnd = wnd;
+    current()->mouse_hook = SetWindowsHookEx(WH_MOUSE, mouse_hook_proc, nullptr, GetCurrentThreadId());
+    SetTimer(wnd, watch_timer_id, 250, nullptr);
     render(*current());
     ShowWindow(wnd, SW_SHOW);
     SetForegroundWindow(wnd);
@@ -3602,6 +3692,8 @@ void apply_layout(HWND wnd)
     const auto target = compute_window_rect(state->bar_rect, style);
     const auto content = current_content();
     if (IsRectEmpty(&target) || !content) {
+        if (const auto& open_picker = picker::current(); open_picker && open_picker->meter == wnd)
+            picker::close();
         if (IsWindowVisible(wnd)) {
             KillTimer(wnd, frame_timer_id);
             ShowWindow(wnd, SW_HIDE);
