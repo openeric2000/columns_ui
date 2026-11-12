@@ -356,13 +356,13 @@ public:
 
 play_callback_static_factory_t<NowPlayingViewPlayCallback> now_playing_view_play_callback;
 
-// 自編版新增：展開頁樣式，1 置中（預設）、3 靠左＋資訊卡，ESLyric 佈局用 %cui_now_playing_style% 切換
+// 自編版新增：展開頁樣式，1 封面（預設）、3 曲目資訊卡（在封面的位置切換；原本叫「置中」「靠左＋資訊卡」），ESLyric 佈局用 %cui_now_playing_style% 切換
 // （原本的 2「靠左＋VU 表」已在 2026-11-07 拿掉，編號不重排：舊設定裡存的值是 2 的話一律當成 1，見 now_playing_style_value）
 // ESLyric 的 visibility 不會隨時重算，所以切換後對正在播放的曲目送一次 dispatch_refresh，讓佈局重新套用
 fbh::ConfigUint32 now_playing_style(
     GUID{0xdd906dca, 0x9b49, 0x492c, {0x8b, 0xb2, 0x43, 0xb9, 0xef, 0xe4, 0xf1, 0x8f}}, 1);
 
-// 目前生效的樣式：只有 3 是靠左＋資訊卡，其他值（含已拿掉的 2）都是置中
+// 目前生效的樣式：只有 3 是曲目資訊卡，其他值（含已拿掉的 2）都是封面
 uint32_t now_playing_style_value()
 {
     return now_playing_style.get() == 3 ? 3 : 1;
@@ -883,7 +883,7 @@ const MainMenuCommand now_playing_style_info{now_playing_style_info_id, nocturne
     nocturne_text::style_info_description, [] { set_now_playing_style(3); }, {},
     [] { return now_playing_style_value() == 3; }};
 
-// ESLyric 展開頁的樣式按鈕用 mm://View/Layout/切換展開頁樣式，在置中與靠左＋資訊卡之間切換
+// ESLyric 展開頁的封面／資訊卡熱區用 mm://View/Layout/切換展開頁樣式，在封面與曲目資訊卡之間切換
 const MainMenuCommand cycle_now_playing_style{cycle_now_playing_style_id, nocturne_text::cycle_style_name,
     nocturne_text::cycle_style_description,
     [] { set_now_playing_style(now_playing_style_value() == 1 ? 3 : 1); }};

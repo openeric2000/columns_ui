@@ -136,13 +136,15 @@ inline constexpr wchar_t cover_zoom_tooltip[] = L"View the large cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
 inline constexpr auto theme_font_description = "Opens the Fonts tab in Preferences.";
-inline constexpr auto style_centered_name = "Now Playing: Centered";
-inline constexpr auto style_centered_description = "Centers the cover and lyrics together in the now playing view.";
-inline constexpr auto style_info_name = "Now Playing: Left + Info Card";
-inline constexpr auto style_info_description = "Puts the cover on the left and track information on the right.";
+// 2026-11-12 改名：樣式 3 早就不是「靠左＋資訊卡」，而是在封面的位置換成資訊卡（v1.5 第 2 個）。
+// cycle_style_name 不改：main.xml 用 mm://View/Layout/<名稱> 呼叫它
+inline constexpr auto style_centered_name = "Now Playing: Cover";
+inline constexpr auto style_centered_description = "Shows the album cover in the now playing view (click it to show the track info card).";
+inline constexpr auto style_info_name = "Now Playing: Track Info Card";
+inline constexpr auto style_info_description
+    = "Shows track information in place of the cover (composer, lyricist, play count…); click it to show the cover again.";
 inline constexpr auto cycle_style_name = "Toggle Now Playing Style";
-inline constexpr auto cycle_style_description
-    = "Switches the now playing view between \"Centered\" and \"Left + Info Card\".";
+inline constexpr auto cycle_style_description = "Switches the cover spot of the now playing view between the album cover and the track info card.";
 // 展開頁顯示內容（2026-11-11，v1.5 待做清單第 4 個）：歌詞／純封面／VU 表，左上角按鈕切換
 inline constexpr auto mode_lyrics_name = "Now Playing: Lyrics";
 inline constexpr auto mode_lyrics_description = "Shows the cover and the lyrics in the now playing view.";
@@ -344,12 +346,12 @@ inline constexpr auto show_cover_description = "在 foobar2000 picture viewer �
 inline constexpr auto theme_font_name = "主題字型…";
 inline constexpr auto theme_font_description
     = "打開設定頁的「字型」分頁。";
-inline constexpr auto style_centered_name = "展開頁：置中";
-inline constexpr auto style_centered_description = "展開頁的封面與歌詞整組置中。";
-inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
-inline constexpr auto style_info_description = "展開頁的封面靠左，右邊顯示曲目資訊。";
+inline constexpr auto style_centered_name = "展開頁：封面";
+inline constexpr auto style_centered_description = "展開頁顯示專輯封面（點封面切到曲目資訊卡）。";
+inline constexpr auto style_info_name = "展開頁：曲目資訊卡";
+inline constexpr auto style_info_description = "封面的位置改顯示曲目資訊（作曲、作詞、播放次數等），點一下切回封面。";
 inline constexpr auto cycle_style_name = "切換展開頁樣式";
-inline constexpr auto cycle_style_description = "在展開頁樣式「置中」與「靠左＋資訊卡」之間切換。";
+inline constexpr auto cycle_style_description = "展開頁封面的位置在專輯封面與曲目資訊卡之間切換。";
 // 展開頁顯示內容（2026-11-11，v1.5 待做清單第 4 個）：歌詞／純封面／VU 表，左上角按鈕切換
 inline constexpr auto mode_lyrics_name = "展開頁：歌詞";
 inline constexpr auto mode_lyrics_description = "展開頁顯示封面與歌詞。";
