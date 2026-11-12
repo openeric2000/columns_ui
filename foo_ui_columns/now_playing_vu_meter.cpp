@@ -144,6 +144,40 @@ constexpr float margin_x_px = 20.f;
 constexpr float margin_top_px = 14.f;
 constexpr float margin_bottom_px = 30.f;
 
+// ---- 頻譜（2026-11-12）：照預覽頁 900×330 裡 780×236 的錶框，基準單位 u＝錶框寬 ÷ 780（state.scale）----
+constexpr float spec_ref_w = 780.f;
+constexpr float spec_ref_h = 236.f;
+constexpr float spec_radius = 22.f;
+constexpr float spec_bezel = 12.f;
+constexpr float spec_refraction = 10.f;
+constexpr float spec_margin_x = 24.f;
+constexpr float spec_margin_top = 16.f;
+constexpr float spec_margin_bottom = 34.f;
+constexpr float spec_plot_side = 38.f;   // 畫頻譜的範圍離錶框左右
+constexpr float spec_plot_top = 26.f;
+constexpr float spec_plot_bottom = 44.f; // 錶框下面這段留給頻率字
+constexpr float spec_label_from_bottom = 22.f;
+constexpr double spec_min_hz = 30.0;
+constexpr double spec_max_hz = 16000.0;
+constexpr unsigned spec_fft_size = 4096;
+// 每條的動態（同預覽）：變高 25 毫秒、變低 220 毫秒；峰值點停 0.5 秒再落下，落下速度（每秒幾個滿格）三段可選
+constexpr double spec_rise_seconds = 0.025;
+constexpr double spec_fall_seconds = 0.22;
+constexpr double spec_peak_hold_seconds = 0.5;
+constexpr double spec_peak_fall_per_second[spectrum_fall_count] = {0.5, 1.0, 2.0};
+// 音量換成高度：頻段 dB 加上每八度 tilt（以 1 kHz 為準，高頻本來就比較小聲）後，floor～floor＋range 對到 0～1
+constexpr double spec_floor_db = -70.0;
+constexpr double spec_range_db = 55.0;
+constexpr double spec_tilt_db_per_octave = 3.0;
+constexpr int spec_max_bands = 48;
+constexpr int spec_glow_downsample = 3; // 發光那層用三分之一解析度畫、模糊
+// 歌詞＋VU 表／歌詞＋頻譜：縮成這麼多倍放在歌詞欄下半（放不下再縮），左緣對齊歌詞。
+// 錶框底部對齊左邊封面下面那組資訊的底部（cover_zoom::info_bottom_in_stage），歌詞往下多佔、多幾行（2026-11-12 使用者要求）；
+// 版面沒有封面標記時，視窗上緣在歌詞那塊下緣往上 combined_overlap_dip（歌詞元件下面本來就有 48 的空白）。
+// 第一版在下半置中，使用者說跟歌詞中間空隙太大
+constexpr float combined_scale = 0.7f;
+constexpr int combined_overlap_dip = 28;
+
 double pos_of_db(double db)
 {
     return std::pow(10.0, db / 20.0) / std::pow(10.0, scale_top_vu / 20.0);
@@ -158,6 +192,29 @@ struct Needle {
 
 struct State {
     Style style{Style::box};
+    // 頻譜模式（2026-11-12）：同一個視窗改畫頻譜；combined＝歌詞＋VU 表／頻譜（縮小放在歌詞欄下半）
+    bool spectrum{};
+    bool combined{};
+    SpectrumStyle spectrum_style{SpectrumStyle::bar_cover};
+    bool spectrum_framed{};
+    int spectrum_bands{spectrum_bands_default};
+    Gdiplus::RectF plot; // 畫頻譜的範圍（視窗座標）
+    // 光的顏色（從錶後面的背景取）：色相（度）、飽和度、背景亮度
+    float hue{35.f};
+    float sat{0.55f};
+    float lum{0.15f};
+    double levels[spec_max_bands]{};
+    double peaks[spec_max_bands]{};
+    double peak_holds[spec_max_bands]{};
+    visualisation_stream_v2::ptr spectrum_stream;
+    audio_chunk_impl spectrum_chunk;
+    // 每格重畫的範圍、那一層（預乘 RGBA 浮點）與發光用的縮小層
+    RECT dynamic_rect{};
+    std::vector<float> live;
+    std::vector<float> glow;
+    int glow_w{};
+    int glow_h{};
+    double last_frame_ms{};
     RECT bar_rect{};
     RECT window_rect{}; // 分割面板座標
     int width{};
@@ -311,6 +368,43 @@ NeedlePreset& cached_needle_preset()
     return preset;
 }
 
+SpectrumStyle& cached_spectrum_style()
+{
+    static SpectrumStyle style = [] {
+        const auto value
+            = fb2k::configStore::get()->getConfigInt(spectrum_style_config_key, static_cast<int>(spectrum_style_default));
+        return value >= 0 && value < spectrum_style_count ? static_cast<SpectrumStyle>(value) : spectrum_style_default;
+    }();
+    return style;
+}
+
+bool& cached_spectrum_framed()
+{
+    static bool framed = fb2k::configStore::get()->getConfigBool(spectrum_frame_config_key, spectrum_frame_default);
+    return framed;
+}
+
+int& cached_spectrum_bands()
+{
+    static int bands = [] {
+        const auto value = static_cast<int>(
+            fb2k::configStore::get()->getConfigInt(spectrum_bands_config_key, spectrum_bands_default));
+        return std::ranges::find(spectrum_band_options, value) != std::end(spectrum_band_options) ? value
+                                                                                                    : spectrum_bands_default;
+    }();
+    return bands;
+}
+
+int& cached_spectrum_fall()
+{
+    static int fall = [] {
+        const auto value
+            = static_cast<int>(fb2k::configStore::get()->getConfigInt(spectrum_fall_config_key, spectrum_fall_default));
+        return value >= 0 && value < spectrum_fall_count ? value : spectrum_fall_default;
+    }();
+    return fall;
+}
+
 // ---- 版面 ----
 
 // 刻度弧：指針軸 (cx, cy)、弧半徑、半邊角度
@@ -446,6 +540,80 @@ std::optional<WindowPlan> window_plan_in_stage(Style style, int stage_width, int
     return WindowPlan{rect, s};
 }
 
+// 頻譜（錶框＋陰影邊，展開頁座標）：錶框寬＝方框雙錶的 band 寬、高寬比照預覽 236:780，在展開頁垂直置中
+std::optional<WindowPlan> spectrum_plan_in_stage(int stage_width, int stage_height)
+{
+    const auto band = band_rect_in_stage(stage_width, stage_height);
+    if (!band)
+        return {};
+    const auto band_w = static_cast<float>(band->right - band->left);
+    auto u = band_w / spec_ref_w;
+    const auto max_h = static_cast<float>(stage_height) / (spec_ref_h + spec_margin_top + spec_margin_bottom);
+    u = std::min(u, max_h);
+    if (u <= 0.f)
+        return {};
+    const auto panel_w = spec_ref_w * u;
+    const auto panel_h = spec_ref_h * u;
+    const auto left = band->left + (band_w - panel_w) / 2.f;
+    const auto top = (stage_height - panel_h) / 2.f;
+    RECT rect{static_cast<LONG>(std::lround(left - spec_margin_x * u)), static_cast<LONG>(std::lround(top - spec_margin_top * u)),
+        static_cast<LONG>(std::lround(left + panel_w + spec_margin_x * u)),
+        static_cast<LONG>(std::lround(top + panel_h + spec_margin_bottom * u))};
+    rect.top = std::max(rect.top, 0L);
+    rect.bottom = std::min(rect.bottom, static_cast<LONG>(stage_height));
+    return WindowPlan{rect, u};
+}
+
+// 現在要畫什麼：VU 表或頻譜；combined＝歌詞＋VU 表／歌詞＋頻譜。其他模式傳回空的（不顯示）
+struct Content {
+    bool spectrum;
+    bool combined;
+};
+
+std::optional<Content> current_content()
+{
+    const auto mode = main_menu::get_now_playing_mode();
+    if (main_menu::mode_shows_vu(mode))
+        return Content{false, mode == main_menu::NowPlayingMode::lyrics_vu};
+    if (main_menu::mode_shows_spectrum(mode))
+        return Content{true, mode == main_menu::NowPlayingMode::lyrics_spectrum};
+    return {};
+}
+
+// 視窗位置與倍率。歌詞＋VU 表／頻譜時整組縮成 combined_scale 倍（歌詞欄下半放不下再縮），
+// 錶本體左緣對齊歌詞欄左緣（歌詞靠左），錶框底部對齊左邊資訊的底部；上面是歌詞（main.xml 標記 lyrics-split）
+std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int stage_width, int stage_height)
+{
+    auto plan = content.spectrum ? spectrum_plan_in_stage(stage_width, stage_height)
+                                 : window_plan_in_stage(style, stage_width, stage_height);
+    if (!plan || !content.combined)
+        return plan;
+
+    const auto column = cover_zoom::lyrics_column_in_stage(stage_width, stage_height);
+    if (!column)
+        return {};
+    const auto split = std::clamp(cover_zoom::lyrics_split_y(stage_height), 0, stage_height);
+    const auto region_h = static_cast<float>(stage_height - split);
+    const auto w = static_cast<float>(plan->rect.right - plan->rect.left);
+    const auto h = static_cast<float>(plan->rect.bottom - plan->rect.top);
+    if (w <= 0.f || h <= 0.f || region_h <= 0.f)
+        return {};
+    const auto room_h = region_h + uih::scale_dpi_value(combined_overlap_dip);
+    const auto f = std::min(combined_scale, room_h / h);
+    const auto new_w = static_cast<LONG>(std::lround(w * f));
+    const auto new_h = static_cast<LONG>(std::lround(h * f));
+    const auto scale = plan->scale * f;
+    const auto margin_left = (content.spectrum ? spec_margin_x : margin_x_px) * scale;
+    const auto left = column->left - static_cast<LONG>(std::lround(margin_left));
+    auto top = static_cast<LONG>(split - uih::scale_dpi_value(combined_overlap_dip));
+    if (const auto info_bottom = cover_zoom::info_bottom_in_stage(stage_width, stage_height)) {
+        const auto margin_bottom = (content.spectrum ? spec_margin_bottom : margin_bottom_px) * scale;
+        top = static_cast<LONG>(*info_bottom + std::lround(margin_bottom)) - new_h;
+    }
+    top = std::clamp(top, 0L, std::max(0L, static_cast<LONG>(stage_height) - new_h));
+    return WindowPlan{RECT{left, top, left + new_w, top + new_h}, scale};
+}
+
 RECT compute_window_rect(const RECT& bar_rect, Style style)
 {
     if (bar_rect.right <= bar_rect.left)
@@ -455,10 +623,11 @@ RECT compute_window_rect(const RECT& bar_rect, Style style)
     HWND owner{};
     if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
         return {};
-    if (main_menu::get_now_playing_mode() != main_menu::NowPlayingMode::vu)
+    const auto content = current_content();
+    if (!content)
         return {};
 
-    const auto plan = window_plan_in_stage(style, bar_rect.right - bar_rect.left, bar_rect.top);
+    const auto plan = plan_in_stage(*content, style, bar_rect.right - bar_rect.left, bar_rect.top);
     if (!plan)
         return {};
     auto rect = plan->rect;
@@ -506,7 +675,36 @@ void rebuild_geometry(State& state, int width, int height, float scale)
     const auto vu_w = width - 2.f * mx;
     const auto max_h = std::max(1.f, std::floor(height - mt));
 
-    switch (state.style) {
+    if (state.spectrum) {
+        // 頻譜：一個錶框（不要框時不畫玻璃與陰影，但位置照樣算，接右鍵用），裡面的 plot 是畫頻譜的範圍
+        const auto smx = spec_margin_x * s;
+        const auto smt = spec_margin_top * s;
+        const auto pw = std::max(1.f, std::floor(width - 2.f * smx));
+        const auto ph = std::max(1.f, std::floor(height - smt - spec_margin_bottom * s));
+        state.panels[0] = {std::round(smx), std::round(smt), pw, ph};
+        state.panels[1] = state.panels[0];
+        state.panel_count = state.spectrum_framed ? 1 : 0;
+        state.panel_radius = spec_radius * s;
+        state.bezel = spec_bezel * s;
+        state.refraction = spec_refraction * s;
+        const auto& panel = state.panels[0];
+        state.plot = {panel.X + spec_plot_side * s, panel.Y + spec_plot_top * s,
+            std::max(1.f, panel.Width - 2.f * spec_plot_side * s),
+            std::max(1.f, panel.Height - (spec_plot_top + spec_plot_bottom) * s)};
+        // 每格重畫：頻譜往外留發光與峰值點的空間
+        const auto pad = 20.f * s + 2.f;
+        RECT dynamic{static_cast<LONG>(std::floor(state.plot.X - pad)), static_cast<LONG>(std::floor(state.plot.Y - pad)),
+            static_cast<LONG>(std::ceil(state.plot.X + state.plot.Width + pad)),
+            static_cast<LONG>(std::ceil(state.plot.Y + state.plot.Height + pad))};
+        const RECT window{0, 0, width, height};
+        IntersectRect(&state.dynamic_rect, &dynamic, &window);
+        const auto dw = std::max(0L, state.dynamic_rect.right - state.dynamic_rect.left);
+        const auto dh = std::max(0L, state.dynamic_rect.bottom - state.dynamic_rect.top);
+        state.live.assign(static_cast<size_t>(dw) * dh * 4, 0.f);
+        state.glow_w = static_cast<int>(dw / spec_glow_downsample + 2);
+        state.glow_h = static_cast<int>(dh / spec_glow_downsample + 2);
+        state.glow.assign(static_cast<size_t>(state.glow_w) * state.glow_h * 4, 0.f);
+    } else switch (state.style) {
     case Style::round: {
         const auto gap = round_gap_px * s;
         const auto d = std::max(1.f, std::min(std::floor((vu_w - gap) / 2.f), max_h));
@@ -575,7 +773,16 @@ void rebuild_geometry(State& state, int width, int height, float scale)
         state.shadow_px[i] = static_cast<uint32_t>(state.shadow[i] * 255.f + 0.5f) << 24;
     state.full_redraw = true;
 
-    // 玻璃：邊緣往內取樣（放大），反光照邊緣朝向（光從左上來）
+    // 玻璃：邊緣往內取樣（放大），反光照邊緣朝向（光從左上來）。頻譜不要框時沒有玻璃
+    if (state.panel_count == 0) {
+        state.panel_w = 0;
+        state.panel_h = 0;
+        state.dx.clear();
+        state.dy.clear();
+        state.coverage.clear();
+        state.specular.clear();
+        return;
+    }
     const auto pw = static_cast<int>(state.panels[0].Width);
     const auto ph = static_cast<int>(state.panels[0].Height);
     state.panel_w = pw;
@@ -975,15 +1182,12 @@ void draw_backlight(Gdiplus::Graphics& g, const State& state, const Gdiplus::Rec
     g.FillRectangle(&glow, panel);
 }
 
-void rebuild_static(State& state)
+// 錶框裡的背景：調飽和、依亮度壓暗（字一直看得清楚）
+void tint_panel(State& state, const Gdiplus::RectF& panel)
 {
     const auto w = state.width;
     const auto h = state.height;
-    state.base = state.backdrop;
-
-    // 錶框裡：背景調飽和、依亮度壓暗
-    for (int index = 0; index < state.panel_count; ++index) {
-        const auto& panel = state.panels[index];
+    {
         const auto x0 = std::max(0, static_cast<int>(panel.X));
         const auto y0 = std::max(0, static_cast<int>(panel.Y));
         const auto x1 = std::min(w, static_cast<int>(panel.X + panel.Width));
@@ -1015,6 +1219,22 @@ void rebuild_static(State& state)
                 p = 0xFF000000 | (nr << 16) | (ng << 8) | nb;
             }
     }
+}
+
+void rebuild_static_spectrum(State& state);
+
+void rebuild_static(State& state)
+{
+    if (state.spectrum) {
+        rebuild_static_spectrum(state);
+        return;
+    }
+    const auto w = state.width;
+    const auto h = state.height;
+    state.base = state.backdrop;
+
+    for (int index = 0; index < state.panel_count; ++index)
+        tint_panel(state, state.panels[index]);
 
     Gdiplus::Bitmap canvas(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(state.base.data()));
     Gdiplus::Graphics g(&canvas);
@@ -1047,6 +1267,537 @@ void rebuild_static(State& state)
         g.ResetClip();
     }
     state.static_dirty = false;
+}
+
+// ---- 頻譜：顏色、不動的那層 ----
+
+struct Rgba {
+    float r, g, b, a; // 0～1，未預乘
+};
+
+Rgba hsl(float h, float s, float l, float a = 1.f)
+{
+    const auto c = (1.f - std::abs(2.f * l - 1.f)) * s;
+    const auto hp = std::fmod(std::fmod(h, 360.f) + 360.f, 360.f) / 60.f;
+    const auto x = c * (1.f - std::abs(std::fmod(hp, 2.f) - 1.f));
+    float r{}, g{}, b{};
+    if (hp < 1.f) { r = c; g = x; }
+    else if (hp < 2.f) { r = x; g = c; }
+    else if (hp < 3.f) { g = c; b = x; }
+    else if (hp < 4.f) { g = x; b = c; }
+    else if (hp < 5.f) { r = x; b = c; }
+    else { r = c; b = x; }
+    const auto m = l - c / 2.f;
+    return {r + m, g + m, b + m, a};
+}
+
+Rgba mix(const Rgba& a, const Rgba& b, float t)
+{
+    return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t};
+}
+
+// 光的顏色：錶框範圍的背景平均色（越鮮豔的像素權重越大，同預覽）；太灰（飽和度 ≤ 0.12）時用暖琥珀
+void update_palette(State& state)
+{
+    const auto& panel = state.panels[0];
+    const auto w = state.width;
+    const auto x0 = std::clamp(static_cast<int>(panel.X), 0, w);
+    const auto x1 = std::clamp(static_cast<int>(panel.X + panel.Width), 0, w);
+    const auto y0 = std::clamp(static_cast<int>(panel.Y), 0, state.height);
+    const auto y1 = std::clamp(static_cast<int>(panel.Y + panel.Height), 0, state.height);
+    double wr = 0, wg = 0, wb = 0, wsum = 0, lsum = 0;
+    int count = 0;
+    for (int y = y0; y < y1; y += 4)
+        for (int x = x0; x < x1; x += 4) {
+            const auto p = state.backdrop[static_cast<size_t>(y) * w + x];
+            const auto r = ((p >> 16) & 0xFF) / 255.0;
+            const auto g = ((p >> 8) & 0xFF) / 255.0;
+            const auto b = (p & 0xFF) / 255.0;
+            const auto mx = std::max({r, g, b});
+            const auto mn = std::min({r, g, b});
+            const auto l = (mx + mn) / 2;
+            const auto sat = mx == mn ? 0.0 : (l > 0.5 ? (mx - mn) / (2 - mx - mn) : (mx - mn) / (mx + mn));
+            const auto weight = 0.05 + sat;
+            wr += r * weight;
+            wg += g * weight;
+            wb += b * weight;
+            wsum += weight;
+            lsum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            ++count;
+        }
+    state.hue = 35.f;
+    state.sat = 0.55f;
+    state.lum = count ? static_cast<float>(lsum / count) : 0.15f;
+    if (wsum <= 0)
+        return;
+    const auto r = wr / wsum;
+    const auto g = wg / wsum;
+    const auto b = wb / wsum;
+    const auto mx = std::max({r, g, b});
+    const auto mn = std::min({r, g, b});
+    const auto l = (mx + mn) / 2;
+    const auto d = mx - mn;
+    if (d <= 0)
+        return;
+    const auto sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    if (sat <= 0.12)
+        return;
+    double hue = mx == r ? (g - b) / d + (g < b ? 6 : 0) : (mx == g ? (b - r) / d + 2 : (r - g) / d + 4);
+    state.hue = static_cast<float>(hue * 60.0);
+    state.sat = static_cast<float>(std::clamp(sat * 1.5, 0.5, 0.8));
+}
+
+Rgba spectrum_light(const State& state, float a = 1.f) { return hsl(state.hue, state.sat, 0.72f, a); }
+Rgba spectrum_bright(const State& state, float a = 1.f) { return hsl(state.hue, state.sat * 0.7f, 0.86f, a); }
+Rgba spectrum_deep(const State& state, float a = 1.f) { return hsl(state.hue, state.sat, 0.42f, a); }
+
+// 第 i 條的中心 x、每條寬
+float column_width(const State& state) { return state.plot.Width / std::max(1, state.spectrum_bands); }
+float column_x(const State& state, int i) { return state.plot.X + column_width(state) * (i + 0.5f); }
+
+// LED 點陣：每條分 k 欄小點（24 條 3 欄、32 條 2 欄、48 條 1 欄），點距 pitch、rows 排
+struct LedGeometry {
+    int k;
+    float pitch;
+    int rows;
+    float radius;
+};
+
+LedGeometry led_geometry(const State& state)
+{
+    const auto k = state.spectrum_bands <= 24 ? 3 : (state.spectrum_bands <= 32 ? 2 : 1);
+    const auto pitch = column_width(state) / k;
+    const auto rows = std::max(1, static_cast<int>(state.plot.Height / pitch));
+    return {k, pitch, rows, pitch * 0.34f};
+}
+
+bool is_led(SpectrumStyle style) { return style == SpectrumStyle::led_cover || style == SpectrumStyle::led_warm; }
+
+void rebuild_static_spectrum(State& state)
+{
+    const auto w = state.width;
+    const auto h = state.height;
+    update_palette(state);
+    const auto framed = state.spectrum_framed;
+    if (framed) {
+        state.base = state.backdrop;
+        tint_panel(state, state.panels[0]);
+    } else {
+        // 不要框：整個視窗透明，只有光（每格畫）、頻率字與 LED 的暗點浮在背景上
+        state.base.assign(static_cast<size_t>(w) * h, 0);
+    }
+
+    Gdiplus::Bitmap canvas(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(state.base.data()));
+    Gdiplus::Graphics g(&canvas);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    const auto s = state.scale;
+    const auto& panel = state.panels[0];
+    Gdiplus::GraphicsPath clip;
+    add_panel_path(clip, panel, state.panel_radius);
+    if (framed)
+        g.SetClip(&clip);
+
+    const auto& plot = state.plot;
+    const auto bottom = plot.Y + plot.Height;
+    if (is_led(state.spectrum_style)) {
+        const auto m = led_geometry(state);
+        const Gdiplus::SolidBrush dim(rgba(255, 255, 255, framed ? 0.055 : 0.045));
+        for (int i = 0; i < state.spectrum_bands; ++i)
+            for (int k = 0; k < m.k; ++k)
+                for (int r = 0; r < m.rows; ++r) {
+                    const auto x = plot.X + column_width(state) * i + m.pitch * (k + 0.5f);
+                    const auto y = bottom - m.pitch * (r + 0.5f);
+                    g.FillEllipse(&dim, x - m.radius, y - m.radius, 2 * m.radius, 2 * m.radius);
+                }
+    } else if (state.spectrum_style == SpectrumStyle::mirror) {
+        const auto mid = plot.Y + plot.Height / 2.f + 6.f * s;
+        const Gdiplus::SolidBrush line(rgba(244, 240, 230, 0.12));
+        g.FillRectangle(&line, plot.X, mid - 0.5f * std::max(1.f, s), plot.Width, std::max(1.f, s));
+    }
+
+    // 頻率字：60、250、1k、4k、16k，最右邊小字 Hz
+    if (const auto family = theme_family()) {
+        const Gdiplus::Font font(family.get(), 13.f * s, regular_style(*family), Gdiplus::UnitPixel);
+        const Gdiplus::Font unit_font(family.get(), 12.f * s, regular_style(*family), Gdiplus::UnitPixel);
+        const auto y = panel.Y + panel.Height - spec_label_from_bottom * s;
+        const auto span = std::log(spec_max_hz / spec_min_hz);
+        const std::pair<double, const wchar_t*> labels[]
+            = {{60.0, L"60"}, {250.0, L"250"}, {1000.0, L"1k"}, {4000.0, L"4k"}, {16000.0, L"16k"}};
+        for (const auto& [hz, text] : labels) {
+            const auto u = static_cast<float>(std::log(hz / spec_min_hz) / span);
+            const auto x = plot.X + column_width(state) * (0.5f + u * (state.spectrum_bands - 1));
+            draw_text(g, text, font, rgba(244, 240, 230, framed ? 0.55 : 0.5), {x, y}, Gdiplus::StringAlignmentCenter, s);
+        }
+        draw_text(g, L"Hz", unit_font, rgba(244, 240, 230, 0.38), {plot.X + plot.Width + 20.f * s, y},
+            Gdiplus::StringAlignmentCenter, s);
+    }
+    g.ResetClip();
+    state.static_dirty = false;
+}
+
+// ---- 頻譜：每格（軟體畫在浮點層上，發光層三分之一解析度、模糊後加上去）----
+
+// 畫布：p 是預乘 RGBA 浮點；畫布像素＝(視窗座標 − 原點) × k
+struct Layer {
+    float* p;
+    int w;
+    int h;
+    float k;
+    float ox;
+    float oy;
+};
+
+inline void blend(Layer& layer, int x, int y, const Rgba& c, float coverage)
+{
+    if (x < 0 || y < 0 || x >= layer.w || y >= layer.h)
+        return;
+    const auto a = c.a * coverage;
+    if (a <= 0.f)
+        return;
+    auto* q = layer.p + (static_cast<size_t>(y) * layer.w + x) * 4;
+    const auto keep = 1.f - a;
+    q[0] = c.r * a + q[0] * keep;
+    q[1] = c.g * a + q[1] * keep;
+    q[2] = c.b * a + q[2] * keep;
+    q[3] = a + q[3] * keep;
+}
+
+// 圓角矩形（視窗座標），顏色照視窗 y 取（漸層）
+template <class ColourAt>
+void fill_rounded(Layer& layer, float x0, float y0, float x1, float y1, float radius, ColourAt colour_at)
+{
+    const auto X0 = (x0 - layer.ox) * layer.k;
+    const auto X1 = (x1 - layer.ox) * layer.k;
+    const auto Y0 = (y0 - layer.oy) * layer.k;
+    const auto Y1 = (y1 - layer.oy) * layer.k;
+    if (X1 <= X0 || Y1 <= Y0)
+        return;
+    const auto hw = (X1 - X0) / 2.f;
+    const auto hh = (Y1 - Y0) / 2.f;
+    const auto r = std::min({radius * layer.k, hw, hh});
+    const auto cx = X0 + hw;
+    const auto cy = Y0 + hh;
+    const auto xs = std::max(0, static_cast<int>(std::floor(X0)));
+    const auto xe = std::min(layer.w, static_cast<int>(std::ceil(X1)));
+    const auto ys = std::max(0, static_cast<int>(std::floor(Y0)));
+    const auto ye = std::min(layer.h, static_cast<int>(std::ceil(Y1)));
+    for (int y = ys; y < ye; ++y) {
+        const auto py = y + 0.5f - cy;
+        const auto colour = colour_at((y + 0.5f) / layer.k + layer.oy);
+        const auto straight = std::abs(py) <= hh - r;
+        for (int x = xs; x < xe; ++x) {
+            const auto px = x + 0.5f - cx;
+            const auto d = straight ? std::abs(px) - hw : rounded_rect_sdf(px, py, hw, hh, r);
+            const auto coverage = std::clamp(0.5f - d, 0.f, 1.f);
+            if (coverage > 0.f)
+                blend(layer, x, y, colour, coverage);
+        }
+    }
+}
+
+void fill_disc(Layer& layer, float cx, float cy, float radius, const Rgba& colour)
+{
+    const auto X = (cx - layer.ox) * layer.k;
+    const auto Y = (cy - layer.oy) * layer.k;
+    const auto r = radius * layer.k;
+    const auto xs = std::max(0, static_cast<int>(std::floor(X - r - 1)));
+    const auto xe = std::min(layer.w, static_cast<int>(std::ceil(X + r + 1)));
+    const auto ys = std::max(0, static_cast<int>(std::floor(Y - r - 1)));
+    const auto ye = std::min(layer.h, static_cast<int>(std::ceil(Y + r + 1)));
+    for (int y = ys; y < ye; ++y)
+        for (int x = xs; x < xe; ++x) {
+            const auto dx = x + 0.5f - X;
+            const auto dy = y + 0.5f - Y;
+            const auto coverage = std::clamp(r + 0.5f - std::sqrt(dx * dx + dy * dy), 0.f, 1.f);
+            if (coverage > 0.f)
+                blend(layer, x, y, colour, coverage);
+        }
+}
+
+// 光帶曲線：各條頂點 (column_x(i), ys[i]) 的 Catmull-Rom（三次 Hermite），傳回視窗 x 處的 y
+float curve_y(const State& state, const float* ys, float x)
+{
+    const auto n = state.spectrum_bands;
+    const auto cw = column_width(state);
+    const auto t_all = (x - column_x(state, 0)) / cw;
+    const auto k = std::clamp(static_cast<int>(std::floor(t_all)), 0, n - 2);
+    const auto t = std::clamp(t_all - k, 0.f, 1.f);
+    const auto y0 = ys[std::max(0, k - 1)];
+    const auto y1 = ys[k];
+    const auto y2 = ys[k + 1];
+    const auto y3 = ys[std::min(n - 1, k + 2)];
+    const auto m1 = (y2 - y0) / 2.f;
+    const auto m2 = (y3 - y1) / 2.f;
+    const auto t2 = t * t;
+    const auto t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * y1 + (t3 - 2 * t2 + t) * m1 + (-2 * t3 + 3 * t2) * y2 + (t3 - t2) * m2;
+}
+
+// 沿曲線畫一條線（半寬 half，視窗單位）；dash＞0 時是虛線（畫 dash、空 gap）
+void stroke_curve(Layer& layer, const State& state, const float* ys, float half, const Rgba& colour, float dash = 0.f,
+    float gap = 0.f)
+{
+    const auto x_from = column_x(state, 0);
+    const auto x_to = column_x(state, state.spectrum_bands - 1);
+    const auto xs = std::max(0, static_cast<int>(std::floor((x_from - layer.ox) * layer.k)));
+    const auto xe = std::min(layer.w, static_cast<int>(std::ceil((x_to - layer.ox) * layer.k)));
+    for (int x = xs; x < xe; ++x) {
+        const auto wx = (x + 0.5f) / layer.k + layer.ox;
+        if (dash > 0.f && std::fmod(wx - x_from, dash + gap) > dash)
+            continue;
+        const auto yc = (curve_y(state, ys, wx) - layer.oy) * layer.k;
+        const auto slope = (curve_y(state, ys, wx + 0.5f) - curve_y(state, ys, wx - 0.5f));
+        const auto hv = half * layer.k * std::sqrt(1.f + slope * slope);
+        const auto ys0 = std::max(0, static_cast<int>(std::floor(yc - hv - 1)));
+        const auto ye0 = std::min(layer.h, static_cast<int>(std::ceil(yc + hv + 1)));
+        for (int y = ys0; y < ye0; ++y) {
+            const auto coverage = std::clamp(hv + 0.5f - std::abs(y + 0.5f - yc), 0.f, 1.f);
+            if (coverage > 0.f)
+                blend(layer, x, y, colour, coverage);
+        }
+    }
+}
+
+// 四個通道的三次方塊模糊（近似高斯，半徑≈標準差）
+void blur_rgba(std::vector<float>& buffer, int w, int h, int radius)
+{
+    if (radius < 1 || w <= 0 || h <= 0)
+        return;
+    std::vector<float> temp(buffer.size());
+    const auto norm = 1.f / (2 * radius + 1);
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int y = 0; y < h; ++y) {
+            const auto row = static_cast<size_t>(y) * w;
+            for (int c = 0; c < 4; ++c) {
+                float sum = 0;
+                for (int x = -radius; x <= radius; ++x)
+                    sum += buffer[(row + std::clamp(x, 0, w - 1)) * 4 + c];
+                for (int x = 0; x < w; ++x) {
+                    temp[(row + x) * 4 + c] = sum * norm;
+                    sum += buffer[(row + std::min(x + radius + 1, w - 1)) * 4 + c]
+                        - buffer[(row + std::max(x - radius, 0)) * 4 + c];
+                }
+            }
+        }
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 4; ++c) {
+                float sum = 0;
+                for (int y = -radius; y <= radius; ++y)
+                    sum += temp[(static_cast<size_t>(std::clamp(y, 0, h - 1)) * w + x) * 4 + c];
+                for (int y = 0; y < h; ++y) {
+                    buffer[(static_cast<size_t>(y) * w + x) * 4 + c] = sum * norm;
+                    sum += temp[(static_cast<size_t>(std::min(y + radius + 1, h - 1)) * w + x) * 4 + c]
+                        - temp[(static_cast<size_t>(std::max(y - radius, 0)) * w + x) * 4 + c];
+                }
+            }
+    }
+}
+
+// 畫這一格的頻譜到 content 的 dynamic_rect（content 那塊要先還原成 base）
+void draw_spectrum(State& state)
+{
+    const auto& dr = state.dynamic_rect;
+    const auto lw = static_cast<int>(dr.right - dr.left);
+    const auto lh = static_cast<int>(dr.bottom - dr.top);
+    if (lw <= 0 || lh <= 0 || state.live.size() < static_cast<size_t>(lw) * lh * 4)
+        return;
+    std::fill(state.live.begin(), state.live.end(), 0.f);
+    std::fill(state.glow.begin(), state.glow.end(), 0.f);
+    Layer full{state.live.data(), lw, lh, 1.f, static_cast<float>(dr.left), static_cast<float>(dr.top)};
+    Layer soft{state.glow.data(), state.glow_w, state.glow_h, 1.f / spec_glow_downsample, static_cast<float>(dr.left),
+        static_cast<float>(dr.top)};
+
+    const auto s = state.scale;
+    const auto n = state.spectrum_bands;
+    const auto& plot = state.plot;
+    const auto top = plot.Y;
+    const auto bottom = plot.Y + plot.Height;
+    const auto height = plot.Height;
+    const auto cw = column_width(state);
+    const Rgba white{1.f, 1.f, 1.f, 1.f};
+    float glow_radius = 6.f;
+    float glow_alpha = 0.55f;
+
+    const auto peak_cap = [&](Layer& layer, int i, float bar_w, float alpha) {
+        if (state.peaks[i] <= 0.03)
+            return;
+        const auto x = column_x(state, i);
+        const auto y = bottom - static_cast<float>(state.peaks[i]) * height - 5.f * s;
+        fill_rounded(layer, x - bar_w / 2.f, y - 1.5f * s, x + bar_w / 2.f, y + 1.5f * s, 1.5f * s,
+            [&](float) { return Rgba{1.f, 1.f, 1.f, alpha}; });
+    };
+
+    switch (state.spectrum_style) {
+    case SpectrumStyle::led_cover:
+    case SpectrumStyle::led_warm: {
+        glow_radius = 5.f;
+        const auto m = led_geometry(state);
+        const auto light = spectrum_light(state);
+        const auto bright = spectrum_bright(state);
+        const auto colour_of = [&](float f) -> Rgba {
+            if (state.spectrum_style == SpectrumStyle::led_cover)
+                return f > 0.82f ? bright : light;
+            if (f > 0.82f)
+                return {240 / 255.f, 98 / 255.f, 74 / 255.f, 0.95f};
+            if (f > 0.62f)
+                return {1.f, 176 / 255.f, 96 / 255.f, 0.95f};
+            return {1.f, 200 / 255.f, 140 / 255.f, 0.9f};
+        };
+        for (int i = 0; i < n; ++i) {
+            const auto lit = static_cast<int>(std::lround(state.levels[i] * m.rows));
+            const auto pk = std::min(m.rows - 1, static_cast<int>(std::lround(state.peaks[i] * m.rows)));
+            for (int k = 0; k < m.k; ++k) {
+                const auto x = plot.X + cw * i + m.pitch * (k + 0.5f);
+                for (int r = 0; r < lit; ++r) {
+                    const auto c = colour_of(static_cast<float>(r) / m.rows);
+                    const auto y = bottom - m.pitch * (r + 0.5f);
+                    fill_disc(full, x, y, m.radius, c);
+                    fill_disc(soft, x, y, m.radius, c);
+                }
+                if (pk >= lit && state.peaks[i] > 0.02) {
+                    const auto y = bottom - m.pitch * (pk + 0.5f);
+                    const Rgba c{1.f, 1.f, 1.f, 0.95f};
+                    fill_disc(full, x, y, m.radius, c);
+                    fill_disc(soft, x, y, m.radius, c);
+                }
+            }
+        }
+        break;
+    }
+    case SpectrumStyle::bar_cover: {
+        glow_radius = 7.f;
+        glow_alpha = 0.5f;
+        const auto bar_w = std::max(3.f, cw * 0.56f);
+        const auto deep = spectrum_deep(state, 0.55f);
+        const auto light = spectrum_light(state, 0.92f);
+        const auto bright = spectrum_bright(state);
+        const auto colour_at = [&](float y) {
+            const auto t = std::clamp((bottom - y) / height, 0.f, 1.f);
+            return t < 0.6f ? mix(deep, light, t / 0.6f) : mix(light, bright, (t - 0.6f) / 0.4f);
+        };
+        for (int i = 0; i < n; ++i) {
+            const auto x = column_x(state, i);
+            const auto h = std::max(bar_w, static_cast<float>(state.levels[i]) * height);
+            fill_rounded(full, x - bar_w / 2.f, bottom - h, x + bar_w / 2.f, bottom, bar_w / 2.f, colour_at);
+            fill_rounded(soft, x - bar_w / 2.f, bottom - h, x + bar_w / 2.f, bottom, bar_w / 2.f, colour_at);
+            peak_cap(full, i, bar_w, 0.92f);
+            peak_cap(soft, i, bar_w, 0.92f);
+        }
+        break;
+    }
+    case SpectrumStyle::bar_frost: {
+        glow_radius = 6.f;
+        glow_alpha = 0.6f;
+        const auto bar_w = std::max(3.f, cw * 0.56f);
+        const auto colour_at = [&](float y) {
+            const auto t = std::clamp((bottom - y) / height, 0.f, 1.f);
+            return Rgba{1.f, 1.f, 1.f, 0.18f + 0.44f * t};
+        };
+        for (int i = 0; i < n; ++i) {
+            const auto x = column_x(state, i);
+            const auto h = std::max(bar_w, static_cast<float>(state.levels[i]) * height);
+            fill_rounded(full, x - bar_w / 2.f, bottom - h, x + bar_w / 2.f, bottom, bar_w / 2.f, colour_at);
+            fill_rounded(soft, x - bar_w / 2.f, bottom - h, x + bar_w / 2.f, bottom, bar_w / 2.f, colour_at);
+        }
+        for (int i = 0; i < n; ++i)
+            peak_cap(full, i, bar_w, 0.85f);
+        break;
+    }
+    case SpectrumStyle::mirror: {
+        const auto bar_w = std::max(2.f, cw * 0.34f);
+        const auto mid = top + height / 2.f + 6.f * s;
+        const auto half = height / 2.f;
+        const auto light0 = spectrum_light(state, 0.f);
+        const auto light = spectrum_light(state, 0.85f);
+        const auto bright = spectrum_bright(state);
+        const auto colour_at = [&](float y) {
+            const auto t = std::clamp((y - (mid - half)) / (2.f * half), 0.f, 1.f);
+            if (t < 0.3f)
+                return mix(light0, light, t / 0.3f);
+            if (t < 0.5f)
+                return mix(light, bright, (t - 0.3f) / 0.2f);
+            if (t < 0.7f)
+                return mix(bright, light, (t - 0.5f) / 0.2f);
+            return mix(light, light0, (t - 0.7f) / 0.3f);
+        };
+        for (int i = 0; i < n; ++i) {
+            const auto x = column_x(state, i);
+            const auto hh = std::max(bar_w / 2.f, static_cast<float>(state.levels[i]) * half);
+            fill_rounded(full, x - bar_w / 2.f, mid - hh, x + bar_w / 2.f, mid + hh, bar_w / 2.f, colour_at);
+            fill_rounded(soft, x - bar_w / 2.f, mid - hh, x + bar_w / 2.f, mid + hh, bar_w / 2.f, colour_at);
+        }
+        break;
+    }
+    case SpectrumStyle::curve: {
+        glow_alpha = 0.7f;
+        float ys[spec_max_bands]{};
+        float peak_ys[spec_max_bands]{};
+        for (int i = 0; i < n; ++i) {
+            ys[i] = bottom - static_cast<float>(state.levels[i]) * height * 0.92f;
+            peak_ys[i] = bottom - static_cast<float>(state.peaks[i]) * height * 0.92f - 4.f * s;
+        }
+        // 曲線下面的淡填色（上 0.42 → 下 0）
+        const auto light = spectrum_light(state);
+        const auto x_from = column_x(state, 0);
+        const auto x_to = column_x(state, n - 1);
+        for (int x = std::max(0, static_cast<int>(std::floor(x_from - full.ox))); x < std::min(full.w, static_cast<int>(std::ceil(x_to - full.ox))); ++x) {
+            const auto wx = x + 0.5f + full.ox;
+            const auto yc = curve_y(state, ys, wx) - full.oy;
+            const auto y_end = std::min(full.h, static_cast<int>(std::ceil(bottom - full.oy)));
+            for (int y = std::max(0, static_cast<int>(std::floor(yc))); y < y_end; ++y) {
+                const auto coverage = std::clamp(y + 1.f - yc, 0.f, 1.f);
+                const auto a = 0.42f * std::clamp(1.f - (y + 0.5f + full.oy - top) / height, 0.f, 1.f);
+                blend(full, x, y, Rgba{light.r, light.g, light.b, a}, coverage);
+            }
+        }
+        stroke_curve(full, state, peak_ys, 0.6f * s, Rgba{1.f, 1.f, 1.f, 0.45f}, 2.f * s, 5.f * s);
+        const auto bright = spectrum_bright(state);
+        stroke_curve(full, state, ys, 1.2f * s, bright);
+        stroke_curve(soft, state, ys, 1.2f * s, bright);
+        break;
+    }
+    }
+
+    blur_rgba(state.glow, state.glow_w, state.glow_h,
+        std::max(1, static_cast<int>(std::lround(glow_radius * s / spec_glow_downsample))));
+
+    // 合成：content（base）＋ 發光（加亮）＋ 這一層（蓋上去）
+    for (int y = 0; y < lh; ++y) {
+        const auto wy = dr.top + y;
+        if (wy < 0 || wy >= state.height)
+            continue;
+        const auto gy = std::clamp((y + 0.5f) / spec_glow_downsample - 0.5f, 0.f, state.glow_h - 1.001f);
+        const auto gy0 = static_cast<int>(gy);
+        const auto ay = gy - gy0;
+        for (int x = 0; x < lw; ++x) {
+            const auto wx = dr.left + x;
+            if (wx < 0 || wx >= state.width)
+                continue;
+            auto& dst = state.content[static_cast<size_t>(wy) * state.width + wx];
+            float c[4]{static_cast<float>((dst >> 16) & 0xFF) / 255.f, static_cast<float>((dst >> 8) & 0xFF) / 255.f,
+                static_cast<float>(dst & 0xFF) / 255.f, static_cast<float>(dst >> 24) / 255.f};
+            const auto gx = std::clamp((x + 0.5f) / spec_glow_downsample - 0.5f, 0.f, state.glow_w - 1.001f);
+            const auto gx0 = static_cast<int>(gx);
+            const auto ax = gx - gx0;
+            const auto* g00 = &state.glow[(static_cast<size_t>(gy0) * state.glow_w + gx0) * 4];
+            const auto* g01 = g00 + state.glow_w * 4;
+            for (int ch = 0; ch < 4; ++ch) {
+                const auto v = (g00[ch] * (1 - ax) + g00[4 + ch] * ax) * (1 - ay) + (g01[ch] * (1 - ax) + g01[4 + ch] * ax) * ay;
+                c[ch] = std::min(1.f, c[ch] + v * glow_alpha);
+            }
+            const auto* l = &state.live[(static_cast<size_t>(y) * lw + x) * 4];
+            const auto keep = 1.f - l[3];
+            for (int ch = 0; ch < 4; ++ch)
+                c[ch] = std::min(1.f, l[ch] + c[ch] * keep);
+            // 預乘：顏色不能超過透明度
+            for (int ch = 0; ch < 3; ++ch)
+                c[ch] = std::min(c[ch], c[3]);
+            dst = (static_cast<uint32_t>(c[3] * 255.f + 0.5f) << 24) | (static_cast<uint32_t>(c[0] * 255.f + 0.5f) << 16)
+                | (static_cast<uint32_t>(c[1] * 255.f + 0.5f) << 8) | static_cast<uint32_t>(c[2] * 255.f + 0.5f);
+        }
+    }
 }
 
 // ---- 每格 ----
@@ -1220,6 +1971,10 @@ void draw_dynamic(State& state, const RECT* region = nullptr)
                     static_cast<size_t>(right - left) * 4);
         }
     }
+    if (state.spectrum) {
+        draw_spectrum(state);
+        return;
+    }
     Gdiplus::Bitmap canvas(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(state.content.data()));
     Gdiplus::Graphics g(&canvas);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -1308,6 +2063,14 @@ void compose_region(const State& state, uint32_t* out, const RECT& region)
     if (x_end <= x_begin || y_end <= y_begin)
         return;
 
+    // 頻譜不要框：content 本身就是透明底的預乘像素，直接用
+    if (state.spectrum && !state.spectrum_framed) {
+        for (int y = y_begin; y < y_end; ++y)
+            memcpy(&out[static_cast<size_t>(y) * w + x_begin], &state.content[static_cast<size_t>(y) * w + x_begin],
+                static_cast<size_t>(x_end - x_begin) * 4);
+        return;
+    }
+
     // 陰影（黑色，預乘）
     for (int y = y_begin; y < y_end; ++y)
         memcpy(&out[static_cast<size_t>(y) * w + x_begin], &state.shadow_px[static_cast<size_t>(y) * w + x_begin],
@@ -1393,6 +2156,24 @@ bool ensure_dib(State& state)
 RECT redraw(State& state, uint32_t* out, bool content_changed)
 {
     RECT dirty{};
+    if (state.spectrum) {
+        // 頻譜每格整片都會動：只重畫 dynamic_rect（往外擴折射寬度）
+        if (state.full_redraw || state.static_dirty) {
+            compose(state, out);
+            state.full_redraw = false;
+            return {0, 0, state.width, state.height};
+        }
+        if (!content_changed)
+            return {};
+        draw_dynamic(state, &state.dynamic_rect);
+        RECT grown = state.dynamic_rect;
+        const auto spread = static_cast<LONG>(std::ceil(state.refraction)) + 2;
+        InflateRect(&grown, spread, spread);
+        const RECT window{0, 0, state.width, state.height};
+        IntersectRect(&grown, &grown, &window);
+        compose_region(state, out, grown);
+        return grown;
+    }
     if (state.full_redraw || state.static_dirty) {
         compose(state, out);
         for (int index = 0; index < state.panel_count; ++index)
@@ -1700,6 +2481,177 @@ bool update_needles(State& state, double dt)
     return changed;
 }
 
+// ---- 頻譜資料 ----
+
+#if defined(NOCTURNE_BUILD_DEV)
+// 開發版：環境變數 NOCTURNE_SPECTRUM_LOG＝CSV 前綴時，每首（換歌或換頻段數就另開一段）記每一格各頻段的原始 dB（沒加 tilt）
+// 與上一格畫面花了幾毫秒，存成「<前綴>_t<第幾首>_b<頻段數>.csv」；長度同 NOCTURNE_VU_LOG_SECONDS（預設 60 秒）。
+// 用來校正 dB 換成高度的範圍（2026-11-12）
+void log_spectrum(const State& state, const double* raw_db, int bands)
+{
+    static struct {
+        bool checked{};
+        bool disabled{};
+        std::wstring prefix;
+        double max_seconds{60.0};
+        int track{-1};
+        int bands{-1};
+        bool finished{};
+        LARGE_INTEGER frequency{};
+        LARGE_INTEGER start{};
+        std::string rows;
+    } log;
+    if (log.disabled)
+        return;
+    if (!log.checked) {
+        log.checked = true;
+        wchar_t path[MAX_PATH]{};
+        if (!GetEnvironmentVariable(L"NOCTURNE_SPECTRUM_LOG", path, MAX_PATH)) {
+            log.disabled = true;
+            return;
+        }
+        log.prefix = path;
+        if (log.prefix.size() > 4 && _wcsicmp(log.prefix.c_str() + log.prefix.size() - 4, L".csv") == 0)
+            log.prefix.resize(log.prefix.size() - 4);
+        wchar_t seconds[32]{};
+        if (GetEnvironmentVariable(L"NOCTURNE_VU_LOG_SECONDS", seconds, 32) && _wtof(seconds) > 0)
+            log.max_seconds = _wtof(seconds);
+        QueryPerformanceFrequency(&log.frequency);
+    }
+    const auto flush = [&] {
+        if (log.rows.empty())
+            return;
+        wchar_t path[MAX_PATH]{};
+        swprintf_s(path, L"%s_t%d_b%d.csv", log.prefix.c_str(), log.track, log.bands);
+        FILE* file{};
+        if (_wfopen_s(&file, path, L"w") == 0 && file) {
+            fwrite(log.rows.data(), 1, log.rows.size(), file);
+            fclose(file);
+        }
+        log.rows.clear();
+    };
+    if (track_serial != log.track || bands != log.bands) {
+        flush();
+        log.track = track_serial;
+        log.bands = bands;
+        log.start.QuadPart = 0;
+        log.finished = false;
+    }
+    if (log.finished || !raw_db)
+        return;
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    if (log.start.QuadPart == 0) {
+        log.start = now;
+        log.rows = "t_ms,frame_ms";
+        for (int i = 0; i < bands; ++i) {
+            const auto hz = spec_min_hz * std::pow(spec_max_hz / spec_min_hz, bands > 1 ? static_cast<double>(i) / (bands - 1) : 0.0);
+            char head[32]{};
+            sprintf_s(head, ",f%.0f", hz);
+            log.rows += head;
+        }
+        log.rows += "\n";
+    }
+    const auto t = (now.QuadPart - log.start.QuadPart) * 1000.0 / log.frequency.QuadPart;
+    char cell[32]{};
+    sprintf_s(cell, "%.1f,%.2f", t, state.last_frame_ms);
+    log.rows += cell;
+    for (int i = 0; i < bands; ++i) {
+        sprintf_s(cell, ",%.1f", raw_db[i]);
+        log.rows += cell;
+    }
+    log.rows += "\n";
+    if (t >= log.max_seconds * 1000.0) {
+        flush();
+        log.finished = true;
+    }
+}
+#endif
+
+// 讀這一格的頻譜，更新各條高度與峰值點；有動到要重畫就傳回 true。
+// 頻段：30 Hz～16 kHz 對數等分，中心頻率 fc，範圍 fc 前後半格；範圍不到一個 FFT 格就在中心內插，否則取範圍內最大值
+bool update_spectrum(State& state, double dt)
+{
+    const auto n = std::clamp(state.spectrum_bands, 2, spec_max_bands);
+    double targets[spec_max_bands]{};
+    double raw_db[spec_max_bands]{};
+    bool have_data = false;
+    const auto playback = play_control::get();
+    const auto live = playback->is_playing() && !playback->is_paused();
+    if (live) {
+        if (!state.spectrum_stream) {
+            try {
+                // 同 Columns UI 內建頻譜分析器：新版 FFT、單聲道
+                visualisation_manager::get()->create_stream(state.spectrum_stream, visualisation_manager::KStreamFlagNewFFT);
+                if (state.spectrum_stream.is_valid())
+                    state.spectrum_stream->set_channel_mode(visualisation_stream_v2::channel_mode_mono);
+            } catch (const std::exception&) {
+            }
+        }
+        double now{};
+        auto& chunk = state.spectrum_chunk;
+        if (state.spectrum_stream.is_valid() && state.spectrum_stream->get_absolute_time(now)
+            && state.spectrum_stream->get_spectrum_absolute(chunk, now, spec_fft_size)) {
+            const auto* data = chunk.get_data();
+            const auto bins = static_cast<int>(chunk.get_sample_count());
+            const auto channels = std::max(1u, chunk.get_channels());
+            const auto nyquist = chunk.get_sample_rate() / 2.0;
+            if (data && bins > 1 && nyquist > 0) {
+                have_data = true;
+                const auto ratio = spec_max_hz / spec_min_hz;
+                const auto half_step = std::pow(ratio, 0.5 / (n - 1));
+                const auto at = [&](int bin) { return static_cast<double>(data[static_cast<size_t>(std::clamp(bin, 0, bins - 1)) * channels]); };
+                for (int i = 0; i < n; ++i) {
+                    const auto fc = spec_min_hz * std::pow(ratio, static_cast<double>(i) / (n - 1));
+                    const auto lo = fc / half_step / nyquist * bins;
+                    const auto hi = fc * half_step / nyquist * bins;
+                    double value{};
+                    if (hi - lo < 1.0) {
+                        const auto b = fc / nyquist * bins;
+                        const auto b0 = static_cast<int>(std::floor(b));
+                        value = at(b0) + (at(b0 + 1) - at(b0)) * (b - b0);
+                    } else {
+                        for (auto bin = static_cast<int>(std::lround(lo)); bin <= static_cast<int>(std::lround(hi)) - 1; ++bin)
+                            value = std::max(value, at(bin));
+                    }
+                    const auto db = 20.0 * std::log10(std::max(value, 1e-9));
+                    raw_db[i] = db;
+                    targets[i] = std::clamp(
+                        (db + spec_tilt_db_per_octave * std::log2(fc / 1000.0) - spec_floor_db) / spec_range_db, 0.0, 1.0);
+                }
+            }
+        }
+    }
+#if defined(NOCTURNE_BUILD_DEV)
+    log_spectrum(state, have_data ? raw_db : nullptr, n);
+#endif
+
+    const auto fall = spec_peak_fall_per_second[std::clamp(cached_spectrum_fall(), 0, spectrum_fall_count - 1)];
+    bool changed = false;
+    for (int i = 0; i < n; ++i) {
+        auto& v = state.levels[i];
+        auto& pk = state.peaks[i];
+        auto& hold = state.peak_holds[i];
+        const auto before_v = v;
+        const auto before_pk = pk;
+        const auto target = targets[i];
+        v += (target - v) * std::min(1.0, dt / (target > v ? spec_rise_seconds : spec_fall_seconds));
+        if (v < 1e-4 && target <= 0)
+            v = 0;
+        if (v >= pk) {
+            pk = v;
+            hold = spec_peak_hold_seconds;
+        } else if (hold > 0) {
+            hold -= dt;
+        } else {
+            pk = std::max(v, pk - fall * dt);
+        }
+        if (std::abs(v - before_v) > 1e-4 || std::abs(pk - before_pk) > 1e-4)
+            changed = true;
+    }
+    return changed;
+}
+
 #if defined(NOCTURNE_BUILD_DEV)
 // ---- 開發版才有的測試輸出 ----
 // 環境變數 NOCTURNE_VU_DUMP＝一個資料夾時，第一次重截背景後把三種樣式各用目前展開頁大小的 1、1.5、2 倍
@@ -1872,9 +2824,25 @@ constexpr float chip_gap_dip = 8.f;
 // 縮圖由左到右的順序（2026-11-12 使用者要單錶雙指針跟圓形互換位置）；存的設定值仍是 Style 的數字
 constexpr Style display_order[style_count] = {Style::box, Style::dual, Style::round};
 
+// 頻譜卡（2026-11-12）：六張縮圖（兩排三張）＋外框、頻段、峰值點落下三排按鈕
+constexpr float spectrum_tile_h_dip = 76.f;
+constexpr float spectrum_row_h_dip = 44.f;
+constexpr float spectrum_row_label_dip = 104.f;
+constexpr float spectrum_chip_h_dip = 32.f;
+constexpr int frame_hit_base = 200;
+constexpr int bands_hit_base = 300;
+constexpr int fall_hit_base = 400;
+
 struct Picker {
     HWND wnd{};
     HWND meter{};
+    bool spectrum{};
+    Gdiplus::RectF spectrum_tiles[spectrum_style_count];
+    Gdiplus::RectF frame_chips[2];
+    Gdiplus::RectF band_chips[3];
+    Gdiplus::RectF fall_chips[spectrum_fall_count];
+    float row_y[3]{};
+    std::vector<uint32_t> spectrum_thumbs[spectrum_style_count];
     float k{1.f}; // DPI 倍率
     int width{};
     int height{};
@@ -1953,11 +2921,131 @@ std::vector<uint32_t> render_thumbnail(Style style, int tw, int th, const State*
     return out;
 }
 
+// 頻譜一種樣式的縮圖：同 VU 縮圖，用目前的外框與頻段數、一組固定的頻譜形狀
+std::vector<uint32_t> render_spectrum_thumbnail(SpectrumStyle style, int tw, int th, const State* live)
+{
+    std::vector<uint32_t> out(static_cast<size_t>(tw) * th, 0xFF1A1C20);
+    if (!live || live->width <= 0 || live->height <= 0 || live->backdrop.empty())
+        return out;
+    for (int y = 0; y < th; ++y)
+        for (int x = 0; x < tw; ++x)
+            out[static_cast<size_t>(y) * tw + x] = sample_bilinear(live->backdrop, live->width, live->height,
+                (x + 0.5f) * live->width / tw - 0.5f, (y + 0.5f) * live->height / th - 0.5f);
+
+    const auto plan = spectrum_plan_in_stage(live->bar_rect.right - live->bar_rect.left, live->bar_rect.top);
+    if (!plan)
+        return out;
+    const auto w = static_cast<float>(plan->rect.right - plan->rect.left);
+    const auto h = static_cast<float>(plan->rect.bottom - plan->rect.top);
+    if (w <= 0 || h <= 0)
+        return out;
+    const auto f = std::min(tw / w, th / h) * 0.94f;
+    State test;
+    test.spectrum = true;
+    test.spectrum_style = style;
+    test.spectrum_framed = cached_spectrum_framed();
+    test.spectrum_bands = cached_spectrum_bands();
+    rebuild_geometry(test, std::max(1, static_cast<int>(std::lround(w * f))), std::max(1, static_cast<int>(std::lround(h * f))),
+        plan->scale * f);
+    const auto ox = (tw - test.width) / 2;
+    const auto oy = (th - test.height) / 2;
+    for (int y = 0; y < test.height; ++y)
+        for (int x = 0; x < test.width; ++x)
+            test.backdrop[static_cast<size_t>(y) * test.width + x]
+                = out[static_cast<size_t>(std::clamp(oy + y, 0, th - 1)) * tw + std::clamp(ox + x, 0, tw - 1)];
+    test.has_backdrop = true;
+    test.static_dirty = true;
+    // 鼓、貝斯在低頻，人聲在中間，鈸在高頻的樣子
+    for (int i = 0; i < test.spectrum_bands; ++i) {
+        const auto x = static_cast<double>(i) / (test.spectrum_bands - 1);
+        const auto g = [x](double m, double s) { return std::exp(-0.5 * (x - m) * (x - m) / (s * s)); };
+        const auto v = std::clamp(0.18 + 0.55 * g(0.1, 0.08) + 0.38 * g(0.5, 0.1) + 0.25 * g(0.84, 0.07) - 0.15 * x
+                + 0.06 * std::sin(i * 2.3),
+            0.04, 0.95);
+        test.levels[i] = v;
+        test.peaks[i] = std::min(1.0, v + 0.07 + 0.03 * std::cos(i * 1.7));
+    }
+
+    std::vector<uint32_t> frame(static_cast<size_t>(test.width) * test.height);
+    compose(test, frame.data());
+    for (int y = 0; y < test.height; ++y)
+        for (int x = 0; x < test.width; ++x) {
+            const auto tx = ox + x;
+            const auto ty = oy + y;
+            if (tx < 0 || ty < 0 || tx >= tw || ty >= th)
+                continue;
+            const auto src = frame[static_cast<size_t>(y) * test.width + x];
+            auto& dst = out[static_cast<size_t>(ty) * tw + tx];
+            const auto a = (src >> 24) / 255.f;
+            uint32_t mixed = 0xFF000000;
+            for (int shift = 0; shift <= 16; shift += 8) {
+                const auto c = ((src >> shift) & 0xFF) + ((dst >> shift) & 0xFF) * (1.f - a);
+                mixed |= static_cast<uint32_t>(std::clamp(c, 0.f, 255.f) + 0.5f) << shift;
+            }
+            dst = mixed;
+        }
+    return out;
+}
+
 void build_thumbnails(Picker& p)
 {
     const auto* live = state_of(p.meter);
+    if (p.spectrum) {
+        for (int i = 0; i < spectrum_style_count; ++i)
+            p.spectrum_thumbs[i] = render_spectrum_thumbnail(static_cast<SpectrumStyle>(i), p.thumb_w, p.thumb_h, live);
+        return;
+    }
     for (int i = 0; i < style_count; ++i)
         p.thumbs[i] = render_thumbnail(display_order[i], p.thumb_w, p.thumb_h, live);
+}
+
+void build_spectrum_layout(Picker& p)
+{
+    const auto k = p.k;
+    const auto px = [k](float dip) { return std::round(dip * k); };
+    const auto sh = px(shadow_dip);
+    const auto pad = px(pad_dip);
+    p.thumb_w = static_cast<int>(px(tile_w_dip));
+    p.thumb_h = static_cast<int>(px(spectrum_tile_h_dip));
+    const auto gap = px(tile_gap_dip);
+    const auto card_w = 2 * pad + 3 * p.thumb_w + 2 * gap;
+    const auto tile_block = p.thumb_h + px(label_h_dip);
+    const auto card_h = px(title_h_dip) + 2 * tile_block + px(6) + 3 * px(spectrum_row_h_dip) + px(10);
+    p.card = {sh, sh - px(4), card_w, card_h};
+    p.width = static_cast<int>(card_w + 2 * sh);
+    p.height = static_cast<int>(card_h + 2 * sh);
+    for (int i = 0; i < spectrum_style_count; ++i)
+        p.spectrum_tiles[i] = {p.card.X + pad + (i % 3) * (p.thumb_w + gap), p.card.Y + px(title_h_dip) + (i / 3) * tile_block,
+            static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
+    p.divider_y = p.card.Y + px(title_h_dip) + 2 * tile_block + px(4);
+    const auto chips_left = p.card.X + pad + px(spectrum_row_label_dip);
+    const auto chips_w = card_w - 2 * pad - px(spectrum_row_label_dip);
+    const auto chip_gap = px(chip_gap_dip);
+    const auto place = [&](Gdiplus::RectF* chips, int count, float y) {
+        const auto cw = std::floor((chips_w - (count - 1) * chip_gap) / count);
+        for (int i = 0; i < count; ++i)
+            chips[i] = {chips_left + i * (cw + chip_gap), y + (px(spectrum_row_h_dip) - px(spectrum_chip_h_dip)) / 2.f, cw,
+                px(spectrum_chip_h_dip)};
+    };
+    for (int row = 0; row < 3; ++row)
+        p.row_y[row] = p.divider_y + px(6) + row * px(spectrum_row_h_dip);
+    place(p.frame_chips, 2, p.row_y[0]);
+    place(p.band_chips, 3, p.row_y[1]);
+    place(p.fall_chips, spectrum_fall_count, p.row_y[2]);
+
+    std::vector<float> mask(static_cast<size_t>(p.width) * p.height, 0.f);
+    const auto hw = card_w / 2.f;
+    const auto hh = card_h / 2.f;
+    const auto cx = p.card.X + hw;
+    const auto cy = p.card.Y + hh + px(6);
+    for (int y = 0; y < p.height; ++y)
+        for (int x = 0; x < p.width; ++x)
+            mask[static_cast<size_t>(y) * p.width + x]
+                = std::clamp(0.5f - rounded_rect_sdf(x + 0.5f - cx, y + 0.5f - cy, hw, hh, px(radius_dip)), 0.f, 1.f);
+    box_blur(mask, p.width, p.height, std::max(1, static_cast<int>(px(7))));
+    for (auto& value : mask)
+        value *= 0.55f;
+    p.shadow = std::move(mask);
 }
 
 void build_layout(Picker& p)
@@ -2005,10 +3093,32 @@ void build_layout(Picker& p)
     p.shadow = std::move(mask);
 }
 
+bool inside(const Gdiplus::RectF& r, float x, float y)
+{
+    return x >= r.X && x < r.X + r.Width && y >= r.Y && y < r.Y + r.Height;
+}
+
 int hit_test(const Picker& p, POINT pt)
 {
     const auto fx = static_cast<float>(pt.x);
     const auto fy = static_cast<float>(pt.y);
+    if (p.spectrum) {
+        for (int i = 0; i < spectrum_style_count; ++i) {
+            const auto& t = p.spectrum_tiles[i];
+            if (inside({t.X, t.Y, t.Width, t.Height + label_h_dip * p.k}, fx, fy))
+                return i;
+        }
+        for (int i = 0; i < 2; ++i)
+            if (inside(p.frame_chips[i], fx, fy))
+                return frame_hit_base + i;
+        for (int i = 0; i < 3; ++i)
+            if (inside(p.band_chips[i], fx, fy))
+                return bands_hit_base + i;
+        for (int i = 0; i < spectrum_fall_count; ++i)
+            if (inside(p.fall_chips[i], fx, fy))
+                return fall_hit_base + i;
+        return -1;
+    }
     for (int i = 0; i < style_count; ++i) {
         const auto& t = p.tiles[i];
         const auto half_gap = tile_gap_dip * p.k / 2.f;
@@ -2065,9 +3175,78 @@ void render(Picker& p)
         const Gdiplus::Font label_font(family.get(), 14.f * k, regular_style(*family), Gdiplus::UnitPixel);
         const Gdiplus::Font label_bold(family.get(), 14.f * k, bold_style(*family), Gdiplus::UnitPixel);
 
-        draw_text(g, nocturne_text::vu_picker_title, title_font, rgba(244, 240, 230, 0.55),
-            {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear, k);
+        draw_text(g, p.spectrum ? nocturne_text::spectrum_picker_title : nocturne_text::vu_picker_title, title_font,
+            rgba(244, 240, 230, 0.55), {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear,
+            k);
 
+        const auto draw_tile = [&](const Gdiplus::RectF& t, const std::vector<uint32_t>& thumb, const wchar_t* name,
+                                   bool selected, bool hovered) {
+            Gdiplus::GraphicsPath tile_path;
+            add_panel_path(tile_path, t, 9.f * k);
+            g.SetClip(&tile_path);
+            if (!thumb.empty()) {
+                Gdiplus::Bitmap bitmap(p.thumb_w, p.thumb_h, p.thumb_w * 4, PixelFormat32bppPARGB,
+                    reinterpret_cast<BYTE*>(const_cast<uint32_t*>(thumb.data())));
+                g.DrawImage(&bitmap, t.X, t.Y, t.Width, t.Height);
+            }
+            if (!selected) {
+                const Gdiplus::SolidBrush dim(rgba(0, 0, 0, hovered ? 0.10 : 0.28));
+                g.FillRectangle(&dim, t);
+            }
+            g.ResetClip();
+            if (selected) {
+                Gdiplus::GraphicsPath ring;
+                const auto o = 2.f * k;
+                add_panel_path(ring, {t.X - o, t.Y - o, t.Width + 2 * o, t.Height + 2 * o}, 9.f * k + o);
+                const Gdiplus::Pen pen(rgba(240, 190, 120, 0.95), 2.f * k);
+                g.DrawPath(&pen, &ring);
+            } else {
+                const Gdiplus::Pen pen(rgba(255, 255, 255, hovered ? 0.40 : 0.12), 1.f * k);
+                g.DrawPath(&pen, &tile_path);
+            }
+            draw_text(g, name, selected ? label_bold : label_font,
+                selected ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.58),
+                {t.X + t.Width / 2.f, t.Y + t.Height + label_h_dip * k / 2.f}, Gdiplus::StringAlignmentCenter, k);
+        };
+        const auto draw_chip = [&](const Gdiplus::RectF& c, const wchar_t* text, bool chosen, bool hovered) {
+            Gdiplus::GraphicsPath chip_path;
+            add_panel_path(chip_path, c, 10.f * k);
+            const Gdiplus::SolidBrush chip_fill(chosen ? rgba(240, 190, 120, 0.14) : rgba(255, 255, 255, hovered ? 0.07 : 0.035));
+            g.FillPath(&chip_fill, &chip_path);
+            const Gdiplus::Pen chip_pen(chosen ? rgba(240, 190, 120, 0.95) : rgba(255, 255, 255, hovered ? 0.30 : 0.10),
+                (chosen ? 1.5f : 1.f) * k);
+            g.DrawPath(&chip_pen, &chip_path);
+            draw_text(g, text, chosen ? label_bold : label_font,
+                chosen ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.65),
+                {c.X + c.Width / 2.f, c.Y + c.Height / 2.f}, Gdiplus::StringAlignmentCenter, k);
+        };
+
+        if (p.spectrum) {
+            const auto current_style = static_cast<int>(cached_spectrum_style());
+            for (int i = 0; i < spectrum_style_count; ++i)
+                draw_tile(p.spectrum_tiles[i], p.spectrum_thumbs[i], nocturne_text::spectrum_style_names[i], i == current_style,
+                    p.hover == i);
+            const Gdiplus::Pen divider(rgba(255, 255, 255, 0.08), 1.f * k);
+            g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider_y, p.card.X + p.card.Width - pad_dip * k, p.divider_y);
+            const wchar_t* titles[3]
+                = {nocturne_text::spectrum_frame_title, nocturne_text::spectrum_bands_title, nocturne_text::spectrum_fall_title};
+            for (int row = 0; row < 3; ++row)
+                draw_text(g, titles[row], title_font, rgba(244, 240, 230, 0.55),
+                    {p.card.X + pad_dip * k, p.row_y[row] + spectrum_row_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear, k);
+            const auto framed = cached_spectrum_framed();
+            for (int i = 0; i < 2; ++i)
+                draw_chip(p.frame_chips[i], nocturne_text::spectrum_frame_names[i], (i == 0) == framed, p.hover == frame_hit_base + i);
+            for (int i = 0; i < 3; ++i) {
+                wchar_t text[8]{};
+                swprintf_s(text, L"%d", spectrum_band_options[i]);
+                draw_chip(p.band_chips[i], text, spectrum_band_options[i] == cached_spectrum_bands(), p.hover == bands_hit_base + i);
+            }
+            for (int i = 0; i < spectrum_fall_count; ++i)
+                draw_chip(p.fall_chips[i], nocturne_text::spectrum_fall_names[i], i == cached_spectrum_fall(),
+                    p.hover == fall_hit_base + i);
+        }
+
+        if (!p.spectrum) {
         int selected = 0;
         for (int i = 0; i < style_count; ++i)
             if (display_order[i] == get_style())
@@ -2153,6 +3332,7 @@ void render(Picker& p)
         g.FillEllipse(&knob, knob_x - knob_r, cy - knob_r, 2 * knob_r, 2 * knob_r);
         draw_text(g, nocturne_text::vu_backlight, label_font, rgba(244, 240, 230, 0.85),
             {pill.X + pill.Width + 10.f * k, cy}, Gdiplus::StringAlignmentNear, k);
+        } // !p.spectrum
     }
 
     BITMAPINFO info{};
@@ -2210,6 +3390,22 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_LBUTTONUP: {
         const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+        if (p.spectrum) {
+            if (hit >= 0 && hit < spectrum_style_count) {
+                set_spectrum_style(static_cast<SpectrumStyle>(hit));
+            } else if (hit >= frame_hit_base && hit < frame_hit_base + 2) {
+                set_spectrum_framed(hit == frame_hit_base);
+                build_thumbnails(p);
+            } else if (hit >= bands_hit_base && hit < bands_hit_base + 3) {
+                set_spectrum_bands(spectrum_band_options[hit - bands_hit_base]);
+                build_thumbnails(p);
+            } else if (hit >= fall_hit_base && hit < fall_hit_base + spectrum_fall_count) {
+                set_spectrum_fall(hit - fall_hit_base);
+            }
+            if (hit >= 0)
+                render(p);
+            return 0;
+        }
         if (hit >= 0 && hit < style_count) {
             if (display_order[hit] != get_style())
                 set_style(display_order[hit]);
@@ -2267,7 +3463,12 @@ void open(HWND meter, POINT at)
     auto p = std::make_unique<Picker>();
     p->meter = meter;
     p->k = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
-    build_layout(*p);
+    if (const auto* state = state_of(meter))
+        p->spectrum = state->spectrum;
+    if (p->spectrum)
+        build_spectrum_layout(*p);
+    else
+        build_layout(*p);
     build_thumbnails(*p);
 
     const auto sh = static_cast<int>(std::round(shadow_dip * p->k));
@@ -2300,7 +3501,8 @@ void open(HWND meter, POINT at)
 // 點在哪個錶框裡（視窗用戶區座標）：只有錶框本身接滑鼠，陰影與空白照常落到底下的 ESLyric
 bool hit_panel(const State& state, POINT pt)
 {
-    for (int index = 0; index < state.panel_count; ++index) {
+    const auto count = state.spectrum ? 1 : state.panel_count;
+    for (int index = 0; index < count; ++index) {
         const auto& panel = state.panels[index];
         const auto hw = panel.Width / 2.f;
         const auto hh = panel.Height / 2.f;
@@ -2352,7 +3554,8 @@ void apply_layout(HWND wnd)
 
     const auto style = cached_style();
     const auto target = compute_window_rect(state->bar_rect, style);
-    if (IsRectEmpty(&target)) {
+    const auto content = current_content();
+    if (IsRectEmpty(&target) || !content) {
         if (IsWindowVisible(wnd)) {
             KillTimer(wnd, frame_timer_id);
             ShowWindow(wnd, SW_HIDE);
@@ -2363,7 +3566,13 @@ void apply_layout(HWND wnd)
     const auto visible = IsWindowVisible(wnd) != FALSE;
     const auto width = static_cast<int>(target.right - target.left);
     const auto height = static_cast<int>(target.bottom - target.top);
-    const auto restyled = state->style != style;
+    const auto spectrum_style = cached_spectrum_style();
+    const auto spectrum_framed = cached_spectrum_framed();
+    const auto spectrum_bands = cached_spectrum_bands();
+    const auto restyled = state->style != style || state->spectrum != content->spectrum || state->combined != content->combined
+        || (content->spectrum
+            && (state->spectrum_style != spectrum_style || state->spectrum_framed != spectrum_framed
+                || state->spectrum_bands != spectrum_bands));
     const auto moved = !EqualRect(&state->window_rect, &target) || restyled;
 
     if (!visible || moved) {
@@ -2372,9 +3581,14 @@ void apply_layout(HWND wnd)
             ShowWindow(wnd, SW_HIDE);
         state->window_rect = target;
         state->style = style;
+        state->spectrum = content->spectrum;
+        state->combined = content->combined;
+        state->spectrum_style = spectrum_style;
+        state->spectrum_framed = spectrum_framed;
+        state->spectrum_bands = spectrum_bands;
         if (width != state->width || height != state->height || moved) {
-            const auto plan = window_plan_in_stage(
-                style, state->bar_rect.right - state->bar_rect.left, state->bar_rect.top);
+            const auto plan
+                = plan_in_stage(*content, style, state->bar_rect.right - state->bar_rect.left, state->bar_rect.top);
             rebuild_geometry(*state, width, height, plan ? plan->scale : 1.f);
         }
         SetWindowPos(wnd, HWND_TOP, target.left, target.top, width, height, SWP_NOACTIVATE);
@@ -2477,9 +3691,15 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             const auto now = GetTickCount64();
             const auto dt = std::clamp((now - state->last_tick) / 1000.0, 0.001, 0.1);
             state->last_tick = now;
-            const auto changed = update_needles(*state, dt);
-            if (changed || state->fading || state->needs_present)
+            const auto changed = state->spectrum ? update_spectrum(*state, dt) : update_needles(*state, dt);
+            if (changed || state->fading || state->needs_present) {
+                LARGE_INTEGER start{}, end{}, frequency{};
+                QueryPerformanceCounter(&start);
                 present(wnd, *state, changed || state->needs_present);
+                QueryPerformanceCounter(&end);
+                QueryPerformanceFrequency(&frequency);
+                state->last_frame_ms = (end.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
+            }
             return 0;
         }
         if (wp == recapture_timer_id || wp == recapture_late_timer_id) {
@@ -2575,6 +3795,57 @@ void set_style(Style style)
     cached_style() = style;
     fb2k::configStore::get()->setConfigInt(style_config_key, static_cast<int>(style));
     refresh_layouts();
+}
+
+SpectrumStyle get_spectrum_style()
+{
+    return cached_spectrum_style();
+}
+
+void set_spectrum_style(SpectrumStyle style)
+{
+    if (static_cast<int>(style) < 0 || static_cast<int>(style) >= spectrum_style_count)
+        style = spectrum_style_default;
+    cached_spectrum_style() = style;
+    fb2k::configStore::get()->setConfigInt(spectrum_style_config_key, static_cast<int>(style));
+    refresh_layouts();
+}
+
+bool is_spectrum_framed()
+{
+    return cached_spectrum_framed();
+}
+
+void set_spectrum_framed(bool framed)
+{
+    cached_spectrum_framed() = framed;
+    fb2k::configStore::get()->setConfigBool(spectrum_frame_config_key, framed);
+    refresh_layouts();
+}
+
+int get_spectrum_bands()
+{
+    return cached_spectrum_bands();
+}
+
+void set_spectrum_bands(int bands)
+{
+    if (std::ranges::find(spectrum_band_options, bands) == std::end(spectrum_band_options))
+        bands = spectrum_bands_default;
+    cached_spectrum_bands() = bands;
+    fb2k::configStore::get()->setConfigInt(spectrum_bands_config_key, bands);
+    refresh_layouts();
+}
+
+int get_spectrum_fall()
+{
+    return cached_spectrum_fall();
+}
+
+void set_spectrum_fall(int fall)
+{
+    cached_spectrum_fall() = std::clamp(fall, 0, spectrum_fall_count - 1);
+    fb2k::configStore::get()->setConfigInt(spectrum_fall_config_key, cached_spectrum_fall());
 }
 
 HWND create(HWND parent)

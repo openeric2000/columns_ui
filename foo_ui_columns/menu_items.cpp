@@ -320,7 +320,8 @@ bool vu_mode_available()
 {
     // 用一個夠大的假展開頁問標記有沒有歌詞欄位置（只看有沒有，不看大小）
     const auto available = cover_zoom::lyrics_column_in_stage(10000, 10000).has_value();
-    if (vu_available_for_fields.exchange(available) != available && now_playing_mode.get() == 3)
+    if (vu_available_for_fields.exchange(available) != available
+        && main_menu::mode_needs_lyrics_column(static_cast<main_menu::NowPlayingMode>(now_playing_mode.get())))
         fb2k::inMainThread([] { refresh_now_playing_track(); });
     return available;
 }
@@ -337,16 +338,20 @@ uint32_t enabled_modes_mask()
     return mask;
 }
 
-// 存的模式在「有沒有勾選」「VU 表能不能用」的限制下實際顯示哪一種：存的那種不能用時取第一個能用的（歌詞、純封面、VU 表的順序），
-// 都不能用時是歌詞。純函式，任何執行緒都可以用
+// 存的模式在「有沒有勾選」「VU 表／頻譜能不能用」的限制下實際顯示哪一種：存的那種不能用時取第一個能用的
+// （歌詞、純封面、VU 表、頻譜的順序），都不能用時是歌詞。純函式，任何執行緒都可以用
 uint32_t effective_mode(uint32_t stored, uint32_t mask, bool vu_available)
 {
-    const auto usable = [&](uint32_t mode) { return (mask & (1u << (mode - 1))) != 0 && (mode != 3 || vu_available); };
-    if (stored >= 1 && stored <= 3 && usable(stored))
+    constexpr auto count = main_menu::now_playing_mode_count;
+    const auto usable = [&](uint32_t mode) {
+        return (mask & (1u << (mode - 1))) != 0
+            && (vu_available || !main_menu::mode_needs_lyrics_column(static_cast<main_menu::NowPlayingMode>(mode)));
+    };
+    if (stored >= 1 && stored <= count && usable(stored))
         return stored;
-    for (uint32_t mode = 1; mode <= 3; ++mode)
-        if (usable(mode))
-            return mode;
+    for (const auto mode : main_menu::now_playing_mode_order)
+        if (usable(static_cast<uint32_t>(mode)))
+            return static_cast<uint32_t>(mode);
     return 1;
 }
 
@@ -362,7 +367,7 @@ bool mode_usable(main_menu::NowPlayingMode mode)
 {
     if ((enabled_modes_mask() & main_menu::now_playing_modes::bit_of(mode)) == 0)
         return false;
-    return mode != main_menu::NowPlayingMode::vu || vu_mode_available();
+    return !main_menu::mode_needs_lyrics_column(mode) || vu_mode_available();
 }
 
 // 給標題格式欄位用（任何執行緒）：同 now_playing_mode_value，但只讀主執行緒存好的副本
@@ -371,7 +376,7 @@ uint32_t now_playing_mode_for_fields()
     return effective_mode(now_playing_mode.get(), enabled_modes_for_fields.load(), vu_available_for_fields.load());
 }
 
-// 「換下一種」時左上角按鈕旁邊的提示：顯示中的模式（1～3），0＝不顯示。約 1.1 秒後自動清掉
+// 「換下一種」時左上角按鈕旁邊的提示：顯示中的模式（1～4），0＝不顯示。約 1.1 秒後自動清掉
 std::atomic<uint32_t> mode_toast{0};
 UINT_PTR mode_toast_timer{};
 constexpr UINT mode_toast_ms = 1100;
@@ -415,16 +420,22 @@ void set_now_playing_mode(main_menu::NowPlayingMode mode)
     style_transition::run_stage(apply);
 }
 
-// 「換下一種」的順序：歌詞 → 純封面 → VU 表 → 歌詞，跳過沒勾選或不能用的；只剩一種時就是它自己
+// 「換下一種」的順序照 now_playing_mode_order（純封面 → 歌詞 → VU 表 → 頻譜 → 歌詞＋VU → 歌詞＋頻譜 → 純封面），
+// 跳過沒勾選或不能用的；只剩一種時就是它自己
 main_menu::NowPlayingMode next_now_playing_mode()
 {
-    const auto current = static_cast<uint32_t>(now_playing_mode_value());
-    for (uint32_t step = 1; step <= 3; ++step) {
-        const auto candidate = static_cast<main_menu::NowPlayingMode>((current - 1 + step) % 3 + 1);
+    constexpr auto count = main_menu::now_playing_mode_count;
+    const auto current_mode = now_playing_mode_value();
+    uint32_t current = 0;
+    for (uint32_t i = 0; i < count; ++i)
+        if (main_menu::now_playing_mode_order[i] == current_mode)
+            current = i;
+    for (uint32_t step = 1; step <= count; ++step) {
+        const auto candidate = main_menu::now_playing_mode_order[(current + step) % count];
         if (mode_usable(candidate))
             return candidate;
     }
-    return static_cast<main_menu::NowPlayingMode>(current);
+    return current_mode;
 }
 
 // 「跳出選單」：在游標位置開一個小選單，只列設定頁勾選的，目前的打勾；勾了 VU 表但沒有 VU 元件時那一項變灰並註明
@@ -447,10 +458,10 @@ void show_now_playing_mode_menu()
             flags |= MF_GRAYED;
         AppendMenu(menu.get(), flags, static_cast<UINT_PTR>(mode), text);
     };
-    add(main_menu::NowPlayingMode::lyrics, nocturne_text::mode_short_names[0], true);
-    add(main_menu::NowPlayingMode::cover, nocturne_text::mode_short_names[1], true);
-    add(main_menu::NowPlayingMode::vu, vu_available ? nocturne_text::mode_short_names[2] : nocturne_text::mode_short_names[3],
-        vu_available);
+    for (const auto mode : main_menu::now_playing_mode_order) {
+        const auto available = vu_available || !main_menu::mode_needs_lyrics_column(mode);
+        add(mode, nocturne_text::mode_short_names[main_menu::mode_name_index(mode, available)], available);
+    }
 
     POINT cursor{};
     GetCursorPos(&cursor);
@@ -459,7 +470,7 @@ void show_now_playing_mode_menu()
     SetForegroundWindow(owner);
     const auto chosen
         = TrackPopupMenu(menu.get(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN, cursor.x, cursor.y, 0, owner, nullptr);
-    if (chosen >= 1 && chosen <= 3)
+    if (chosen >= 1 && chosen <= static_cast<int>(main_menu::now_playing_mode_count))
         set_now_playing_mode(static_cast<main_menu::NowPlayingMode>(chosen));
 }
 
@@ -642,7 +653,7 @@ public:
             return true;
         }
 
-        // %cui_now_playing_mode%：展開頁顯示內容 1 歌詞、2 純封面、3 VU 表（2026-11-11）
+        // %cui_now_playing_mode%：展開頁顯示內容 1 歌詞、2 純封面、3 VU 表（2026-11-11）、4 頻譜、5 歌詞＋VU 表、6 歌詞＋頻譜（2026-11-12）
         if (index == 8) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_mode_for_fields()));
             return true;
@@ -651,7 +662,7 @@ public:
         // %cui_now_playing_mode_toast%：左上角按鈕「換下一種」後約 1.1 秒內是新模式的名稱，其餘時間不存在
         if (index == 9) {
             const auto toast = mode_toast.load();
-            if (toast < 1 || toast > 3)
+            if (toast < 1 || toast > main_menu::now_playing_mode_count)
                 return false;
             out->write(titleformat_inputtypes::meta, nocturne_text::mode_toast_names[toast - 1]);
             return true;
@@ -778,6 +789,27 @@ const MainMenuCommand now_playing_mode_vu{.guid = now_playing_mode_vu_id,
     .is_available_callback = [] { return vu_mode_available(); }};
 
 // ESLyric 展開頁左上角的按鈕用 mm://View/Layout/切換展開頁顯示內容
+const MainMenuCommand now_playing_mode_spectrum{.guid = now_playing_mode_spectrum_id,
+    .name = nocturne_text::mode_spectrum_name,
+    .description = nocturne_text::mode_spectrum_description,
+    .execute_callback = [] { set_now_playing_mode(NowPlayingMode::spectrum); },
+    .is_radio_selected_callback = [] { return now_playing_mode_value() == NowPlayingMode::spectrum; },
+    .is_available_callback = [] { return vu_mode_available(); }};
+
+const MainMenuCommand now_playing_mode_lyrics_vu{.guid = now_playing_mode_lyrics_vu_id,
+    .name = nocturne_text::mode_lyrics_vu_name,
+    .description = nocturne_text::mode_lyrics_vu_description,
+    .execute_callback = [] { set_now_playing_mode(NowPlayingMode::lyrics_vu); },
+    .is_radio_selected_callback = [] { return now_playing_mode_value() == NowPlayingMode::lyrics_vu; },
+    .is_available_callback = [] { return vu_mode_available(); }};
+
+const MainMenuCommand now_playing_mode_lyrics_spectrum{.guid = now_playing_mode_lyrics_spectrum_id,
+    .name = nocturne_text::mode_lyrics_spectrum_name,
+    .description = nocturne_text::mode_lyrics_spectrum_description,
+    .execute_callback = [] { set_now_playing_mode(NowPlayingMode::lyrics_spectrum); },
+    .is_radio_selected_callback = [] { return now_playing_mode_value() == NowPlayingMode::lyrics_spectrum; },
+    .is_available_callback = [] { return vu_mode_available(); }};
+
 const MainMenuCommand now_playing_mode_button{now_playing_mode_button_id, nocturne_text::mode_button_name,
     nocturne_text::mode_button_description, [] { on_now_playing_mode_button(); }};
 
@@ -921,7 +953,8 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_view_ui_parts(grou
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     groups::view_layout_commands, mainmenu_commands::sort_priority_base, live_editing, toggle_now_playing_view,
     stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_info, cycle_now_playing_style,
-    now_playing_mode_lyrics, now_playing_mode_cover, now_playing_mode_vu, now_playing_mode_button, next_track_toast_toggle,
+    now_playing_mode_cover, now_playing_mode_lyrics, now_playing_mode_vu, now_playing_mode_spectrum,
+    now_playing_mode_lyrics_vu, now_playing_mode_lyrics_spectrum, now_playing_mode_button, next_track_toast_toggle,
     theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(

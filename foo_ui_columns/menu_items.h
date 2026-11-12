@@ -42,6 +42,14 @@ constexpr GUID now_playing_mode_cover_id{
     0xcf0b57e1, 0x32df, 0x44f8, {0xaa, 0xc0, 0x73, 0x97, 0xc3, 0x4c, 0x05, 0x38}};
 constexpr GUID now_playing_mode_vu_id{
     0xd0539e89, 0xa2ee, 0x4314, {0xaa, 0x53, 0x55, 0x42, 0xaf, 0xe9, 0x90, 0xc7}};
+// 2026-11-12：展開頁：頻譜
+constexpr GUID now_playing_mode_spectrum_id{
+    0x3a983b1b, 0x4f95, 0x4718, {0x89, 0xf0, 0x0e, 0x88, 0xb6, 0x7c, 0xc9, 0x74}};
+// 2026-11-12：展開頁：歌詞＋VU 表、歌詞＋頻譜
+constexpr GUID now_playing_mode_lyrics_vu_id{
+    0x2f29d27e, 0x459e, 0x4d2f, {0x96, 0x4e, 0xb6, 0x2f, 0x62, 0x74, 0x71, 0x0e}};
+constexpr GUID now_playing_mode_lyrics_spectrum_id{
+    0xa7f6ef88, 0xe197, 0x4a61, {0xb6, 0xf8, 0xc1, 0x38, 0xfc, 0xb7, 0xde, 0x36}};
 constexpr GUID now_playing_mode_button_id{
     0xeb119c41, 0x706f, 0x4e51, {0x87, 0x5d, 0xeb, 0xc2, 0x5a, 0x2f, 0x91, 0x8d}};
 // 自編版新增：View/Layout/下一首提示（開關）
@@ -77,8 +85,54 @@ uint32_t get_now_playing_style();
 void reset_now_playing_style_to_cover();
 
 // 自編版新增（2026-11-11，v1.5 待做清單第 4 個）：展開頁要顯示什麼，給 ESLyric 佈局的 %cui_now_playing_mode% 與 Columns UI 自己用
-// 1 歌詞（預設）、2 純封面、3 VU 表。VU 表只有版面裡有「展開頁右側」面板、main.xml 標記有 VU 位置時才算數，沒有就當成 1
-enum class NowPlayingMode : uint32_t { lyrics = 1, cover = 2, vu = 3 };
+// 1 歌詞（預設）、2 純封面、3 VU 表、4 頻譜、5 歌詞＋VU 表、6 歌詞＋頻譜（4～6 是 2026-11-12 加的）。
+// 3～6 左邊一樣有封面；它們只有 main.xml 標記有歌詞欄位置時才算數，沒有就當成 1。
+// 數字是存在設定裡的值，不能改；畫面上的順序見 now_playing_mode_order
+enum class NowPlayingMode : uint32_t { lyrics = 1, cover = 2, vu = 3, spectrum = 4, lyrics_vu = 5, lyrics_spectrum = 6 };
+inline constexpr uint32_t now_playing_mode_count = 6;
+// 設定頁勾選、左上角按鈕的輪流與選單都照這個順序（2026-11-12 使用者指定：純封面、封面＋歌詞、VU、頻譜、歌詞＋VU、歌詞＋頻譜）
+inline constexpr NowPlayingMode now_playing_mode_order[now_playing_mode_count] = {NowPlayingMode::cover,
+    NowPlayingMode::lyrics, NowPlayingMode::vu, NowPlayingMode::spectrum, NowPlayingMode::lyrics_vu,
+    NowPlayingMode::lyrics_spectrum};
+
+// 模式在 nocturne_text::mode_short_names 裡的位置；版面不支援時的灰色字在下一格（3～6 才有）
+inline constexpr int mode_name_index(NowPlayingMode mode, bool available = true)
+{
+    switch (mode) {
+    case NowPlayingMode::cover:
+        return 1;
+    case NowPlayingMode::vu:
+        return available ? 2 : 3;
+    case NowPlayingMode::spectrum:
+        return available ? 4 : 5;
+    case NowPlayingMode::lyrics_vu:
+        return available ? 6 : 7;
+    case NowPlayingMode::lyrics_spectrum:
+        return available ? 8 : 9;
+    default:
+        return 0;
+    }
+}
+
+// 要放到歌詞欄位置、要 main.xml 標記的模式
+inline constexpr bool mode_needs_lyrics_column(NowPlayingMode mode)
+{
+    return static_cast<uint32_t>(mode) >= 3 && static_cast<uint32_t>(mode) <= now_playing_mode_count;
+}
+
+// 這個模式畫 VU 表／頻譜嗎；歌詞要不要跟著顯示（歌詞＋VU、歌詞＋頻譜時歌詞在歌詞欄上半）
+inline constexpr bool mode_shows_vu(NowPlayingMode mode)
+{
+    return mode == NowPlayingMode::vu || mode == NowPlayingMode::lyrics_vu;
+}
+inline constexpr bool mode_shows_spectrum(NowPlayingMode mode)
+{
+    return mode == NowPlayingMode::spectrum || mode == NowPlayingMode::lyrics_spectrum;
+}
+inline constexpr bool mode_shows_lyrics(NowPlayingMode mode)
+{
+    return mode == NowPlayingMode::lyrics || mode == NowPlayingMode::lyrics_vu || mode == NowPlayingMode::lyrics_spectrum;
+}
 NowPlayingMode get_now_playing_mode();
 
 // 左上角按鈕點一下的動作：false＝換下一種（預設，旁邊跳出模式名稱）、true＝跳出選單。存在 fb2k 共用設定
@@ -97,15 +151,24 @@ inline void set_opens_menu(bool value)
 }
 } // namespace now_playing_mode_button
 
-// 展開頁要有哪幾種（2026-11-11 使用者要求：設定頁用下拉鈕勾選）：bit0 歌詞、bit1 純封面、bit2 VU 表，預設全勾。
+// 展開頁要有哪幾種（2026-11-11 使用者要求：設定頁用下拉鈕勾選）：bit0 歌詞、bit1 純封面、bit2 VU 表、bit3 頻譜、
+// bit4 歌詞＋VU 表、bit5 歌詞＋頻譜，預設全勾。
 // 左上角按鈕的「換下一種」與「跳出選單」都只出現勾選的；至少留一種（設定頁擋掉全部取消）。存在 fb2k 共用設定
 namespace now_playing_modes {
 inline constexpr char config_key[] = "nocturne.nowPlaying.modes";
-inline constexpr uint32_t all_modes = 7;
+inline constexpr uint32_t all_modes = 63;
+// 2026-11-12 加頻譜與兩種「歌詞＋」之前存的勾選沒有 bit3～5：第一次讀到時補勾（新功能預設出現），之後照使用者的勾選
+inline constexpr char spectrum_added_key[] = "nocturne.nowPlaying.modesSpectrumAdded";
 
 inline uint32_t get_mask()
 {
-    const auto mask = static_cast<uint32_t>(fb2k::configStore::get()->getConfigInt(config_key, all_modes)) & all_modes;
+    const auto store = fb2k::configStore::get();
+    auto mask = static_cast<uint32_t>(store->getConfigInt(config_key, all_modes)) & all_modes;
+    if (!store->getConfigBool(spectrum_added_key, false)) {
+        mask |= 8u | 16u | 32u;
+        store->setConfigInt(config_key, mask);
+        store->setConfigBool(spectrum_added_key, true);
+    }
     return mask ? mask : 1u;
 }
 

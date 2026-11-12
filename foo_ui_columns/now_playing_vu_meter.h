@@ -51,6 +51,43 @@ inline constexpr NeedlePreset needle_preset_default = NeedlePreset::standard;
 NeedlePreset get_needle_preset();
 void set_needle_preset(NeedlePreset preset);
 
+// ---- 頻譜（2026-11-12，v1.5 待做清單第 7 個）----
+// 展開頁第四種模式「頻譜」也畫在同一個視窗（同 VU 的位置、背景截取、玻璃、右鍵挑選卡）：
+// 使用者看過六種預覽後說「都做、跟 VU 一樣可以右鍵調整」，樣式、外框、頻段數、峰值點落下速度都在挑選卡裡選。
+// 資料用 fb2k 視覺化串流的頻譜（新版 FFT、單聲道、4096 點），30 Hz～16 kHz 對數分頻；光的顏色從錶後面的虛化背景取
+// （換歌時跟著封面變，灰色封面改暖琥珀）
+enum class SpectrumStyle : int {
+    led_cover = 0, // LED 點陣・封面色
+    led_warm = 1,  // LED 點陣・暖光（同 VU 背光色調、最上面幾排轉紅）
+    bar_cover = 2, // 長條・封面色柔光
+    bar_frost = 3, // 長條・霧白
+    mirror = 4,    // 鏡像細條
+    curve = 5,     // 光帶曲線
+};
+inline constexpr int spectrum_style_count = 6;
+inline constexpr char spectrum_style_config_key[] = "nocturne.spectrum.style";
+inline constexpr SpectrumStyle spectrum_style_default = SpectrumStyle::bar_cover;
+// 外框：玻璃錶框（同 VU）或不要框（光直接浮在背景上）
+inline constexpr char spectrum_frame_config_key[] = "nocturne.spectrum.frame";
+inline constexpr bool spectrum_frame_default = false;
+// 頻段數：24／32／48
+inline constexpr int spectrum_band_options[3] = {24, 32, 48};
+inline constexpr char spectrum_bands_config_key[] = "nocturne.spectrum.bands";
+inline constexpr int spectrum_bands_default = 32;
+// 峰值點落下：0 慢、1 中、2 快
+inline constexpr int spectrum_fall_count = 3;
+inline constexpr char spectrum_fall_config_key[] = "nocturne.spectrum.fall";
+inline constexpr int spectrum_fall_default = 1;
+
+SpectrumStyle get_spectrum_style();
+void set_spectrum_style(SpectrumStyle style);
+bool is_spectrum_framed();
+void set_spectrum_framed(bool framed);
+int get_spectrum_bands();
+void set_spectrum_bands(int bands);
+int get_spectrum_fall();
+void set_spectrum_fall(int fall);
+
 HWND create(HWND parent);
 void layout(HWND wnd, const RECT& bar_rect);
 HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);

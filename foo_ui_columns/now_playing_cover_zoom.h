@@ -42,6 +42,14 @@ std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height);
 // 高度照 VU 外觀比例 830×199、在展開頁垂直置中。沒有歌詞欄位置時傳回空的（＝這個版面沒有 VU 表模式）
 std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height);
 
+// 「歌詞＋VU 表」「歌詞＋頻譜」時歌詞在歌詞欄上半、下半放 VU 表／頻譜（2026-11-12）：歌詞那塊的下緣（展開頁左上角為原點、實際像素）。
+// 照標記的 lyrics-split（展開頁高的百分比，main.xml 裡上半那塊的高度要一致），沒寫時是 56%
+int lyrics_split_y(int stage_height);
+
+// 封面下面那組資訊（歌名、藝人、專輯、技術資訊）在排版時的下緣（展開頁左上角為原點、實際像素）＝封面＋gap＋info 那一整組的下緣。
+// 歌詞＋VU 表／頻譜時 VU 表／頻譜的錶框底部對齊這裡（2026-11-12 使用者要求）；沒有封面標記時傳回空的
+std::optional<int> info_bottom_in_stage(int stage_width, int stage_height);
+
 } // namespace cui::cover_zoom
 
 // 自編版新增：歌詞防誤拖（2026-11-11 使用者要求）

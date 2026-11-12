@@ -156,12 +156,22 @@ inline constexpr auto mode_cover_description = "Shows only a large cover in the 
 inline constexpr auto mode_vu_name = "Now Playing: VU Meter";
 inline constexpr auto mode_vu_description
     = "Shows the VU meter in place of the lyrics.";
+inline constexpr auto mode_spectrum_name = "Now Playing: Spectrum";
+inline constexpr auto mode_spectrum_description = "Shows a spectrum analyser in place of the lyrics.";
+inline constexpr auto mode_lyrics_vu_name = "Now Playing: Lyrics + VU Meter";
+inline constexpr auto mode_lyrics_vu_description = "Shows the lyrics with a smaller VU meter below them.";
+inline constexpr auto mode_lyrics_spectrum_name = "Now Playing: Lyrics + Spectrum";
+inline constexpr auto mode_lyrics_spectrum_description = "Shows the lyrics with a smaller spectrum analyser below them.";
 inline constexpr auto mode_button_name = "Switch Now Playing Content";
 inline constexpr auto mode_button_description
     = "Switches what the now playing view shows. Clicking moves to the next one or opens a menu, as set in Preferences.";
-// 彈出選單與切換時的提示（第 4 個是版面沒標記歌詞欄位置、不能用 VU 表時的灰色項目）
-inline constexpr wchar_t mode_short_names[4][32] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (layout not supported)"};
-inline constexpr const char* mode_toast_names[3] = {"Lyrics", "Cover only", "VU meter"};
+// 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
+inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (layout not supported)",
+    L"Spectrum", L"Spectrum (layout not supported)", L"Lyrics + VU meter", L"Lyrics + VU meter (layout not supported)",
+    L"Lyrics + spectrum", L"Lyrics + spectrum (layout not supported)"};
+// 依模式數字 1～6
+inline constexpr const char* mode_toast_names[6]
+    = {"Lyrics", "Cover only", "VU meter", "Spectrum", "Lyrics + VU meter", "Lyrics + spectrum"};
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"Top-left button";
 inline constexpr wchar_t mode_button_names[2][32] = {L"Next on click (default)", L"Menu on click"};
@@ -187,6 +197,15 @@ inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
 inline constexpr wchar_t vu_needle_title[] = L"Needle";
 inline constexpr wchar_t vu_needle_names[4][16] = {L"Standard", L"Lively", L"Snappy", L"Auto"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"Follows the song"};
+// 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
+inline constexpr wchar_t spectrum_picker_title[] = L"Spectrum style";
+inline constexpr wchar_t spectrum_style_names[6][32]
+    = {L"LED · cover colour", L"LED · warm", L"Bars · cover glow", L"Bars · frost", L"Mirrored lines", L"Glow curve"};
+inline constexpr wchar_t spectrum_frame_title[] = L"Frame";
+inline constexpr wchar_t spectrum_frame_names[2][24] = {L"Glass frame", L"No frame"};
+inline constexpr wchar_t spectrum_bands_title[] = L"Bands";
+inline constexpr wchar_t spectrum_fall_title[] = L"Peak fall";
+inline constexpr wchar_t spectrum_fall_names[3][16] = {L"Slow", L"Medium", L"Fast"};
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "Main Menu Button";
@@ -365,11 +384,19 @@ inline constexpr auto mode_cover_name = "展開頁：純封面";
 inline constexpr auto mode_cover_description = "展開頁只在中間顯示放大的封面。";
 inline constexpr auto mode_vu_name = "展開頁：VU 表";
 inline constexpr auto mode_vu_description = "展開頁歌詞的位置換成 VU 表。";
+inline constexpr auto mode_spectrum_name = "展開頁：頻譜";
+inline constexpr auto mode_spectrum_description = "展開頁歌詞的位置換成頻譜。";
+inline constexpr auto mode_lyrics_vu_name = "展開頁：歌詞＋VU 表";
+inline constexpr auto mode_lyrics_vu_description = "展開頁歌詞往上，下面放縮小的 VU 表。";
+inline constexpr auto mode_lyrics_spectrum_name = "展開頁：歌詞＋頻譜";
+inline constexpr auto mode_lyrics_spectrum_description = "展開頁歌詞往上，下面放縮小的頻譜。";
 inline constexpr auto mode_button_name = "切換展開頁顯示內容";
 inline constexpr auto mode_button_description = "切換展開頁要顯示什麼；點一下換下一種或跳出選單，依設定頁的選擇。";
-// 彈出選單與切換時的提示（第 4 個是版面沒標記歌詞欄位置、不能用 VU 表時的灰色項目）
-inline constexpr wchar_t mode_short_names[4][32] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（這個版面不支援）"};
-inline constexpr const char* mode_toast_names[3] = {"歌詞", "純封面", "VU 表"};
+// 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
+inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（這個版面不支援）", L"頻譜",
+    L"頻譜（這個版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（這個版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（這個版面不支援）"};
+// 依模式數字 1～6
+inline constexpr const char* mode_toast_names[6] = {"歌詞", "純封面", "VU 表", "頻譜", "歌詞＋VU 表", "歌詞＋頻譜"};
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
 inline constexpr wchar_t mode_button_names[2][32] = {L"點一下換下一種（預設）", L"點一下跳出選單"};
@@ -392,6 +419,15 @@ inline constexpr wchar_t vu_backlight[] = L"暖色背光";
 inline constexpr wchar_t vu_needle_title[] = L"指針";
 inline constexpr wchar_t vu_needle_names[4][16] = {L"標準", L"活潑", L"靈敏", L"自動"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"跟著歌曲音量"};
+// 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
+inline constexpr wchar_t spectrum_picker_title[] = L"頻譜樣式";
+inline constexpr wchar_t spectrum_style_names[6][32]
+    = {L"LED 點陣・封面色", L"LED 點陣・暖光", L"長條・封面色柔光", L"長條・霧白", L"鏡像細條", L"光帶曲線"};
+inline constexpr wchar_t spectrum_frame_title[] = L"外框";
+inline constexpr wchar_t spectrum_frame_names[2][24] = {L"玻璃錶框", L"不要框"};
+inline constexpr wchar_t spectrum_bands_title[] = L"頻段";
+inline constexpr wchar_t spectrum_fall_title[] = L"峰值點落下";
+inline constexpr wchar_t spectrum_fall_names[3][16] = {L"慢", L"中", L"快"};
 
 // 主選單按鈕面板
 inline constexpr auto menu_button_panel_name = "主選單按鈕";

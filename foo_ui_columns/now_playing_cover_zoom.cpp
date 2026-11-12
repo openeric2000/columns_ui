@@ -120,6 +120,9 @@ struct CoverGeometry {
     Length lyrics_right;
     bool has_vu_width{};
     Length vu_width;
+    // lyrics-split（2026-11-12）：歌詞＋VU 表／頻譜時，歌詞那塊佔展開頁高的百分比
+    bool has_lyrics_split{};
+    Length lyrics_split;
 };
 
 std::wstring layout_file_path()
@@ -198,6 +201,9 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "vu-width") {
             geometry.vu_width = *value;
             geometry.has_vu_width = geometry.vu_width.value > 0;
+        } else if (key == "lyrics-split") {
+            geometry.lyrics_split = *value;
+            geometry.has_lyrics_split = value->percent && value->value > 10 && value->value < 90;
         }
     }
 
@@ -599,6 +605,19 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
     return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
 }
 
+std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
+{
+    const auto cover = cover_rect_in_stage(stage_width, stage_height);
+    if (!cover)
+        return {};
+    const auto& geometry = layout_geometry();
+    const auto resolve = [stage_width](const Length& length) {
+        return length.percent ? static_cast<int>(std::lround(stage_width * length.value / 100.0))
+                              : uih::scale_dpi_value(static_cast<int>(std::lround(length.value)));
+    };
+    return static_cast<int>(cover->bottom) + resolve(geometry.gap) + resolve(geometry.info);
+}
+
 std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
 {
     const auto& geometry = layout_geometry();
@@ -616,6 +635,13 @@ std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
         return {};
 
     return RECT{left, 0, right, stage_height};
+}
+
+int lyrics_split_y(int stage_height)
+{
+    const auto& geometry = layout_geometry();
+    const auto percent = geometry.has_lyrics_split ? geometry.lyrics_split.value : 56.0;
+    return static_cast<int>(std::lround(stage_height * percent / 100.0));
 }
 
 std::optional<RECT> vu_rect_in_stage(int stage_width, int stage_height)
@@ -740,19 +766,23 @@ RECT compute_layout(const RECT& bar_rect)
     if (bar_rect.right <= bar_rect.left || !is_enabled())
         return {};
 
-    // 只在展開頁完全展開、而且是歌詞模式時蓋
+    // 只在展開頁完全展開、而且有歌詞時蓋（歌詞＋VU 表／頻譜時只蓋上半的歌詞，下半是 VU 表／頻譜自己的視窗）
     RECT stage_screen{};
     HWND owner{};
     if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
         return {};
-    if (main_menu::get_now_playing_mode() != main_menu::NowPlayingMode::lyrics)
+    const auto mode = main_menu::get_now_playing_mode();
+    if (!main_menu::mode_shows_lyrics(mode))
         return {};
 
     const auto column = cover_zoom::lyrics_column_in_stage(bar_rect.right - bar_rect.left, bar_rect.top);
     if (!column)
         return {};
 
-    return RECT{bar_rect.left + column->left, column->top, bar_rect.left + column->right, column->bottom};
+    auto bottom = column->bottom;
+    if (mode != main_menu::NowPlayingMode::lyrics)
+        bottom = std::min(bottom, static_cast<LONG>(cover_zoom::lyrics_split_y(bar_rect.top)));
+    return RECT{bar_rect.left + column->left, column->top, bar_rect.left + column->right, bottom};
 }
 
 // 蓋層底下那個 ESLyric 視窗（滾輪、右鍵轉給它）

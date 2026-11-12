@@ -708,13 +708,13 @@ private:
         using main_menu::NowPlayingMode;
         const auto mask = main_menu::now_playing_modes::get_mask();
         std::wstring text;
-        const NowPlayingMode modes[]{NowPlayingMode::lyrics, NowPlayingMode::cover, NowPlayingMode::vu};
+        const auto& modes = main_menu::now_playing_mode_order;
         for (size_t i = 0; i < std::size(modes); ++i) {
             if ((mask & main_menu::now_playing_modes::bit_of(modes[i])) == 0)
                 continue;
             if (!text.empty())
                 text += nocturne_text::modes_separator;
-            text += nocturne_text::mode_short_names[i];
+            text += nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i])];
         }
         const auto combo = GetDlgItem(wnd, IDC_MODES);
         ComboBox_ResetContent(combo);
@@ -769,17 +769,17 @@ private:
             if (!menu)
                 return;
             const auto mask = main_menu::now_playing_modes::get_mask();
-            const NowPlayingMode modes[]{NowPlayingMode::lyrics, NowPlayingMode::cover, NowPlayingMode::vu};
+            const auto& modes = main_menu::now_playing_mode_order;
             for (size_t i = 0; i < std::size(modes); ++i) {
+                const auto available = vu_available || !main_menu::mode_needs_lyrics_column(modes[i]);
                 const auto checked = (mask & main_menu::now_playing_modes::bit_of(modes[i])) != 0;
-                const auto text = (modes[i] == NowPlayingMode::vu && !vu_available) ? nocturne_text::mode_short_names[3]
-                                                                                   : nocturne_text::mode_short_names[i];
+                const auto text = nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i], available)];
                 AppendMenu(menu.get(), MF_STRING | (checked ? MF_CHECKED : MF_UNCHECKED), i + 1, text);
             }
 
             const auto chosen = TrackPopupMenu(menu.get(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN,
                 rect.left, rect.bottom, 0, wnd, nullptr);
-            if (chosen < 1 || chosen > 3)
+            if (chosen < 1 || chosen > static_cast<int>(std::size(modes)))
                 return;
 
             const auto bit = main_menu::now_playing_modes::bit_of(modes[chosen - 1]);
