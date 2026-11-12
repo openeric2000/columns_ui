@@ -167,7 +167,8 @@ constexpr float spec_plot_top = 26.f;
 constexpr float spec_plot_bottom = 44.f; // 錶框下面這段留給頻率字
 constexpr float spec_label_from_bottom = 22.f;
 constexpr double spec_min_hz = 30.0;
-constexpr double spec_max_hz = 16000.0;
+// 上限 16 kHz → 20 kHz（2026-11-12 使用者要求；曲庫以無損／Hi-Res／DSD 為主，16～20 kHz 有東西。不到 22 kHz：44.1 kHz 音源 20 kHz 以上被濾掉，最右邊會一直是空的）
+constexpr double spec_max_hz = 20000.0;
 constexpr unsigned spec_fft_size = 4096;
 // 每條的動態（同預覽）：變高 25 毫秒、變低 220 毫秒；峰值點停 0.5 秒再落下，落下速度（每秒幾個滿格）三段可選
 constexpr double spec_rise_seconds = 0.025;
@@ -1555,14 +1556,14 @@ void rebuild_static_spectrum(State& state)
         g.FillRectangle(&line, plot.X, mid - 0.5f * std::max(1.f, s), plot.Width, std::max(1.f, s));
     }
 
-    // 頻率字：60、250、1k、4k、16k，最右邊小字 Hz
+    // 頻率字：60、250、1k、4k、20k（最右邊一條＝上限，2026-11-12 從 16k 改），最右邊小字 Hz
     if (const auto family = theme_family()) {
         const Gdiplus::Font font(family.get(), 13.f * s, regular_style(*family), Gdiplus::UnitPixel);
         const Gdiplus::Font unit_font(family.get(), 12.f * s, regular_style(*family), Gdiplus::UnitPixel);
         const auto y = panel.Y + panel.Height - spec_label_from_bottom * s;
         const auto span = std::log(spec_max_hz / spec_min_hz);
         const std::pair<double, const wchar_t*> labels[]
-            = {{60.0, L"60"}, {250.0, L"250"}, {1000.0, L"1k"}, {4000.0, L"4k"}, {16000.0, L"16k"}};
+            = {{60.0, L"60"}, {250.0, L"250"}, {1000.0, L"1k"}, {4000.0, L"4k"}, {spec_max_hz, L"20k"}};
         for (const auto& [hz, text] : labels) {
             const auto u = static_cast<float>(std::log(hz / spec_min_hz) / span);
             const auto x = plot.X + column_width(state) * (0.5f + u * (state.spectrum_bands - 1));
@@ -2707,7 +2708,7 @@ void log_spectrum(const State& state, const double* raw_db, int bands)
 #endif
 
 // 讀這一格的頻譜，更新各條高度與峰值點；有動到要重畫就傳回 true。
-// 頻段：30 Hz～16 kHz 對數等分，中心頻率 fc，範圍 fc 前後半格；範圍不到一個 FFT 格就在中心內插，否則取範圍內最大值
+// 頻段：30 Hz～20 kHz 對數等分，中心頻率 fc，範圍 fc 前後半格；範圍不到一個 FFT 格就在中心內插，否則取範圍內最大值
 bool update_spectrum(State& state, double dt)
 {
     const auto n = std::clamp(state.spectrum_bands, 2, spec_max_bands);
