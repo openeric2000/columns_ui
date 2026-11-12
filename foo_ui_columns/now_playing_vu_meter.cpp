@@ -697,6 +697,9 @@ RECT compute_window_rect(const RECT& bar_rect, Style style)
     const auto content = current_content();
     if (!content)
         return {};
+    // 歌詞＋VU 表沒有圓形錶頭（2026-11-12 使用者：圓形在這個高度太小；方框雙錶、單錶雙指針照樣可選）→ 存的是圓形時畫方框雙錶
+    if (content->combined && !content->spectrum && style == Style::round)
+        style = Style::box;
 
     const auto plan = plan_in_stage(*content, style, bar_rect.right - bar_rect.left, bar_rect.top);
     if (!plan)
@@ -2914,6 +2917,8 @@ struct Picker {
     HWND wnd{};
     HWND meter{};
     bool spectrum{};
+    // 歌詞＋VU 表：沒有圓形錶頭（2026-11-12 使用者：方框雙錶、單錶雙指針照樣可選，圓形不在這裡顯示），卡片只列前兩種
+    bool combined_vu{};
     Gdiplus::RectF spectrum_tiles[spectrum_style_count];
     Gdiplus::RectF frame_chips[2];
     Gdiplus::RectF band_chips[3];
@@ -2938,6 +2943,12 @@ struct Picker {
     int hover{-1};
     bool tracking{};
 };
+
+// 縮圖幾張：歌詞＋VU 表只有方框雙錶、單錶雙指針（display_order 的前兩個）
+int tile_count(const Picker& p)
+{
+    return p.combined_vu ? 2 : style_count;
+}
 
 std::unique_ptr<Picker>& current()
 {
@@ -3145,8 +3156,9 @@ void build_layout(Picker& p)
     p.height = static_cast<int>(card_h + 2 * sh);
     p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
     for (int i = 0; i < style_count; ++i)
-        p.tiles[i] = {p.card.X + pad + i * (p.thumb_w + gap), p.card.Y + px(title_h_dip),
-            static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
+        // 歌詞＋VU 表只有兩張：在三張的寬度裡置中
+        p.tiles[i] = {p.card.X + pad + (p.combined_vu ? (p.thumb_w + gap) / 2.f : 0.f) + i * (p.thumb_w + gap),
+            p.card.Y + px(title_h_dip), static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
     p.divider_y = p.tiles[0].Y + p.thumb_h + px(label_h_dip) + px(4);
     // 指針設定：小標題＋一排四個按鈕（跟縮圖同寬）
     const auto chips_y = p.divider_y + px(section_h_dip);
@@ -3202,7 +3214,7 @@ int hit_test(const Picker& p, POINT pt)
                 return fall_hit_base + i;
         return -1;
     }
-    for (int i = 0; i < style_count; ++i) {
+    for (int i = 0; i < tile_count(p); ++i) {
         const auto& t = p.tiles[i];
         const auto half_gap = tile_gap_dip * p.k / 2.f;
         if (fx >= t.X - half_gap && fx < t.X + t.Width + half_gap && fy >= t.Y - 4.f * p.k
@@ -3258,7 +3270,10 @@ void render(Picker& p)
         const Gdiplus::Font label_font(family.get(), 14.f * k, regular_style(*family), Gdiplus::UnitPixel);
         const Gdiplus::Font label_bold(family.get(), 14.f * k, bold_style(*family), Gdiplus::UnitPixel);
 
-        draw_text(g, p.spectrum ? nocturne_text::spectrum_picker_title : nocturne_text::vu_picker_title, title_font,
+        draw_text(g,
+            p.spectrum ? nocturne_text::spectrum_picker_title
+                       : (p.combined_vu ? nocturne_text::vu_picker_title_combined : nocturne_text::vu_picker_title),
+            title_font,
             rgba(244, 240, 230, 0.55), {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear,
             k);
 
@@ -3343,11 +3358,13 @@ void render(Picker& p)
         }
 
         if (!p.spectrum) {
+        // 選中的：歌詞＋VU 表時存的若是圓形，實際畫的是方框雙錶
+        const auto shown = p.combined_vu && get_style() == Style::round ? Style::box : get_style();
         int selected = 0;
         for (int i = 0; i < style_count; ++i)
-            if (display_order[i] == get_style())
+            if (display_order[i] == shown)
                 selected = i;
-        for (int i = 0; i < style_count; ++i) {
+        for (int i = 0; i < tile_count(p); ++i) {
             const auto& t = p.tiles[i];
             Gdiplus::GraphicsPath tile_path;
             add_panel_path(tile_path, t, 9.f * k);
@@ -3506,7 +3523,7 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
                 render(p);
             return 0;
         }
-        if (hit >= 0 && hit < style_count) {
+        if (hit >= 0 && hit < tile_count(p)) {
             if (display_order[hit] != get_style())
                 set_style(display_order[hit]);
             render(p);
@@ -3597,8 +3614,10 @@ void open(HWND meter, POINT at)
     auto p = std::make_unique<Picker>();
     p->meter = meter;
     p->k = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
-    if (const auto* state = state_of(meter))
+    if (const auto* state = state_of(meter)) {
         p->spectrum = state->spectrum;
+        p->combined_vu = state->combined && !state->spectrum;
+    }
     if (p->spectrum)
         build_spectrum_layout(*p);
     else
@@ -3688,9 +3707,10 @@ void apply_layout(HWND wnd)
     if (!state)
         return;
 
-    const auto style = cached_style();
-    const auto target = compute_window_rect(state->bar_rect, style);
     const auto content = current_content();
+    const auto style
+        = content && content->combined && !content->spectrum && cached_style() == Style::round ? Style::box : cached_style();
+    const auto target = compute_window_rect(state->bar_rect, style);
     if (IsRectEmpty(&target) || !content) {
         if (const auto& open_picker = picker::current(); open_picker && open_picker->meter == wnd)
             picker::close();

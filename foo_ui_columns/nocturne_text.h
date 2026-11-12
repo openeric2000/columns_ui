@@ -192,6 +192,7 @@ inline constexpr wchar_t lyrics_lock_note[]
       L"work.";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
 inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
+inline constexpr wchar_t vu_picker_title_combined[] = L"VU meter style (no round pair with lyrics)";
 inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
 inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
 inline constexpr wchar_t vu_needle_title[] = L"Needle";
@@ -414,6 +415,7 @@ inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左鍵或拖曳不會跳到別的時間；滾輪和右鍵照常。";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
 inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
+inline constexpr wchar_t vu_picker_title_combined[] = L"VU 表樣式（歌詞＋VU 沒有圓形錶頭）";
 inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
 inline constexpr wchar_t vu_backlight[] = L"暖色背光";
 inline constexpr wchar_t vu_needle_title[] = L"指針";
