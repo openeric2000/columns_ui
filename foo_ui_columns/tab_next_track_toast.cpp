@@ -572,10 +572,11 @@ void set_on_top(bool on_top)
 } // namespace folder_search_position
 
 // 暫時隱藏伴奏版（2026-11-11 使用者要求）：存在 fb2k 共用設定，自編 Album list 讀它、送「目前選取資料夾」時略過伴奏版，
-// 也登記了變更通知，寫入就用目前的資料夾重送一次。鍵名、預設值要跟 Album list 的 playlist_utils.h 一致；預設 false＝不隱藏
+// 也登記了變更通知，寫入就用目前的資料夾重送一次。鍵名、預設值要跟 Album list 的 playlist_utils.h 一致；
+// 預設 true＝隱藏（2026-11-12 使用者決定改成預設勾，朋友版也一樣；已手動切過的環境照存的值）
 namespace hide_instrumental {
 inline constexpr char config_key[] = "nocturne.folderTree.hideInstrumental";
-inline constexpr bool enabled_default = false;
+inline constexpr bool enabled_default = true;
 
 bool is_enabled()
 {
