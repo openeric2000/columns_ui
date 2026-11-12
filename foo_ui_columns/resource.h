@@ -122,7 +122,6 @@
 #define IDD_PREFS_SETUP                 240
 #define IDD_PREFS_PVIEW_SEARCH          241
 #define IDD_LAYOUT_PROPERTIES           242
-#define IDD_THEME_FONT                  243
 #define IDD_PREFS_NEXT_TRACK_TOAST      244
 #define IDD_PREFS_NOCTURNE_PLAYBACK     245
 #define IDD_PREFS_NOCTURNE_FONT         246
@@ -378,12 +377,6 @@
 #define IDC_INFOSECTIONS_STATIC         1240
 #define IDC_EXPORT_TYPE_STATIC          1241
 #define IDC_REMEMBER_WINDOW_POS         1242
-#define IDC_THEME_FONT_FAMILY           1243
-#define IDC_THEME_FONT_SIZE             1244
-#define IDC_THEME_FONT_INTRO            1245
-#define IDC_THEME_FONT_FAMILY_LABEL     1246
-#define IDC_THEME_FONT_SIZE_LABEL       1247
-#define IDC_THEME_FONT_LYRICS_NOTE      1248
 #define IDC_NEXT_TOAST_ENABLED          1249
 #define IDC_NEXT_TOAST_SECONDS_LABEL    1250
 #define IDC_NEXT_TOAST_SECONDS          1251

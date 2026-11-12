@@ -12,7 +12,7 @@
 #include "system_appearance_manager.h"
 #include "tab_main_window.h"
 #include "splitter.h"
-#include "theme_font.h"
+#include "config.h"
 #include "nocturne_text.h"
 #include "next_track_toast.h"
 #include "volume_chip.h"
@@ -767,9 +767,9 @@ const MainMenuCommand show_now_playing_cover{show_now_playing_cover_id, nocturne
                 album_art_ids::cover_front);
     }};
 
-// 自編版新增：選一個字型，一次換掉主題的 Columns UI 字型項目與兩個主題檔（見 theme_font.cpp）
+// 自編版新增：主題字型。2026-11-12 起打開設定頁的「字型」分頁（舊對話框退休；命令名稱與 GUID 不變，綁過的快速鍵照用）
 const MainMenuCommand theme_font{theme_font_id, nocturne_text::theme_font_name, nocturne_text::theme_font_description,
-    [] { theme_font::open_theme_font_dialog(core_api::get_main_window()); }};
+    [] { prefs::show_nocturne_font_tab(); }};
 
 const MainMenuCommand now_playing_style_centered{now_playing_style_centered_id, nocturne_text::style_centered_name,
     nocturne_text::style_centered_description, [] { set_now_playing_style(1); }, {},

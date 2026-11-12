@@ -137,7 +137,7 @@ inline constexpr auto show_cover_name = "Show Large Cover";
 inline constexpr wchar_t cover_zoom_tooltip[] = L"View the large cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
-inline constexpr auto theme_font_description = "Changes the whole interface font at once and sets the list size.";
+inline constexpr auto theme_font_description = "Opens the Fonts tab in Preferences.";
 inline constexpr auto style_centered_name = "Now Playing: Centered";
 inline constexpr auto style_centered_description = "Centers the cover and lyrics together in the now playing view.";
 inline constexpr auto style_info_name = "Now Playing: Left + Info Card";
@@ -206,18 +206,10 @@ inline constexpr auto menu_button_panel_name = "Main Menu Button";
 inline constexpr wchar_t collapse_text[] = L"Collapse All";
 inline constexpr wchar_t menu_tooltip[] = L"Menu";
 
-// 主題字型對話框
-inline constexpr wchar_t theme_font_title_w[] = L"Theme Font";
+// 字型分頁：套用失敗時訊息框的標題、歌詞字型說明、大小選項（2026-11-12 主題字型對話框退休，只留分頁用得到的）
 inline constexpr auto theme_font_title = "Theme Font";
-inline constexpr wchar_t theme_font_intro[]
-    = L"Pick a font for the whole interface (except the lyrics). The weight is always Regular.";
-inline constexpr wchar_t theme_font_family_label[] = L"Font";
-inline constexpr wchar_t theme_font_size_label[]
-    = L"Overall size (lists, tabs and folder tree only)";
 inline constexpr wchar_t theme_font_lyrics_note[]
     = L"Lyrics font: right-click the lyrics → Panel Options...";
-inline constexpr wchar_t ok_text[] = L"OK";
-inline constexpr wchar_t cancel_text[] = L"Cancel";
 inline constexpr wchar_t size_small[] = L"Small (90%)";
 inline constexpr wchar_t size_standard[] = L"Standard";
 inline constexpr wchar_t size_large[] = L"Large (115%)";
@@ -227,20 +219,10 @@ inline constexpr wchar_t size_extra_large[] = L"Extra Large (130%)";
 inline constexpr auto error_file_not_found = "file not found";
 inline constexpr auto error_font_setting_not_found = "no font setting found in the file";
 inline constexpr auto error_write_failed = "could not write the file";
-inline constexpr auto error_no_font_list = "Could not read the list of system fonts.";
 inline constexpr auto error_no_usable_style = "This font has no usable style.";
 inline constexpr char error_change_failed[] = "Could not change the font: {}";
 inline constexpr char failure_item[] = "\n{} ({})";
-inline constexpr char applied_message[]
-    = "Changed to \"{}\", size \"{}\". Everything has been applied.\n\n"
-      "Lyrics font: right-click the lyrics → Panel Options...";
-inline constexpr char restart_message[]
-    = "Changed to \"{}\", size \"{}\".\n\n"
-      "The lists, tabs and folder tree are updated. The now playing bar, view and album header switch after a "
-      "restart.\n"
-      "Lyrics font: right-click the lyrics → Panel Options...";
 inline constexpr char failures_message[] = "\n\nThese files were not updated. Please edit them in Notepad:{}";
-inline constexpr auto restart_question = "\n\nRestart foobar2000 now?";
 
 #else
 
@@ -367,7 +349,7 @@ inline constexpr wchar_t cover_zoom_tooltip[] = L"看封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";
 inline constexpr auto theme_font_description
-    = "一次換掉整個介面的字型，並調整清單大小。";
+    = "打開設定頁的「字型」分頁。";
 inline constexpr auto style_centered_name = "展開頁：置中";
 inline constexpr auto style_centered_description = "展開頁的封面與歌詞整組置中。";
 inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
@@ -431,16 +413,9 @@ inline constexpr auto menu_button_panel_name = "主選單按鈕";
 inline constexpr wchar_t collapse_text[] = L"全部收合";
 inline constexpr wchar_t menu_tooltip[] = L"選單";
 
-// 主題字型對話框
-inline constexpr wchar_t theme_font_title_w[] = L"主題字型";
+// 字型分頁：套用失敗時訊息框的標題、歌詞字型說明、大小選項（2026-11-12 主題字型對話框退休，只留分頁用得到的）
 inline constexpr auto theme_font_title = "主題字型";
-inline constexpr wchar_t theme_font_intro[]
-    = L"選一個字型，一次換掉整個介面（歌詞除外）。粗細固定一般。";
-inline constexpr wchar_t theme_font_family_label[] = L"字型";
-inline constexpr wchar_t theme_font_size_label[] = L"整體大小（只影響清單、分頁與資料夾樹）";
 inline constexpr wchar_t theme_font_lyrics_note[] = L"歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
-inline constexpr wchar_t ok_text[] = L"確定";
-inline constexpr wchar_t cancel_text[] = L"取消";
 inline constexpr wchar_t size_small[] = L"小（90%）";
 inline constexpr wchar_t size_standard[] = L"標準";
 inline constexpr wchar_t size_large[] = L"大（115%）";
@@ -450,19 +425,10 @@ inline constexpr wchar_t size_extra_large[] = L"特大（130%）";
 inline constexpr auto error_file_not_found = "找不到檔案";
 inline constexpr auto error_font_setting_not_found = "檔案裡找不到字型設定";
 inline constexpr auto error_write_failed = "寫入失敗";
-inline constexpr auto error_no_font_list = "讀不到系統字型清單。";
 inline constexpr auto error_no_usable_style = "這個字型沒有可以用的樣式。";
 inline constexpr char error_change_failed[] = "換字型失敗：{}";
 inline constexpr char failure_item[] = "\n{}（{}）";
-inline constexpr char applied_message[]
-    = "已經換成「{}」，大小「{}」，都套用好了。\n\n"
-      "歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
-inline constexpr char restart_message[]
-    = "已經換成「{}」，大小「{}」。\n\n"
-      "清單、分頁與資料夾樹已經換好；播放列、展開頁與專輯標頭要重開 foobar2000 才會換。\n"
-      "歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
 inline constexpr char failures_message[] = "\n\n下面的檔案沒有換到，要自己用記事本改：{}";
-inline constexpr auto restart_question = "\n\n要現在重開 foobar2000 嗎？";
 
 #endif
 

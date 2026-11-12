@@ -117,4 +117,7 @@ extern service_factory_single_t<PreferencesTabsHost> page_playlist_view;
 extern service_factory_single_t<PreferencesTabsHost> page_playlist_switcher;
 extern service_factory_single_t<PreferencesTabsHost> page_filters;
 
+// 自編版新增：打開 Preferences → Tools → Nocturne 的「字型」分頁（View/Layout/主題字型… 用，2026-11-12）
+void show_nocturne_font_tab();
+
 } // namespace cui::prefs

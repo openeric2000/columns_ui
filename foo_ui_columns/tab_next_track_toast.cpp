@@ -1002,6 +1002,11 @@ service_factory_single_t<PreferencesTabsHost> g_nocturne_preferences_page("Noctu
 
 } // namespace
 
+void show_nocturne_font_tab()
+{
+    g_nocturne_preferences_page.get_static_instance().show_tab(nocturne_text::font_tab_name);
+}
+
 PreferencesTab* g_get_tab_next_track_toast()
 {
     return &g_tab_next_track_toast;
