@@ -19,6 +19,7 @@
 #include "expanded_cover_bg.h"
 #include "now_playing_cover_zoom.h"
 #include "now_playing_style_transition.h"
+#include "now_playing_mode_picker.h"
 
 namespace cui::main_menu {
 
@@ -438,9 +439,25 @@ main_menu::NowPlayingMode next_now_playing_mode()
     return current_mode;
 }
 
-// 「跳出選單」：在游標位置開一個小選單，只列設定頁勾選的，目前的打勾；勾了 VU 表但沒有 VU 元件時那一項變灰並註明
+// 「跳出選單」：只列設定頁勾選的。2026-11-12 起用版面縮圖卡（now_playing_mode_picker，使用者看過預覽選 B）；
+// 卡片開不起來（GDI+ 字型還沒暖機好）時才用下面的系統選單：在游標位置、目前的打勾、版面不支援的變灰並註明
 void show_now_playing_mode_menu()
 {
+    {
+        const auto current = now_playing_mode_value();
+        const auto vu_available = vu_mode_available();
+        const auto mask = enabled_modes_mask();
+        std::vector<mode_picker::Item> items;
+        for (const auto mode : main_menu::now_playing_mode_order) {
+            if ((mask & main_menu::now_playing_modes::bit_of(mode)) == 0)
+                continue;
+            const auto available = vu_available || !main_menu::mode_needs_lyrics_column(mode);
+            items.push_back({mode, nocturne_text::mode_short_names[main_menu::mode_name_index(mode)], available});
+        }
+        if (mode_picker::open(std::move(items), current, [](main_menu::NowPlayingMode mode) { set_now_playing_mode(mode); }))
+            return;
+    }
+
     const wil::unique_hmenu menu(CreatePopupMenu());
     if (!menu)
         return;

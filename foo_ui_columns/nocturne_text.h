@@ -172,6 +172,8 @@ inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L
 // 依模式數字 1～6
 inline constexpr const char* mode_toast_names[6]
     = {"Lyrics", "Cover only", "VU meter", "Spectrum", "Lyrics + VU meter", "Lyrics + spectrum"};
+// 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
+inline constexpr wchar_t mode_picker_unavailable[] = L"Not in this layout";
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"Top-left button";
 inline constexpr wchar_t mode_button_names[2][32] = {L"Next on click (default)", L"Menu on click"};
@@ -398,6 +400,8 @@ inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"
     L"頻譜（這個版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（這個版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（這個版面不支援）"};
 // 依模式數字 1～6
 inline constexpr const char* mode_toast_names[6] = {"歌詞", "純封面", "VU 表", "頻譜", "歌詞＋VU 表", "歌詞＋頻譜"};
+// 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
+inline constexpr wchar_t mode_picker_unavailable[] = L"版面不支援";
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
 inline constexpr wchar_t mode_button_names[2][32] = {L"點一下換下一種（預設）", L"點一下跳出選單"};
