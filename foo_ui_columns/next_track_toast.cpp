@@ -9,7 +9,6 @@
 #include "menu_items.h"
 #include "nocturne_text.h"
 #include "nocturne_timing.h"
-#include "playlist_item_helpers.h"
 #include "splitter.h"
 
 #pragma comment(lib, "shlwapi.lib")
@@ -205,7 +204,6 @@ std::wstring format_track_text(const metadb_handle_ptr& handle, const char* scri
 
 // 提示畫面上要顯示的文字與開關（內容變了才重畫靜態的那一層）
 struct Content {
-    bool stopped{};
     bool show_number{};
     bool show_cover{};
     bool show_tag{};
@@ -468,16 +466,6 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
     Gdiplus::Pen track(rgba(255, 61, 61, 61), layout.stroke);
     g.DrawEllipse(&track, rect);
 
-    if (content.stopped) {
-        // 已停止：圈裡放一個播放符號，不倒數
-        const auto t = layout.ring * 0.36f;
-        const Gdiplus::PointF points[3]{{center_x - t * 0.32f, center_y - t * 0.5f},
-            {center_x - t * 0.32f, center_y + t * 0.5f}, {center_x + t * 0.58f, center_y}};
-        const Gdiplus::SolidBrush glyph(rgba(255, 241, 241, 241));
-        g.FillPolygon(&glyph, points, 3);
-        return;
-    }
-
     // 從 12 點鐘方向順時針畫剩餘的弧，剩餘變少時弧的末端往逆時針退
     Gdiplus::Pen arc(rgba(255, 229, 38, 43), layout.stroke); // 主題紅 #e5262b
     arc.SetStartCap(Gdiplus::LineCapRound);
@@ -574,7 +562,7 @@ private:
     std::unique_ptr<Gdiplus::Bitmap> m_static;
 };
 
-// 卡片可以點（2026-11-07）：點下去等於按「下一首」（已停止的「接下來」卡片則是開始播放）。
+// 卡片可以點（2026-11-07）：點下去等於按「下一首」。
 // 實作在 Controller 之後（要讀它的狀態）；視窗訊息這邊只轉過去
 bool toast_hit_test(LPARAM screen_point);
 void toast_set_hover(HWND wnd, bool inside);
@@ -673,12 +661,9 @@ public:
     void activate();
 
 private:
-    enum class Mode { countdown, stopped };
-
     struct Want {
         RECT stage{};
         HWND owner{};
-        Mode mode{Mode::countdown};
         double remaining{};
         double ratio{};
         // 歌曲最後 fade_out_seconds 秒：提示邊淡出邊把倒數圈與數字走到 0（2026-11-05），不再凍結在「1」
@@ -777,21 +762,19 @@ void Controller::set_hover(HWND wnd, bool inside)
     m_hover = inside;
 }
 
-// 點卡片：播放中＝跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）；已停止＝開始播放
+// 點卡片：跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）
 void Controller::activate()
 {
     if (!m_content_valid)
         return;
 
-    const auto stopped = m_content.stopped;
-
     // 不在自己的視窗訊息裡直接換歌：換歌會馬上收掉這個視窗（on_new_track），改排到下一輪主執行緒訊息再做
-    fb2k::inMainThread([stopped] {
+    fb2k::inMainThread([] {
         if (!g_alive)
             return;
 
         try {
-            play_control::get()->start(stopped ? play_control::track_command_play : play_control::track_command_next);
+            play_control::get()->start(play_control::track_command_next);
         }
         CATCH_LOG()
     });
@@ -939,7 +922,13 @@ std::optional<Controller::Want> Controller::evaluate()
     const auto count = static_cast<int>(std::clamp(seconds.get(), min_seconds, max_seconds));
     metadb_handle_ptr now_playing;
 
-    if (playback->is_playing()) {
+    // 停止中不顯示（2026-11-12 起停止一律收起展開頁，不再有「已停止 · 接下來」）
+    if (!playback->is_playing()) {
+        m_smoother.reset();
+        return {};
+    }
+
+    {
         if (!playback->get_now_playing(now_playing)) {
             m_smoother.reset();
             return {};
@@ -969,17 +958,9 @@ std::optional<Controller::Want> Controller::evaluate()
         if (remaining > count)
             return {};
 
-        want.mode = Mode::countdown;
         want.fading = remaining <= fade_out_seconds;
         want.remaining = std::max(remaining, 0.0);
         want.ratio = want.remaining / count;
-    } else {
-        m_smoother.reset();
-
-        if (playlist_manager::get()->queue_get_count() == 0)
-            return {};
-
-        want.mode = Mode::stopped;
     }
 
     update_next(now_playing);
@@ -1092,8 +1073,7 @@ void Controller::on_cover_loaded(uint64_t generation, std::shared_ptr<Gdiplus::B
 
 void Controller::rebuild_content(const Want& want, const Layout& layout)
 {
-    const auto stopped = want.mode == Mode::stopped;
-    const uint32_t key = (stopped ? 1u : 0u) | (show_seconds_in_ring.get() ? 2u : 0u) | (show_cover.get() ? 4u : 0u)
+    const uint32_t key = (show_seconds_in_ring.get() ? 2u : 0u) | (show_cover.get() ? 4u : 0u)
         | (show_source_tag.get() ? 8u : 0u) | (want.next.from_queue ? 16u : 0u);
 
     const auto unchanged = m_content_valid && m_content_key == key && m_content_track == want.next.handle
@@ -1107,11 +1087,10 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
         const auto cover_wanted = show_cover.get();
         const auto cover_toggled_on = cover_wanted && (m_content_key & 4u) == 0;
 
-        m_content.stopped = stopped;
         m_content.show_number = show_seconds_in_ring.get();
         m_content.show_cover = cover_wanted;
         m_content.show_tag = show_source_tag.get();
-        m_content.caption = stopped ? nocturne_text::next_caption_stopped : nocturne_text::next_caption;
+        m_content.caption = nocturne_text::next_caption;
         m_content.tag = want.next.from_queue ? nocturne_text::next_source_queue : nocturne_text::next_source_list;
         m_content.title = format_track_text(want.next.handle, "$if2(%title%,%filename%)");
         m_content.artist = format_track_text(want.next.handle, "[%artist%]");
@@ -1265,20 +1244,10 @@ public:
 
 initquit_factory_t<NextTrackToastInitQuit> next_track_toast_initquit;
 
-// 佇列有變動：馬上重算下一首。停止中使用者把佇列清空，展開頁就沒有東西可以顯示，自動收合（跟「停止就收」一致）
-// 只看使用者移除的那一種：播放推進時佇列變空，不能收（那時下一首正要開始播）
-// 雙擊播放別首歌時，核心會先清佇列、再由 playlist_item_helpers 補回（2026-11-03），那一瞬間的空佇列不算使用者清空
+// 佇列有變動：馬上重算下一首
 class QueueChangeCallback : public playback_queue_callback {
 public:
-    void on_changed(t_change_origin origin) override
-    {
-        controller().invalidate_next();
-
-        if (origin == changed_user_removed && !play_control::get()->is_playing()
-            && playlist_manager::get()->queue_get_count() == 0 && FlatSplitterPanel::s_is_now_playing_expanded()
-            && !playlist_item_helpers::is_restoring_queue())
-            FlatSplitterPanel::s_toggle_now_playing();
-    }
+    void on_changed(t_change_origin origin) override { controller().invalidate_next(); }
 };
 
 service_factory_single_t<QueueChangeCallback> queue_change_callback;

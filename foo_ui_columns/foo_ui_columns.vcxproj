@@ -283,7 +283,6 @@
     <ClCompile Include="format_code_generator.cpp" />
     <ClCompile Include="theme_font.cpp" />
     <ClCompile Include="next_track_toast.cpp" />
-    <ClCompile Include="stopped_page.cpp" />
     <ClCompile Include="now_playing_progress.cpp" />
     <ClCompile Include="output_chip.cpp" />
     <ClCompile Include="volume_chip.cpp" />

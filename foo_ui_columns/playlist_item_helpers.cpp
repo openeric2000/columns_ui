@@ -8,9 +8,6 @@ fbh::ConfigBool keep_queue_on_play(
 
 namespace {
 
-// 只在主執行緒用（播放清單的操作都在主執行緒）
-size_t restoring_depth{};
-
 template <typename RunDefaultAction>
 void run_keeping_queue(RunDefaultAction&& run_default_action)
 {
@@ -23,9 +20,6 @@ void run_keeping_queue(RunDefaultAction&& run_default_action)
 
     pfc::list_t<t_playback_queue_item> saved;
     api->queue_get_contents(saved);
-
-    ++restoring_depth;
-    const auto leave = wil::scope_exit([] { --restoring_depth; });
 
     run_default_action();
 
@@ -53,11 +47,6 @@ void play_item_keeping_queue(size_t playlist, size_t item)
 void play_active_item_keeping_queue(size_t item)
 {
     run_keeping_queue([&] { playlist_manager::get()->activeplaylist_execute_default_action(item); });
-}
-
-bool is_restoring_queue()
-{
-    return restoring_depth > 0;
 }
 
 void action_remove_track(bool on_item, size_t idx)

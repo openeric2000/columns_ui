@@ -196,24 +196,91 @@ const MainMenuCommand live_editing{toggle_live_editing_id, "Live editing",
 // 版面裡要有同一層、自訂標題分別為「主內容」「播放列」的兩個面板（標題常數在 splitter.h）；找不到時什麼都不做
 using panels::splitter::FlatSplitterPanel;
 
+// 自編版新增：「暫停就位」（2026-11-12）——規則是「沒在播就沒有展開頁」
+// - 停止中點播放列、佇列有歌：讓佇列第一首暫停在 0:00 就位再展開，展開頁就是那首真正的樣子（封面、歌詞、背景）
+// - 還沒按過播放就停止或收起：把那首放回佇列最前面，等於什麼都沒發生（播放次數也不會動）
+// - 按過播放（取消暫停）之後就是一般的播放，停止時不放回
+namespace staged {
+
+// 就位前記下的佇列第一首（含它原本在哪個播放清單第幾首，放回時盡量照原樣）
+t_playback_queue_item g_head{};
+// 已經呼叫 start()、還在等這首開檔
+bool g_pending{};
+// 這首已經就位、還沒按過播放
+bool g_active{};
+
+void clear()
+{
+    g_head = {};
+    g_pending = false;
+    g_active = false;
+}
+
+bool start_from_queue()
+{
+    const auto playlists = playlist_manager::get();
+    pfc::list_t<t_playback_queue_item> queue;
+    playlists->queue_get_contents(queue);
+
+    if (queue.get_count() == 0)
+        return false;
+
+    g_head = queue[0];
+    g_pending = true;
+    g_active = false;
+    playback_control::get()->start(playback_control::track_command_play, true);
+    return true;
+}
+
+// 把就位的那首放回佇列最前面：佇列沒有「插到第幾個」的 API，只能清掉再照順序加回去
+void put_head_back()
+{
+    const auto playlists = playlist_manager::get();
+    pfc::list_t<t_playback_queue_item> rest;
+    playlists->queue_get_contents(rest);
+
+    const auto add = [&playlists](const t_playback_queue_item& entry) {
+        // 播放清單在這段時間被改過（刪歌、排序）時，原本的位置可能已經是別首，改用曲目本身加
+        metadb_handle_ptr at_position;
+        if (entry.m_playlist != pfc_infinite
+            && playlists->playlist_get_item_handle(at_position, entry.m_playlist, entry.m_item)
+            && at_position == entry.m_handle)
+            playlists->queue_add_item_playlist(entry.m_playlist, entry.m_item);
+        else
+            playlists->queue_add_item(entry.m_handle);
+    };
+
+    playlists->queue_flush();
+    add(g_head);
+    for (size_t index = 0; index < rest.get_count(); index++)
+        add(rest[index]);
+}
+
+} // namespace staged
+
 const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, nocturne_text::toggle_now_playing_name,
     nocturne_text::toggle_now_playing_description,
     [] {
-        // 沒在播放（停止）而且佇列也沒有歌時不展開；暫停算播放中。收合一律可以
-        // 佇列還有歌時停止中也能展開，展開頁會顯示「已停止 · 接下來」（見 next_track_toast.cpp）
-        if (!FlatSplitterPanel::s_is_now_playing_expanded() && !playback_control::get()->is_playing()
-            && playlist_manager::get()->queue_get_count() == 0)
+        const auto playback = playback_control::get();
+
+        if (!FlatSplitterPanel::s_is_now_playing_expanded()) {
+            // 停止中：佇列有歌就讓第一首暫停就位再展開，沒有就不展開；暫停算播放中
+            if (!playback->is_playing() && !staged::start_from_queue())
+                return;
+        } else if (staged::g_pending || staged::g_active) {
+            // 就位後還沒播就收起：停止並放回佇列（停止時的回呼會收合展開頁），回到點開前的樣子
+            playback->stop();
             return;
+        }
 
         FlatSplitterPanel::s_toggle_now_playing();
     },
     [] { return FlatSplitterPanel::s_is_now_playing_expanded(); }};
 
 // 自編版新增：ESLyric 播放列的停止鈕用 mm://View/Layout/停止或收起播放頁
-// - 播放中（含暫停）：照常停止；佇列有歌時展開頁留住，顯示「已停止 · 接下來」（見 stopped_page.cpp）
-// - 已經停止、展開頁還開著：收起展開頁，佇列保留不動（要清佇列自己清，清空後展開頁會自動收，見 next_track_toast.cpp）
+// - 播放中（含暫停）：照常停止，展開頁跟著收起（見下面的 NowPlayingViewPlayCallback）
+// - 已經停止、展開頁還開著（照理不會發生，保險用）：收起展開頁
 // - 已經停止而且已收合：什麼都不做
-// 只有接這個命令的按鈕有這個行為；鍵盤、媒體鍵的停止還是核心的停止，展開頁照舊
 const MainMenuCommand stop_or_collapse{stop_or_collapse_id, nocturne_text::stop_or_collapse_name,
     nocturne_text::stop_or_collapse_description,
     [] {
@@ -233,28 +300,52 @@ const MainMenuCommand next_track_toast_toggle{next_track_toast_toggle_id, noctur
     nocturne_text::next_track_toggle_description, [] { next_track_toast::enabled = !next_track_toast::enabled.get(); },
     [] { return next_track_toast::enabled.get(); }};
 
-// 自編版新增：播放停止（按停止、清單播完）時，展開中的播放頁自動收回；換曲與結束 fb2k 不處理
+// 自編版新增：播放停止（按停止、清單播完）時，展開中的播放頁一律收回（2026-11-12 起佇列有歌也收，見上面的 staged）；
+// 換曲與結束 fb2k 不處理。也在這裡追蹤「暫停就位」的那首有沒有真的播過
 class NowPlayingViewPlayCallback : public play_callback_static {
 public:
-    unsigned get_flags() override { return flag_on_playback_stop; }
+    unsigned get_flags() override
+    {
+        return flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_pause | flag_on_playback_stop;
+    }
 
     void on_playback_stop(play_control::t_stop_reason reason) override
     {
-        if (reason == play_control::stop_reason_starting_another || reason == play_control::stop_reason_shutting_down)
+        // 換曲（按下一首、雙擊別首）：就位的那首被跳過了，不放回
+        if (reason == play_control::stop_reason_starting_another || reason == play_control::stop_reason_shutting_down) {
+            staged::clear();
             return;
+        }
 
-        // 佇列還有歌：停止後展開頁保持展開，顯示「已停止 · 接下來」；佇列被清空時由 next_track_toast.cpp 收回
-        if (playlist_manager::get()->queue_get_count() > 0)
-            return;
+        if (staged::g_active)
+            staged::put_head_back();
+        staged::clear();
 
         if (FlatSplitterPanel::s_is_now_playing_expanded())
             FlatSplitterPanel::s_toggle_now_playing();
     }
 
-    void on_playback_starting(play_control::t_track_command command, bool paused) override {}
-    void on_playback_new_track(metadb_handle_ptr track) override {}
+    // 不是暫停開始的播放（按播放、雙擊）：就不是就位了
+    void on_playback_starting(play_control::t_track_command command, bool paused) override
+    {
+        if (!paused)
+            staged::clear();
+    }
+
+    void on_playback_new_track(metadb_handle_ptr track) override
+    {
+        staged::g_active = staged::g_pending && track == staged::g_head.m_handle;
+        staged::g_pending = false;
+    }
+
+    // 取消暫停＝真的開始播了
+    void on_playback_pause(bool state) override
+    {
+        if (!state)
+            staged::clear();
+    }
+
     void on_playback_seek(double time) override {}
-    void on_playback_pause(bool state) override {}
     void on_playback_edited(metadb_handle_ptr track) override {}
     void on_playback_dynamic_info(const file_info& info) override {}
     void on_playback_dynamic_info_track(const file_info& info) override {}

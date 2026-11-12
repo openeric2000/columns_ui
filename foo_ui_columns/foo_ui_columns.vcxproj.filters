@@ -674,9 +674,6 @@
     <ClCompile Include="next_track_toast.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="stopped_page.cpp">
-      <Filter>Utilities</Filter>
-    </ClCompile>
     <ClCompile Include="now_playing_progress.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>

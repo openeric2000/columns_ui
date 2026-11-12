@@ -16,17 +16,14 @@ inline constexpr wchar_t nocturne_version[] = L"1.40";
 // 選單（View/Layout）
 inline constexpr auto toggle_now_playing_name = "Toggle Now Playing";
 inline constexpr auto toggle_now_playing_description
-    = "Expands or collapses the now playing view (the \"Now Playing Bar\" panel covers \"Main Content\"). Does not "
-      "expand while stopped with an empty queue.";
+    = "Expands or collapses the now playing view (the \"Now Playing Bar\" panel covers \"Main Content\"). While "
+      "stopped, the first queued track is loaded paused first; with an empty queue it does not expand.";
 inline constexpr auto stop_or_collapse_name = "Stop or Collapse Now Playing";
-inline constexpr auto stop_or_collapse_description
-    = "Stops playback. If already stopped, closes the now playing view (the queue is kept).";
+inline constexpr auto stop_or_collapse_description = "Stops playback and closes the now playing view.";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view near the end of a track.";
 inline constexpr wchar_t next_caption[] = L"Up next";
-inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
-inline constexpr wchar_t stopped_label[] = L"Stopped";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
 // 播放列的輸出裝置顯示（output_chip.cpp）
@@ -226,16 +223,14 @@ inline constexpr char failures_message[] = "\n\nThese files were not updated. Pl
 // 選單（View/Layout）
 inline constexpr auto toggle_now_playing_name = "切換播放頁";
 inline constexpr auto toggle_now_playing_description
-    = "展開或收起播放頁（「播放列」面板蓋住「主內容」）。停止且佇列沒歌時不展開。";
+    = "展開或收起播放頁（「播放列」面板蓋住「主內容」）。停止中會讓佇列第一首暫停就位再展開，佇列沒歌就不展開。";
 inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
-    = "停止播放；已經停止時收起展開頁（佇列保留）。";
+    = "停止播放並收起展開頁。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description
     = "歌曲最後幾秒，在展開頁角落顯示下一首。";
 inline constexpr wchar_t next_caption[] = L"下一首";
-inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
-inline constexpr wchar_t stopped_label[] = L"已停止";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
 // 播放列的輸出裝置顯示（output_chip.cpp）

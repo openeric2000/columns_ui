@@ -10,9 +10,6 @@ extern fbh::ConfigBool keep_queue_on_play;
 void play_item_keeping_queue(size_t playlist, size_t item);
 void play_active_item_keeping_queue(size_t item);
 
-// 補回佇列的過程中（包含核心清佇列的通知）為 true，別的元件用來略過這一瞬間的空佇列
-bool is_restoring_queue();
-
 using MiddleClickFunction = void (*)(bool, size_t);
 
 struct MiddleLickAction {
