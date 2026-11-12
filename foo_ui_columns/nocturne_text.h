@@ -90,10 +90,14 @@ inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars and lists";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"Widens when the pointer is near. Turn off for the standard Windows scroll bars.";
-inline constexpr wchar_t thin_autohide_vertical[] = L"Folder tree: auto-hide the vertical scroll bar";
-inline constexpr wchar_t thin_autohide_horizontal[] = L"Folder tree: auto-hide the horizontal scroll bar";
+// 「資料夾」分頁的「資料夾樹」一段（2026-11-12 從「介面」搬過來，所以字拿掉「資料夾樹：」開頭）
+inline constexpr wchar_t folder_tree_title[] = L"Folder tree";
+inline constexpr wchar_t thin_autohide_vertical[] = L"Auto-hide the vertical scroll bar";
+inline constexpr wchar_t thin_autohide_horizontal[] = L"Auto-hide the horizontal scroll bar";
+// 沒開細捲軸時兩個自動隱藏變灰，下面這行說明原因（開關在「介面」分頁）
+inline constexpr wchar_t thin_autohide_needs_thin[] = L"Needs thin scroll bars (Interface tab).";
 // 資料夾樹的搜尋框放上面還是下面（2026-11-09）
-inline constexpr wchar_t folder_search_position_label[] = L"Folder tree: search box position";
+inline constexpr wchar_t folder_search_position_label[] = L"Search box position";
 inline constexpr wchar_t folder_search_position_names[2][16] = {L"Top", L"Bottom (default)"};
 // 播放清單框選方框（2026-11-09）
 inline constexpr wchar_t playlist_marquee[] = L"Playlist: drag to box-select";
@@ -319,10 +323,14 @@ inline constexpr wchar_t appearance_tab_title[] = L"捲軸與清單";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
     = L"滑鼠靠近才變寬；關掉就用 Windows 原本的捲軸。";
-inline constexpr wchar_t thin_autohide_vertical[] = L"資料夾樹：直向捲軸自動隱藏";
-inline constexpr wchar_t thin_autohide_horizontal[] = L"資料夾樹：橫向捲軸自動隱藏";
+// 「資料夾」分頁的「資料夾樹」一段（2026-11-12 從「介面」搬過來，所以字拿掉「資料夾樹：」開頭）
+inline constexpr wchar_t folder_tree_title[] = L"資料夾樹";
+inline constexpr wchar_t thin_autohide_vertical[] = L"直向捲軸自動隱藏";
+inline constexpr wchar_t thin_autohide_horizontal[] = L"橫向捲軸自動隱藏";
+// 沒開細捲軸時兩個自動隱藏變灰，下面這行說明原因（開關在「介面」分頁）
+inline constexpr wchar_t thin_autohide_needs_thin[] = L"要先在「介面」分頁開細捲軸。";
 // 資料夾樹的搜尋框放上面還是下面（2026-11-09）
-inline constexpr wchar_t folder_search_position_label[] = L"資料夾樹：搜尋框位置";
+inline constexpr wchar_t folder_search_position_label[] = L"搜尋框位置";
 inline constexpr wchar_t folder_search_position_names[2][16] = {L"上方", L"下方（預設）"};
 // 播放清單框選方框（2026-11-09）
 inline constexpr wchar_t playlist_marquee[] = L"播放清單：按住左鍵拖曳可框選";

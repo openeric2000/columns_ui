@@ -543,7 +543,8 @@ void set_custom(bool custom)
 }
 } // namespace hide_instrumental
 
-// 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁，這頁剩捲軸與資料夾樹、啟動兩段
+// 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁；
+// 2026-11-12：資料夾樹的捲軸自動隱藏與搜尋框位置搬到「資料夾」分頁。這頁剩捲軸與清單、啟動兩段
 class TabNocturneInterface : public NocturneTab {
 public:
     TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
@@ -553,13 +554,6 @@ public:
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_APPEARANCE; }
 
-    // 「平常隱藏」只對細捲軸有意義：沒勾細捲軸時變灰
-    static void enable_autohide(HWND wnd, bool enabled)
-    {
-        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_VERTICAL), enabled);
-        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL), enabled);
-    }
-
     void on_init_dialog(HWND wnd) override
     {
         // 捲軸
@@ -567,18 +561,6 @@ private:
         SetDlgItemText(wnd, IDC_THIN_SCROLLBAR, nocturne_text::thin_scrollbar);
         SetDlgItemText(wnd, IDC_THIN_SCROLLBAR_NOTE, nocturne_text::thin_scrollbar_note);
         CheckDlgButton(wnd, IDC_THIN_SCROLLBAR, check_state(thin_scrollbar::is_enabled()));
-        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_VERTICAL, nocturne_text::thin_autohide_vertical);
-        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, nocturne_text::thin_autohide_horizontal);
-        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_VERTICAL, check_state(thin_scrollbar::is_autohide(true)));
-        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, check_state(thin_scrollbar::is_autohide(false)));
-        enable_autohide(wnd, thin_scrollbar::is_enabled());
-
-        // 資料夾樹搜尋框位置：0＝上方、1＝下方
-        SetDlgItemText(wnd, IDC_FOLDER_SEARCH_POS_LABEL, nocturne_text::folder_search_position_label);
-        const auto search_combo = GetDlgItem(wnd, IDC_FOLDER_SEARCH_POS);
-        for (const auto& name : nocturne_text::folder_search_position_names)
-            ComboBox_AddString(search_combo, name);
-        ComboBox_SetCurSel(search_combo, folder_search_position::is_on_top() ? 0 : 1);
 
         // 播放清單框選方框
         SetDlgItemText(wnd, IDC_PLAYLIST_MARQUEE, nocturne_text::playlist_marquee);
@@ -597,15 +579,7 @@ private:
         const auto code = HIWORD(wp);
 
         if (id == IDC_THIN_SCROLLBAR && code == BN_CLICKED) {
-            const auto checked = IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED;
-            thin_scrollbar::set_enabled(checked);
-            enable_autohide(wnd, checked);
-        } else if ((id == IDC_THIN_AUTOHIDE_VERTICAL || id == IDC_THIN_AUTOHIDE_HORIZONTAL) && code == BN_CLICKED) {
-            thin_scrollbar::set_autohide(id == IDC_THIN_AUTOHIDE_VERTICAL, IsDlgButtonChecked(wnd, id) == BST_CHECKED);
-        } else if (id == IDC_FOLDER_SEARCH_POS && code == CBN_SELCHANGE) {
-            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
-            if (selection != CB_ERR)
-                folder_search_position::set_on_top(selection == 0);
+            thin_scrollbar::set_enabled(IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED);
         } else if (id == IDC_PLAYLIST_MARQUEE && code == BN_CLICKED) {
             playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
         } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
@@ -615,11 +589,14 @@ private:
 };
 
 // ---- 資料夾（2026-11-11）----
-// 使用者要的：介面分頁太擠，另開一頁。預設只有「隱藏伴奏版」一個勾選；再勾「自訂關鍵字」才出現關鍵字輸入框
-// （沒勾就用預設那組）。邏輯在自編 Album list 的 playlist_utils.cpp，改了馬上用目前選的資料夾重送一次
+// 使用者要的：介面分頁太擠，另開一頁。兩段：
+// - 資料夾樹（2026-11-12 從「介面」搬過來）：兩個捲軸自動隱藏（只對細捲軸有意義，細捲軸開關在「介面」分頁，
+//   沒開時變灰並在下面寫原因；切分頁時這頁會重建，所以在 on_init_dialog 判斷一次就夠）、搜尋框位置
+// - 目前選取資料夾：預設只有「隱藏伴奏版」一個勾選；再勾「自訂關鍵字」才出現關鍵字輸入框
+//   （沒勾就用預設那組）。邏輯在自編 Album list 的 playlist_utils.cpp，改了馬上用目前選的資料夾重送一次
 class TabNocturneFolder : public NocturneTab {
 public:
-    TabNocturneFolder() : NocturneTab({IDC_TITLE1}) {}
+    TabNocturneFolder() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
 
     const char* get_name() override { return nocturne_text::folder_tab_name; }
 
@@ -650,7 +627,27 @@ private:
 
     void on_init_dialog(HWND wnd) override
     {
-        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::hide_instrumental_title);
+        // 資料夾樹
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::folder_tree_title);
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_VERTICAL, nocturne_text::thin_autohide_vertical);
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, nocturne_text::thin_autohide_horizontal);
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_VERTICAL, check_state(thin_scrollbar::is_autohide(true)));
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, check_state(thin_scrollbar::is_autohide(false)));
+        const auto thin = thin_scrollbar::is_enabled();
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_VERTICAL), thin);
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL), thin);
+        SetDlgItemText(wnd, IDC_FOLDER_AUTOHIDE_NOTE, nocturne_text::thin_autohide_needs_thin);
+        ShowWindow(GetDlgItem(wnd, IDC_FOLDER_AUTOHIDE_NOTE), thin ? SW_HIDE : SW_SHOW);
+
+        // 搜尋框位置：0＝上方、1＝下方
+        SetDlgItemText(wnd, IDC_FOLDER_SEARCH_POS_LABEL, nocturne_text::folder_search_position_label);
+        const auto search_combo = GetDlgItem(wnd, IDC_FOLDER_SEARCH_POS);
+        for (const auto& name : nocturne_text::folder_search_position_names)
+            ComboBox_AddString(search_combo, name);
+        ComboBox_SetCurSel(search_combo, folder_search_position::is_on_top() ? 0 : 1);
+
+        // 目前選取資料夾
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::hide_instrumental_title);
         SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL, nocturne_text::hide_instrumental);
         SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM, nocturne_text::hide_instrumental_custom);
         SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL, nocturne_text::hide_instrumental_keywords_label);
@@ -666,7 +663,13 @@ private:
         const auto id = LOWORD(wp);
         const auto code = HIWORD(wp);
 
-        if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
+        if ((id == IDC_THIN_AUTOHIDE_VERTICAL || id == IDC_THIN_AUTOHIDE_HORIZONTAL) && code == BN_CLICKED) {
+            thin_scrollbar::set_autohide(id == IDC_THIN_AUTOHIDE_VERTICAL, IsDlgButtonChecked(wnd, id) == BST_CHECKED);
+        } else if (id == IDC_FOLDER_SEARCH_POS && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                folder_search_position::set_on_top(selection == 0);
+        } else if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
             save_keywords(wnd);
             hide_instrumental::set_enabled(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED);
             update_controls(wnd);
