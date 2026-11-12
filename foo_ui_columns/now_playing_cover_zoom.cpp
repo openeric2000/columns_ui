@@ -605,6 +605,17 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
     return RECT{cover_left, cover_top, cover_left + cover, cover_top + cover};
 }
 
+std::optional<int> info_top_in_stage(int stage_width, int stage_height)
+{
+    const auto cover = cover_rect_in_stage(stage_width, stage_height);
+    if (!cover)
+        return {};
+    const auto& geometry = layout_geometry();
+    const auto gap = geometry.gap.percent ? static_cast<int>(std::lround(stage_width * geometry.gap.value / 100.0))
+                                          : uih::scale_dpi_value(static_cast<int>(std::lround(geometry.gap.value)));
+    return static_cast<int>(cover->bottom) + gap;
+}
+
 std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
 {
     const auto cover = cover_rect_in_stage(stage_width, stage_height);

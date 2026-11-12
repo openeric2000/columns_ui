@@ -49,6 +49,8 @@ int lyrics_split_y(int stage_height);
 // 封面下面那組資訊（歌名、藝人、專輯、技術資訊）在排版時的下緣（展開頁左上角為原點、實際像素）＝封面＋gap＋info 那一整組的下緣。
 // 歌詞＋VU 表／頻譜時 VU 表／頻譜的錶框底部對齊這裡（2026-11-12 使用者要求）；沒有封面標記時傳回空的
 std::optional<int> info_bottom_in_stage(int stage_width, int stage_height);
+// 同上那組資訊的上緣（＝封面下緣＋gap，歌名那一行的頂端）
+std::optional<int> info_top_in_stage(int stage_width, int stage_height);
 
 } // namespace cui::cover_zoom
 

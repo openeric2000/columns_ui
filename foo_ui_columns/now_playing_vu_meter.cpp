@@ -171,12 +171,17 @@ constexpr double spec_range_db = 55.0;
 constexpr double spec_tilt_db_per_octave = 3.0;
 constexpr int spec_max_bands = 48;
 constexpr int spec_glow_downsample = 3; // 發光那層用三分之一解析度畫、模糊
-// 歌詞＋VU 表／歌詞＋頻譜：縮成這麼多倍放在歌詞欄下半（放不下再縮），左緣對齊歌詞。
-// 錶框底部對齊左邊封面下面那組資訊的底部（cover_zoom::info_bottom_in_stage），歌詞往下多佔、多幾行（2026-11-12 使用者要求）；
-// 版面沒有封面標記時，視窗上緣在歌詞那塊下緣往上 combined_overlap_dip（歌詞元件下面本來就有 48 的空白）。
-// 第一版在下半置中，使用者說跟歌詞中間空隙太大
+// 歌詞＋VU 表／歌詞＋頻譜（2026-11-12，使用者看了三版後定的規則）：
+// 看得到的部分（VU 的錶框；頻譜不要框時是最高的長條到頻率字、有框時是錶框）跟左邊封面下那組資訊同高——
+// 上緣對齊歌名頂端（封面下緣＋gap）、下緣對齊最後一行技術資訊；左緣對齊歌詞。不能凸出到封面下緣以上、也不能黏著歌詞
+// （歌詞那塊的下緣由 main.xml 的留白決定，要停在錶上緣往上約 40）。
+// VU 表整組等比例縮到這個高度；頻譜寬度維持 combined_scale 倍、高度壓成這一條，頻率字不小於 10 DIP。
+// 版面沒有封面標記時退回舊做法：縮 combined_scale 倍、視窗上緣在歌詞那塊下緣往上 combined_overlap_dip
 constexpr float combined_scale = 0.7f;
 constexpr int combined_overlap_dip = 28;
+// 標記的 info 是排版高度，最後一行字實際畫到再下面約 12 DIP（2026-11-12 在 169 截圖量的）
+constexpr int combined_info_overhang_dip = 12;
+constexpr float spec_min_label_px = 10.f; // 頻譜頻率字（13u）最小 10 DIP → u ≥ 10/13
 
 double pos_of_db(double db)
 {
@@ -580,8 +585,7 @@ std::optional<Content> current_content()
     return {};
 }
 
-// 視窗位置與倍率。歌詞＋VU 表／頻譜時整組縮成 combined_scale 倍（歌詞欄下半放不下再縮），
-// 錶本體左緣對齊歌詞欄左緣（歌詞靠左），錶框底部對齊左邊資訊的底部；上面是歌詞（main.xml 標記 lyrics-split）
+// 視窗位置與倍率。歌詞＋VU 表／頻譜時的規則見 combined_scale 那段說明
 std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int stage_width, int stage_height)
 {
     auto plan = content.spectrum ? spectrum_plan_in_stage(stage_width, stage_height)
@@ -592,6 +596,52 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
     const auto column = cover_zoom::lyrics_column_in_stage(stage_width, stage_height);
     if (!column)
         return {};
+    const auto info_top = cover_zoom::info_top_in_stage(stage_width, stage_height);
+    const auto info_bottom = cover_zoom::info_bottom_in_stage(stage_width, stage_height);
+    if (info_top && info_bottom) {
+        const auto dpi = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
+        const auto box_top = static_cast<float>(*info_top);
+        const auto box_bottom = *info_bottom + combined_info_overhang_dip * dpi;
+        const auto box_h = box_bottom - box_top;
+        const auto full_w = static_cast<float>(plan->rect.right - plan->rect.left);
+        const auto full_h = static_cast<float>(plan->rect.bottom - plan->rect.top);
+        if (box_h <= 0.f || full_w <= 0.f || full_h <= 0.f)
+            return {};
+        if (!content.spectrum) {
+            // VU 表：錶本體（視窗扣掉陰影邊）等比例縮到 box_h 高
+            const auto body_h = full_h - (margin_top_px + margin_bottom_px) * plan->scale;
+            const auto f = box_h / body_h;
+            const auto scale = plan->scale * f;
+            const auto left = column->left - static_cast<LONG>(std::lround(margin_x_px * scale));
+            const auto top = static_cast<LONG>(std::lround(box_top - margin_top_px * scale));
+            return WindowPlan{RECT{left, top, left + static_cast<LONG>(std::lround(full_w * f)),
+                                  top + static_cast<LONG>(std::lround(full_h * f))},
+                scale};
+        }
+        // 頻譜：寬度照舊（縮 combined_scale 倍），高度依 box 算
+        const auto panel_w = spec_ref_w * plan->scale * combined_scale;
+        const auto u = std::max(plan->scale * combined_scale, spec_min_label_px / 13.f * dpi);
+        float panel_top{};
+        float panel_h{};
+        if (cached_spectrum_framed()) {
+            panel_top = box_top;
+            panel_h = box_h;
+        } else {
+            // 不要框：最高的長條（plot 頂）對齊 box 上緣，頻率字底（錶框底往上約 15u）對齊 box 下緣
+            panel_top = box_top - spec_plot_top * u;
+            panel_h = box_h + (spec_plot_top + spec_label_from_bottom - 7.f) * u;
+        }
+        // 不要框時第一條長條的左緣（plot 左緣再往內半個空隙）對齊歌詞；有框時錶框左緣對齊歌詞
+        const auto bar_inset = cached_spectrum_framed() ? 0.f
+                                                        : spec_plot_side * u
+                + (panel_w - 2.f * spec_plot_side * u) / cached_spectrum_bands() * (1.f - 0.56f) / 2.f;
+        const auto left = column->left - static_cast<LONG>(std::lround(spec_margin_x * u + bar_inset));
+        const auto top = static_cast<LONG>(std::lround(panel_top - spec_margin_top * u));
+        const auto width = static_cast<LONG>(std::lround(panel_w + 2.f * spec_margin_x * u));
+        const auto height = static_cast<LONG>(std::lround((spec_margin_top + spec_margin_bottom) * u + panel_h));
+        return WindowPlan{RECT{left, top, left + width, top + height}, u};
+    }
+
     const auto split = std::clamp(cover_zoom::lyrics_split_y(stage_height), 0, stage_height);
     const auto region_h = static_cast<float>(stage_height - split);
     const auto w = static_cast<float>(plan->rect.right - plan->rect.left);
@@ -606,10 +656,6 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
     const auto margin_left = (content.spectrum ? spec_margin_x : margin_x_px) * scale;
     const auto left = column->left - static_cast<LONG>(std::lround(margin_left));
     auto top = static_cast<LONG>(split - uih::scale_dpi_value(combined_overlap_dip));
-    if (const auto info_bottom = cover_zoom::info_bottom_in_stage(stage_width, stage_height)) {
-        const auto margin_bottom = (content.spectrum ? spec_margin_bottom : margin_bottom_px) * scale;
-        top = static_cast<LONG>(*info_bottom + std::lround(margin_bottom)) - new_h;
-    }
     top = std::clamp(top, 0L, std::max(0L, static_cast<LONG>(stage_height) - new_h));
     return WindowPlan{RECT{left, top, left + new_w, top + new_h}, scale};
 }
