@@ -899,8 +899,8 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         EndPaint(wnd, &ps);
         return 0;
     }
-    case WM_MOUSEACTIVATE:
-        return MA_NOACTIVATE;
+    // WM_MOUSEACTIVATE 不攔、交給預設處理（2026-11-12）：這是主視窗裡的子視窗，原本回「不要啟用」，
+    // fb2k 在別的程式（例如 LINE）後面時點歌詞區不會跳到前景。預設處理會問上層，主視窗照常被啟用
     case WM_SETCURSOR:
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
         return TRUE;
