@@ -16,16 +16,14 @@ inline constexpr wchar_t nocturne_version[] = L"1.40";
 // 選單（View/Layout）
 inline constexpr auto toggle_now_playing_name = "Toggle Now Playing";
 inline constexpr auto toggle_now_playing_description
-    = "Lets the panel with the custom title \"Now Playing Bar\" cover the panel titled \"Main Content\" at the same "
-      "level, or puts it back. Does not expand while stopped with an empty queue.";
+    = "Expands or collapses the now playing view (the \"Now Playing Bar\" panel covers \"Main Content\"). Does not "
+      "expand while stopped with an empty queue.";
 inline constexpr auto stop_or_collapse_name = "Stop or Collapse Now Playing";
 inline constexpr auto stop_or_collapse_description
-    = "Stops playback. If playback is already stopped and the now playing view is still open (it stays open while the "
-      "queue has tracks), closes the view and leaves the queue as it is.";
+    = "Stops playback. If already stopped, closes the now playing view (the queue is kept).";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
-    = "Shows the next track in a corner of the now playing view during the last seconds of a track. The corner can be "
-      "chosen in Preferences > Tools > Nocturne.";
+    = "Shows the next track in a corner of the now playing view near the end of a track.";
 inline constexpr wchar_t next_caption[] = L"Up next";
 inline constexpr wchar_t next_caption_stopped[] = L"Stopped · Up next";
 inline constexpr wchar_t stopped_label[] = L"Stopped";
@@ -41,7 +39,7 @@ inline constexpr wchar_t chip_menu_title[] = L"Output mode";
 // 設定頁「輸出裝置」區塊與裝置名稱檔的範本
 inline constexpr wchar_t chip_settings_title[] = L"Output device";
 inline constexpr wchar_t chip_show[] = L"Show the current output device in the playback bar";
-inline constexpr wchar_t chip_click[] = L"Click it to switch device (the hover panel also shows the hint)";
+inline constexpr wchar_t chip_click[] = L"Click it to switch device";
 inline constexpr wchar_t chip_edit_names[] = L"Edit device names...";
 inline constexpr char chip_alias_template[]
     = "# Output device names: one per line, \"text the device name contains=name to show\".\r\n"
@@ -52,7 +50,7 @@ inline constexpr wchar_t chip_mode_mute[] = L"Muted output";
 inline constexpr wchar_t chip_hint[] = L"Click to switch device";
 // 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
 inline constexpr wchar_t volume_title[] = L"Volume";
-inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an icon (recommended at 125%+ Windows scaling)";
+inline constexpr wchar_t volume_icon_only[] = L"Collapse the volume bar to an icon (recommended at 125%+ scaling)";
 inline constexpr wchar_t volume_muted[] = L"Muted";
 inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
@@ -60,16 +58,16 @@ inline constexpr wchar_t chip_unknown[] = L"Unknown device";
 inline constexpr auto next_toast_tab_name = "Up Next & Queue";
 inline constexpr wchar_t next_toast_title[] = L"Up Next Notice";
 inline constexpr wchar_t next_toast_enabled[] = L"Show the next track near the end of the playing track";
-inline constexpr wchar_t next_toast_seconds_label[] = L"Start counting down this many seconds before the track ends (3-30)";
-inline constexpr wchar_t next_toast_show_seconds[] = L"Show the remaining seconds inside the ring";
-inline constexpr wchar_t next_toast_show_cover[] = L"Show the cover of the next track";
-inline constexpr wchar_t next_toast_show_tag[] = L"Show where the next track comes from (Queue / Playlist)";
+inline constexpr wchar_t next_toast_seconds_label[] = L"Count down from this many seconds before the end (3-30)";
+inline constexpr wchar_t next_toast_show_seconds[] = L"Show seconds in the ring";
+inline constexpr wchar_t next_toast_show_cover[] = L"Show the cover";
+inline constexpr wchar_t next_toast_show_tag[] = L"Show the source (Queue / Playlist)";
 inline constexpr wchar_t next_toast_position_label[] = L"Position";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"Top right", L"Bottom right", L"Top left", L"Bottom left"};
 inline constexpr wchar_t next_toast_size_label[] = L"Size";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"Small (85%)", L"Standard", L"Large (120%)", L"Extra large (140%)"};
 inline constexpr wchar_t keep_queue_title[] = L"Playback queue";
-inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track (double-click, Enter, Play)";
+inline constexpr wchar_t keep_queue_on_play[] = L"Keep the queue when playing another track";
 // 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "Playback";
 inline constexpr wchar_t progress_title[] = L"Progress bar";
@@ -91,7 +89,7 @@ inline constexpr auto interface_tab_name = "Interface";
 inline constexpr wchar_t appearance_tab_title[] = L"Scroll bars and lists";
 inline constexpr wchar_t thin_scrollbar[] = L"Use thin scroll bars";
 inline constexpr wchar_t thin_scrollbar_note[]
-    = L"A slim scroll bar that widens when the pointer is near. Turn off for the standard Windows scroll bars.";
+    = L"Widens when the pointer is near. Turn off for the standard Windows scroll bars.";
 inline constexpr wchar_t thin_autohide_vertical[] = L"Folder tree: auto-hide the vertical scroll bar";
 inline constexpr wchar_t thin_autohide_horizontal[] = L"Folder tree: auto-hide the horizontal scroll bar";
 // 資料夾樹的搜尋框放上面還是下面（2026-11-09）
@@ -114,13 +112,11 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
     = {L"10% (very dark)", L"15%", L"20% (default)", L"25%", L"30%", L"35% (lighter)"};
 // 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
-inline constexpr wchar_t startup_hold[] = L"Show the window only when the web panel is ready";
+inline constexpr wchar_t startup_hold[] = L"Show the window only when the album header is ready";
 inline constexpr wchar_t startup_hold_note[]
-    = L"Keeps the window hidden until the album header is ready (3 seconds at most). Takes effect the next time "
-      L"foobar2000 starts.";
+    = L"Waits 3 seconds at most. Takes effect the next time foobar2000 starts.";
 inline constexpr wchar_t font_tab_note[]
-    = L"Change the font of each part separately, or all parts at once with the first row. The lists, tabs, folder tree "
-      L"and other interface text also take a size. These apply at once.";
+    = L"Change each part separately, or all at once with the first row. Changes apply at once.";
 inline constexpr wchar_t font_row_all[] = L"All parts";
 inline constexpr wchar_t font_row_playlist[] = L"Playlist";
 inline constexpr wchar_t font_row_tabs[] = L"Playlist tabs";
@@ -129,18 +125,15 @@ inline constexpr wchar_t font_row_ui[] = L"Other interface text";
 inline constexpr wchar_t font_row_bar[] = L"Now playing bar and view";
 inline constexpr wchar_t font_row_header[] = L"Album header";
 inline constexpr wchar_t font_tab_foot[]
-    = L"The now playing bar, the now playing view and the album header only take a font (no size) and need a restart "
-      L"of foobar2000 to show it.";
-inline constexpr wchar_t font_restart_note[] = L"Changed fonts will show after foobar2000 restarts.";
+    = L"The now playing bar, view and album header take no size, and a new font shows after a restart.";
+inline constexpr wchar_t font_restart_note[] = L"Restart foobar2000 to apply.";
 inline constexpr wchar_t font_restart_button[] = L"Restart now";
 inline constexpr auto show_cover_name = "Show Large Cover";
 // 展開頁封面右下角的放大鈕（2026-11-09，now_playing_cover_zoom.cpp）
 inline constexpr wchar_t cover_zoom_tooltip[] = L"View the large cover";
 inline constexpr auto show_cover_description = "Opens the cover of the playing track in the foobar2000 picture viewer.";
 inline constexpr auto theme_font_name = "Theme Font…";
-inline constexpr auto theme_font_description
-    = "Changes the font of the lists, tabs, folder tree, now playing bar and album header at once, and sets the "
-      "overall list size.";
+inline constexpr auto theme_font_description = "Changes the whole interface font at once and sets the list size.";
 inline constexpr auto style_centered_name = "Now Playing: Centered";
 inline constexpr auto style_centered_description = "Centers the cover and lyrics together in the now playing view.";
 inline constexpr auto style_info_name = "Now Playing: Left + Info Card";
@@ -164,11 +157,11 @@ inline constexpr auto mode_lyrics_spectrum_name = "Now Playing: Lyrics + Spectru
 inline constexpr auto mode_lyrics_spectrum_description = "Shows the lyrics with a smaller spectrum analyser below them.";
 inline constexpr auto mode_button_name = "Switch Now Playing Content";
 inline constexpr auto mode_button_description
-    = "Switches what the now playing view shows. Clicking moves to the next one or opens a menu, as set in Preferences.";
+    = "Switches what the now playing view shows (next one or a menu, as set in Preferences).";
 // 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
-inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (layout not supported)",
-    L"Spectrum", L"Spectrum (layout not supported)", L"Lyrics + VU meter", L"Lyrics + VU meter (layout not supported)",
-    L"Lyrics + spectrum", L"Lyrics + spectrum (layout not supported)"};
+inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (not in this layout)",
+    L"Spectrum", L"Spectrum (not in this layout)", L"Lyrics + VU meter", L"Lyrics + VU meter (not in this layout)",
+    L"Lyrics + spectrum", L"Lyrics + spectrum (not in this layout)"};
 // 依模式數字 1～6
 inline constexpr const char* mode_toast_names[6]
     = {"Lyrics", "Cover only", "VU meter", "Spectrum", "Lyrics + VU meter", "Lyrics + spectrum"};
@@ -176,25 +169,23 @@ inline constexpr const char* mode_toast_names[6]
 inline constexpr wchar_t mode_picker_unavailable[] = L"Not in this layout";
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"Top-left button";
-inline constexpr wchar_t mode_button_names[2][32] = {L"Next on click (default)", L"Menu on click"};
+inline constexpr wchar_t mode_button_names[2][32] = {L"Next one (default)", L"Menu"};
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
 inline constexpr auto expanded_page_tab_name = "Now Playing View";
 inline constexpr wchar_t expanded_section_background[] = L"Background";
 inline constexpr wchar_t expanded_section_content[] = L"Content";
 inline constexpr wchar_t expanded_section_lyrics[] = L"Lyrics";
 inline constexpr wchar_t mode_note[]
-    = L"Only the ticked ones take part in the top-left button.";
+    = L"Only the ticked ones show up on the top-left button.";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"Show";
 inline constexpr wchar_t modes_separator[] = L", ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
-    = L"Left-clicking or dragging the lyrics no longer jumps to another time. The mouse wheel and right-click still "
-      L"work.";
+    = L"Clicking or dragging the lyrics no longer seeks. The wheel and right-click still work.";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
 inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
-inline constexpr wchar_t vu_picker_title_combined[] = L"VU meter style (no round pair with lyrics)";
 inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
 inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
 inline constexpr wchar_t vu_needle_title[] = L"Needle";
@@ -219,13 +210,12 @@ inline constexpr wchar_t menu_tooltip[] = L"Menu";
 inline constexpr wchar_t theme_font_title_w[] = L"Theme Font";
 inline constexpr auto theme_font_title = "Theme Font";
 inline constexpr wchar_t theme_font_intro[]
-    = L"Pick a font to change the lists, tabs, folder tree, now playing bar, now playing view and album header at "
-      L"once. The weight is always Regular.";
+    = L"Pick a font for the whole interface (except the lyrics). The weight is always Regular.";
 inline constexpr wchar_t theme_font_family_label[] = L"Font";
 inline constexpr wchar_t theme_font_size_label[]
-    = L"Overall size (lists, tabs and folder tree scale together; the now playing bar and header stay the same)";
+    = L"Overall size (lists, tabs and folder tree only)";
 inline constexpr wchar_t theme_font_lyrics_note[]
-    = L"The lyrics font is set separately: right-click the lyrics → Panel Options...";
+    = L"Lyrics font: right-click the lyrics → Panel Options...";
 inline constexpr wchar_t ok_text[] = L"OK";
 inline constexpr wchar_t cancel_text[] = L"Cancel";
 inline constexpr wchar_t size_small[] = L"Small (90%)";
@@ -243,12 +233,12 @@ inline constexpr char error_change_failed[] = "Could not change the font: {}";
 inline constexpr char failure_item[] = "\n{} ({})";
 inline constexpr char applied_message[]
     = "Changed to \"{}\", size \"{}\". Everything has been applied.\n\n"
-      "The lyrics font is set separately: right-click the lyrics → Panel Options...";
+      "Lyrics font: right-click the lyrics → Panel Options...";
 inline constexpr char restart_message[]
     = "Changed to \"{}\", size \"{}\".\n\n"
-      "The lists, tabs and folder tree are already updated. The now playing bar, now playing view and album header "
-      "switch fonts after foobar2000 restarts (their size stays the same).\n"
-      "The lyrics font is set separately: right-click the lyrics → Panel Options...";
+      "The lists, tabs and folder tree are updated. The now playing bar, view and album header switch after a "
+      "restart.\n"
+      "Lyrics font: right-click the lyrics → Panel Options...";
 inline constexpr char failures_message[] = "\n\nThese files were not updated. Please edit them in Notepad:{}";
 inline constexpr auto restart_question = "\n\nRestart foobar2000 now?";
 
@@ -257,13 +247,13 @@ inline constexpr auto restart_question = "\n\nRestart foobar2000 now?";
 // 選單（View/Layout）
 inline constexpr auto toggle_now_playing_name = "切換播放頁";
 inline constexpr auto toggle_now_playing_description
-    = "讓自訂標題為「播放列」的面板蓋住同一層自訂標題為「主內容」的面板，或縮回原位。停止播放而且佇列沒有歌時不展開。";
+    = "展開或收起播放頁（「播放列」面板蓋住「主內容」）。停止且佇列沒歌時不展開。";
 inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
-    = "停止播放；已經停止而展開頁還開著（佇列有歌時停止不會自動收）時，收起展開頁，佇列保留不動。";
+    = "停止播放；已經停止時收起展開頁（佇列保留）。";
 inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description
-    = "在展開頁的角落，歌曲最後幾秒顯示下一首；角落可在 Preferences > Tools > Nocturne 選。";
+    = "歌曲最後幾秒，在展開頁角落顯示下一首。";
 inline constexpr wchar_t next_caption[] = L"下一首";
 inline constexpr wchar_t next_caption_stopped[] = L"已停止 · 接下來";
 inline constexpr wchar_t stopped_label[] = L"已停止";
@@ -279,7 +269,7 @@ inline constexpr wchar_t chip_menu_title[] = L"輸出模式";
 // 設定頁「輸出裝置」區塊與裝置名稱檔的範本
 inline constexpr wchar_t chip_settings_title[] = L"輸出裝置";
 inline constexpr wchar_t chip_show[] = L"在播放列顯示目前的輸出裝置";
-inline constexpr wchar_t chip_click[] = L"點一下可切換裝置（滑過面板的提示也一起顯示）";
+inline constexpr wchar_t chip_click[] = L"點一下可切換裝置";
 inline constexpr wchar_t chip_edit_names[] = L"編輯裝置顯示名稱…";
 inline constexpr char chip_alias_template[]
     = "# 輸出裝置顯示名稱：每行「裝置名稱裡要有的字=要顯示的名稱」，# 開頭是註解。\r\n"
@@ -290,23 +280,23 @@ inline constexpr wchar_t chip_mode_mute[] = L"靜音輸出";
 inline constexpr wchar_t chip_hint[] = L"點一下可切換裝置";
 // 音量圖示（volume_chip.cpp）：設定頁的開關與靜音時提示泡的字
 inline constexpr wchar_t volume_title[] = L"音量";
-inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示（Windows 顯示縮放 125% 以上建議開啟）";
+inline constexpr wchar_t volume_icon_only[] = L"音量條收成圖示（縮放 125% 以上建議開）";
 inline constexpr wchar_t volume_muted[] = L"靜音";
 inline constexpr wchar_t chip_unknown[] = L"未知裝置";
 // 設定頁（Preferences → Tools → Nocturne，2026-11-05 起；原本在 Columns UI 的分頁裡）
 inline constexpr auto next_toast_tab_name = "下一首與佇列";
 inline constexpr wchar_t next_toast_title[] = L"下一首提示";
 inline constexpr wchar_t next_toast_enabled[] = L"歌曲快結束時，在展開頁顯示下一首";
-inline constexpr wchar_t next_toast_seconds_label[] = L"歌曲最後幾秒開始倒數（3～30 秒）";
+inline constexpr wchar_t next_toast_seconds_label[] = L"最後幾秒開始倒數（3～30）";
 inline constexpr wchar_t next_toast_show_seconds[] = L"圈內顯示剩餘秒數";
-inline constexpr wchar_t next_toast_show_cover[] = L"顯示下一首的專輯封面";
-inline constexpr wchar_t next_toast_show_tag[] = L"顯示下一首的來源標籤（佇列／清單）";
+inline constexpr wchar_t next_toast_show_cover[] = L"顯示封面";
+inline constexpr wchar_t next_toast_show_tag[] = L"顯示來源（佇列／清單）";
 inline constexpr wchar_t next_toast_position_label[] = L"位置";
 inline constexpr wchar_t next_toast_position_names[4][16] = {L"右上角", L"右下角", L"左上角", L"左下角"};
 inline constexpr wchar_t next_toast_size_label[] = L"大小";
 inline constexpr wchar_t next_toast_size_names[4][24] = {L"小（85%）", L"標準", L"大（120%）", L"特大（140%）"};
 inline constexpr wchar_t keep_queue_title[] = L"播放佇列";
-inline constexpr wchar_t keep_queue_on_play[] = L"雙擊、按 Enter 或右鍵選 Play 播放別首歌時，保留播放佇列（不清掉）";
+inline constexpr wchar_t keep_queue_on_play[] = L"播放別首歌時保留佇列（不清掉）";
 // 設定頁的分頁：播放、下一首與佇列、字型、介面、關於
 inline constexpr auto playback_tab_name = "播放";
 inline constexpr wchar_t progress_title[] = L"進度條";
@@ -328,7 +318,7 @@ inline constexpr auto interface_tab_name = "介面";
 inline constexpr wchar_t appearance_tab_title[] = L"捲軸與清單";
 inline constexpr wchar_t thin_scrollbar[] = L"使用細捲軸";
 inline constexpr wchar_t thin_scrollbar_note[]
-    = L"很細的捲軸，滑鼠靠近才變寬。關掉就用 Windows 原本的捲軸。";
+    = L"滑鼠靠近才變寬；關掉就用 Windows 原本的捲軸。";
 inline constexpr wchar_t thin_autohide_vertical[] = L"資料夾樹：直向捲軸自動隱藏";
 inline constexpr wchar_t thin_autohide_horizontal[] = L"資料夾樹：橫向捲軸自動隱藏";
 // 資料夾樹的搜尋框放上面還是下面（2026-11-09）
@@ -351,11 +341,11 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
     = {L"10%（很暗）", L"15%", L"20%（預設）", L"25%", L"30%", L"35%（偏亮）"};
 // 啟動（開機優化 B）
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
-inline constexpr wchar_t startup_hold[] = L"等網頁面板載好再顯示視窗";
+inline constexpr wchar_t startup_hold[] = L"等專輯標頭載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]
-    = L"等專輯標頭載好才顯示視窗（最多等 3 秒）。下次啟動才生效。";
+    = L"最多等 3 秒；下次啟動才生效。";
 inline constexpr wchar_t font_tab_note[]
-    = L"每個區塊可以各自換字型，也可以用第一列一次全換。清單、分頁、資料夾樹與其餘介面文字還能調大小，改了馬上生效。";
+    = L"逐列換字型，或用第一列一次全換；改了馬上生效。";
 inline constexpr wchar_t font_row_all[] = L"全部區塊";
 inline constexpr wchar_t font_row_playlist[] = L"播放清單";
 inline constexpr wchar_t font_row_tabs[] = L"分頁標籤";
@@ -364,8 +354,8 @@ inline constexpr wchar_t font_row_ui[] = L"其餘介面文字";
 inline constexpr wchar_t font_row_bar[] = L"播放列與展開頁";
 inline constexpr wchar_t font_row_header[] = L"專輯標頭";
 inline constexpr wchar_t font_tab_foot[]
-    = L"播放列、展開頁與專輯標頭只能換字型、不能調大小，要重開 foobar2000 才會換。";
-inline constexpr wchar_t font_restart_note[] = L"換過字型的部分要重開 foobar2000 才會生效。";
+    = L"播放列、展開頁與專輯標頭不能調大小，換字型要重開 foobar2000。";
+inline constexpr wchar_t font_restart_note[] = L"重開 foobar2000 才會生效。";
 inline constexpr wchar_t font_restart_button[] = L"立即重開";
 inline constexpr auto show_cover_name = "顯示封面大圖";
 // 展開頁封面右下角的放大鈕（2026-11-09，now_playing_cover_zoom.cpp）
@@ -373,7 +363,7 @@ inline constexpr wchar_t cover_zoom_tooltip[] = L"看封面大圖";
 inline constexpr auto show_cover_description = "在 foobar2000 picture viewer 開啟正在播放曲目的封面。";
 inline constexpr auto theme_font_name = "主題字型…";
 inline constexpr auto theme_font_description
-    = "一次換掉清單、分頁、資料夾樹、播放列與專輯標頭的字型，並調整清單的整體大小。";
+    = "一次換掉整個介面的字型，並調整清單大小。";
 inline constexpr auto style_centered_name = "展開頁：置中";
 inline constexpr auto style_centered_description = "展開頁的封面與歌詞整組置中。";
 inline constexpr auto style_info_name = "展開頁：靠左＋資訊卡";
@@ -394,32 +384,31 @@ inline constexpr auto mode_lyrics_vu_description = "展開頁歌詞往上，下�
 inline constexpr auto mode_lyrics_spectrum_name = "展開頁：歌詞＋頻譜";
 inline constexpr auto mode_lyrics_spectrum_description = "展開頁歌詞往上，下面放縮小的頻譜。";
 inline constexpr auto mode_button_name = "切換展開頁顯示內容";
-inline constexpr auto mode_button_description = "切換展開頁要顯示什麼；點一下換下一種或跳出選單，依設定頁的選擇。";
+inline constexpr auto mode_button_description = "切換展開頁顯示的內容（換下一種或跳出選單，依設定頁）。";
 // 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
-inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（這個版面不支援）", L"頻譜",
-    L"頻譜（這個版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（這個版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（這個版面不支援）"};
+inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（版面不支援）", L"頻譜",
+    L"頻譜（版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（版面不支援）"};
 // 依模式數字 1～6
 inline constexpr const char* mode_toast_names[6] = {"歌詞", "純封面", "VU 表", "頻譜", "歌詞＋VU 表", "歌詞＋頻譜"};
 // 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
 inline constexpr wchar_t mode_picker_unavailable[] = L"版面不支援";
 // 設定頁「介面」分頁、展開頁那一段
 inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
-inline constexpr wchar_t mode_button_names[2][32] = {L"點一下換下一種（預設）", L"點一下跳出選單"};
+inline constexpr wchar_t mode_button_names[2][32] = {L"換下一種（預設）", L"跳出選單"};
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
 inline constexpr auto expanded_page_tab_name = "展開頁";
 inline constexpr wchar_t expanded_section_background[] = L"背景";
 inline constexpr wchar_t expanded_section_content[] = L"顯示內容";
 inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
-inline constexpr wchar_t mode_note[] = L"勾選的才會出現在左上角按鈕的輪流與選單裡。";
+inline constexpr wchar_t mode_note[] = L"只有勾選的會出現在左上角按鈕。";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"展開頁要有";
 inline constexpr wchar_t modes_separator[] = L"、";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
-inline constexpr wchar_t lyrics_lock_note[] = L"開著時，在歌詞上按左鍵或拖曳不會跳到別的時間；滾輪和右鍵照常。";
+inline constexpr wchar_t lyrics_lock_note[] = L"點或拖曳歌詞不會跳時間；滾輪和右鍵照常。";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
 inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
-inline constexpr wchar_t vu_picker_title_combined[] = L"VU 表樣式（歌詞＋VU 沒有圓形錶頭）";
 inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
 inline constexpr wchar_t vu_backlight[] = L"暖色背光";
 inline constexpr wchar_t vu_needle_title[] = L"指針";
@@ -445,10 +434,10 @@ inline constexpr wchar_t menu_tooltip[] = L"選單";
 inline constexpr wchar_t theme_font_title_w[] = L"主題字型";
 inline constexpr auto theme_font_title = "主題字型";
 inline constexpr wchar_t theme_font_intro[]
-    = L"選一個字型，一次換掉清單、分頁、資料夾樹、播放列、展開頁與上方專輯標頭的字型。粗細固定用一般粗細。";
+    = L"選一個字型，一次換掉整個介面（歌詞除外）。粗細固定一般。";
 inline constexpr wchar_t theme_font_family_label[] = L"字型";
-inline constexpr wchar_t theme_font_size_label[] = L"整體大小（清單、分頁與資料夾樹一起放大縮小；播放列與標頭固定不變）";
-inline constexpr wchar_t theme_font_lyrics_note[] = L"歌詞字型不在這裡，請在歌詞上按右鍵 → Panel Options...（ESLyric 切成中文時是「面板參數選項」）另外設定。";
+inline constexpr wchar_t theme_font_size_label[] = L"整體大小（只影響清單、分頁與資料夾樹）";
+inline constexpr wchar_t theme_font_lyrics_note[] = L"歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
 inline constexpr wchar_t ok_text[] = L"確定";
 inline constexpr wchar_t cancel_text[] = L"取消";
 inline constexpr wchar_t size_small[] = L"小（90%）";
@@ -465,12 +454,12 @@ inline constexpr auto error_no_usable_style = "這個字型沒有可以用的樣
 inline constexpr char error_change_failed[] = "換字型失敗：{}";
 inline constexpr char failure_item[] = "\n{}（{}）";
 inline constexpr char applied_message[]
-    = "已經換成「{}」，大小「{}」，都已經套用好了。\n\n"
-      "歌詞字型不在這裡，請在歌詞上按右鍵 → Panel Options...（ESLyric 切成中文時是「面板參數選項」）另外設定。";
+    = "已經換成「{}」，大小「{}」，都套用好了。\n\n"
+      "歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
 inline constexpr char restart_message[]
     = "已經換成「{}」，大小「{}」。\n\n"
-      "清單、分頁與資料夾樹已經換好；播放列、展開頁與上方專輯標頭要重開 foobar2000 才會換字型（大小固定不變）。\n"
-      "歌詞字型不在這裡，請在歌詞上按右鍵 → Panel Options...（ESLyric 切成中文時是「面板參數選項」）另外設定。";
+      "清單、分頁與資料夾樹已經換好；播放列、展開頁與專輯標頭要重開 foobar2000 才會換。\n"
+      "歌詞字型：在歌詞上按右鍵 → Panel Options...（中文介面是「面板參數選項」）";
 inline constexpr char failures_message[] = "\n\n下面的檔案沒有換到，要自己用記事本改：{}";
 inline constexpr auto restart_question = "\n\n要現在重開 foobar2000 嗎？";
 

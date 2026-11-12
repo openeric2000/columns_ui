@@ -3270,10 +3270,8 @@ void render(Picker& p)
         const Gdiplus::Font label_font(family.get(), 14.f * k, regular_style(*family), Gdiplus::UnitPixel);
         const Gdiplus::Font label_bold(family.get(), 14.f * k, bold_style(*family), Gdiplus::UnitPixel);
 
-        draw_text(g,
-            p.spectrum ? nocturne_text::spectrum_picker_title
-                       : (p.combined_vu ? nocturne_text::vu_picker_title_combined : nocturne_text::vu_picker_title),
-            title_font,
+        // 歌詞＋VU 表只放兩張縮圖（沒有圓形錶頭），標題不再另外註明（2026-11-12 使用者要求說明精簡）
+        draw_text(g, p.spectrum ? nocturne_text::spectrum_picker_title : nocturne_text::vu_picker_title, title_font,
             rgba(244, 240, 230, 0.55), {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear,
             k);
 
