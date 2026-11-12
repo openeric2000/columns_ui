@@ -123,7 +123,10 @@ constexpr double box_half_span = 42.0 * pi / 180.0; // 刻度半邊角度
 // 圓形錶頭（2026-11-12）：使用者看預覽說「有點擠、可以放大點」→
 // 1. 兩顆圓用滿方框雙錶的寬度（直徑約是預覽的 1.5 倍）；2. 字和線條粗細照方框的倍率，不跟著圓放大；
 // 3. 指針軸移到圓心下方 0.46 半徑，刻度弧半徑照「兩端數字剛好碰不到玻璃邊」反推（dial_of），弧比預覽長約三成
-constexpr float round_gap_px = 34.f;
+// 兩顆圓的間距（2026-11-12 使用者在 219 看了說兩顆太近，跟方框一樣要再分開：34→64）。
+// 圓的大小仍照舊的 34 算（round_size_gap_px），所以圓不會因為間距變大而變小，整組往兩邊撐開
+constexpr float round_gap_px = 64.f;
+constexpr float round_size_gap_px = 34.f;
 // 2026-11-12 使用者實際看了說圓形「太大、等比例縮小一點」：整組（圓、字、線條、間距、陰影）乘這個倍數，
 // 寬度從用滿方框雙錶的範圍縮成 0.82 倍（直徑約 414→340 像素＠1080p），鬆緊度不變
 constexpr float round_size_ratio = 0.82f;
@@ -522,10 +525,10 @@ RECT style_rect(Style style, const RECT& band, int stage_height)
     float h{};
     switch (style) {
     case Style::round: {
-        const auto gap = round_gap_px * s;
-        auto d = std::floor((band_w - gap) / 2.f);
+        auto d = std::floor((band_w - round_size_gap_px * s) / 2.f);
         d = std::min(d, std::floor(max_h));
-        w = 2.f * d + gap;
+        w = std::min(2.f * d + round_gap_px * s, full_w);
+        d = std::min(d, std::floor((w - round_gap_px * s) / 2.f));
         h = d;
         break;
     }
