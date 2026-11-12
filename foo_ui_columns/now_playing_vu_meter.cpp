@@ -47,7 +47,7 @@ constexpr double lamp_fade_seconds = 0.4;
 //   （2026-11-12 實測修正：原本用 4.6／(ζ·0.3)「1% 包絡線」公式算出 19.2，約 210 毫秒就到 99%，比規格快三成；ζ 0.8 時 13.2 才剛好 300 毫秒、過衝 1.3%）
 // - 活潑：−10 dBFS、300 毫秒（響亮的歌副歌會碰到 0、偶爾進紅區）
 // - 靈敏：−10 dBFS、150 毫秒到 99%（ζ 0.72、過衝約 3%），擺幅約大一倍，比較不像真 VU
-// - 自動：0 VU 跟著歌曲長時間平均音量走（update_auto_reference），反應同標準
+// - 自動：0 VU 跟著這首歌目前為止最大聲的段落走（update_auto_reference），反應同標準
 struct NeedleTuning {
     double reference_dbfs;
     double natural_frequency;
@@ -60,23 +60,27 @@ constexpr NeedleTuning needle_tunings[needle_preset_count] = {
     {-10.0, 22.2, 0.72, false},
     {-7.0, 13.2, 0.8, true},
 };
-// 自動校準
-constexpr double auto_gate_dbfs = -45.0;       // 比這小聲的片段不算進平均
-constexpr double auto_average_vu_offset = 1.75; // 平均音量對到 −1.75 VU
-// 0 VU 最低可以對到 −30 dBFS（原本 −20：很安靜的錄音如 Don Quixote 大提琴獨奏、DSD 的悲しい酒會卡在下限，指針中位只有 −13～−16 VU）
+// 自動校準（2026-11-12 第三版，見 update_auto_reference）
+constexpr double auto_gate_dbfs = -45.0; // 比這小聲的片段不算
+constexpr double auto_section_seconds = 2.0; // 「段落音量」＝約 2 秒的平均功率
+constexpr double auto_hold_rise_seconds = 2.0; // 出現更大聲的段落時，2 秒時間常數跟上去
+constexpr double auto_hold_decay_db_per_second = 0.02; // 之後變小聲只慢慢退（每分鐘 1.2 dB）
+constexpr double auto_loud_vu_offset = 1.0; // 最大聲的段落對到 −1 VU
+// 0 VU 最低可以對到 −30 dBFS（很安靜的錄音如 Don Quixote 大提琴獨奏、DSD 的悲しい酒）
 constexpr double auto_reference_min = -30.0;
 constexpr double auto_reference_max = -4.0;
-constexpr double auto_fast_seconds = 1.5;
-constexpr double auto_slow_seconds = 8.0;
-constexpr double auto_rise_seconds = 3.0; // 變大聲時跟得快一點
+constexpr double auto_fast_seconds = 1.5; // 剛開始或換歌後前 3 秒快速找位置
 constexpr double auto_warm_seconds = 3.0;
-// 「自動」的峰值燈：最近約 1/8 秒（auto_lamp_frames 格）的音量超過 +3.5 VU（刻度右端再高半格）就亮＝「這一下大聲到爆表」。
-// 2026-11-12 使用者要燈跟著自動一起調整。不看瞬間峰值：169 的歌峰值常卡在同一個值（母帶壓滿，nazonazo 全在 −4.2 dBFS），
-// 門檻設在那之下就一直亮、之上就完全不亮。第一版看單格（16 毫秒）音量 +3 VU，三首歌調的；
-// 同天用 55 首實錄（常聽、Vocaloid、OST、古典、DSD…）重調：單格太敏感，44 首每分鐘閃超過 10 次、34 首亮著超過 8% 的時間；
-// 改成約 1/8 秒、+3.5 VU 後每首中位每分鐘 2～3 次，動態大的曲子（鋼琴、吹奏樂、OST 重擊）閃得多，壓滿的流行歌偶爾才閃
-constexpr double auto_lamp_vu = 3.5;
+// 「自動」的峰值燈：最近約 1/8 秒（auto_lamp_frames 格）的音量超過 +1.5 VU 就亮（＝比最大聲的段落再大 2.5 dB），
+// 每閃一次門檻暫時加 1.5 dB、每秒回落 0.1 dB（冷卻），所以每拍都很突出的曲子不會每拍都閃，只留最大聲的那幾下。
+// 不看瞬間峰值：169 的歌峰值常卡在同一個值（母帶壓滿，nazonazo 全在 −4.2 dBFS），門檻設在那之下就一直亮、之上就完全不亮。
+// 2026-11-12 演進：三首歌調的單格 +3 VU → 55 首實錄改成 1/8 秒 +3.5 VU（太敏感）→ 同天整首／副歌實錄（見 update_auto_reference）
+// 發現那版燈幾乎都亮在前奏轉折、副歌反而不亮，改成現在這樣：整首播 40 首中位每分鐘 2.1 次、最多 4.1 次，
+// 副歌組 60 首中位 3.2 次、最多 7.6 次，燈亮在整首最大聲段落的比例 25% → 66%
+constexpr double auto_lamp_vu = 1.5;
 constexpr int auto_lamp_frames = 8;
+constexpr double auto_lamp_cooldown_db = 1.5;
+constexpr double auto_lamp_recover_db_per_second = 0.1;
 // 指針吃的音量：最近 needle_frames 格（約 50 毫秒）的平均功率。單格（16 毫秒）對低音太短，指針會細細抖動；
 // 55 首實錄比較：3 格時細抖少約兩成，其他表現幾乎不變
 constexpr int needle_frames = 3;
@@ -191,10 +195,15 @@ struct State {
     std::vector<float> specular;
 
     Needle needles[2];
-    // 「自動」校準：長時間平均功率、這首歌已經量了幾秒、目前 0 VU 對到的 dBFS
+    // 「自動」校準：段落音量（約 2 秒平均功率）、目前為止最大聲段落的 dB、這首歌已經量了幾秒、目前 0 VU 對到的 dBFS
     double auto_power{};
+    double auto_hold_db{};
+    bool auto_hold_valid{};
     double auto_warm{};
     double auto_reference{-7.0};
+    // 「自動」峰值燈的冷卻：目前門檻多加幾 dB、上一格有沒有亮
+    double lamp_cooldown{};
+    bool lamp_was_on{};
     // 最近幾格的功率（每聲道，環狀），指針與「自動」峰值燈取平均用
     double power_history_[2][power_history]{};
     int power_index{};
@@ -1545,22 +1554,35 @@ void log_needles(const State& state, double dt, const double* rms, double refere
 #endif
 
 // 「自動」校準：把長時間平均音量（功率平均，低於 −45 dBFS 的安靜片段不算）對到 −2 VU，
-// 0 VU 的位置限制在 −20～−4 dBFS。剛開始或換歌後前 3 秒用 1.5 秒時間常數快速找到位置，之後變大聲用 3 秒、變小聲用 8 秒跟，
-// 所以一首歌裡的大小聲起伏還是看得出來。2026-11-12 用三首實錄離線模擬調的：
-// 原本上下都 8 秒、對到 −3 VU 時，安靜前奏轉爆發的歌（Fighting My Way）轉折後好幾秒都偏高、峰值燈亮 19% 的時間；
-// 改成變大聲 3 秒、對到 −2 VU 後三首中位都在 −2.6～−3.3 VU，那首降到 16.5%，壓得很滿的 nazonazo 每分鐘閃約 2 次
+// 「自動」校準：0 VU 跟著這首歌目前為止最大聲的段落走——段落音量（約 2 秒平均）變更大時 2 秒跟上去，
+// 之後變小聲只每秒退 0.02 dB，最大聲的段落對到 −1 VU。所以主歌比副歌低、最後的大副歌會進紅區，
+// 一首歌裡的大小聲起伏看得出來。剛開始或換歌後前 3 秒用 1.5 秒時間常數快速找到位置（從前奏的音量開始）。
+// 2026-11-12 演進：第一、二版跟著「平均音量」走（變大聲 3 秒、變小聲 8 秒、平均對到 −1.75 VU），用每首前 50 秒調的；
+// 使用者問副歌有沒有看，同天改用整首 40 首＋另外 60 首播到 1:30 實錄：音訊上最大聲的 30 秒比整首平均大約 1.7 dB、
+// 前 50 秒小約 1.5 dB，但平均版 3 秒就把副歌拉回平均，副歌紅區中位 0.5%、燈中位每分鐘 0 次，主副歌幾乎一樣高。
+// 這版：60 秒後每 10 秒一段，指針高低跟音訊大小的斜率 0.62 → 1.09（1＝音訊大幾 dB 指針就高幾 VU），
+// 最大聲段落紅區約 7%、小聲段落約 0%；整首紅區中位 6.9%、指針中位 −2.0 VU
 void update_auto_reference(State& state, double dt, const double* rms)
 {
     const auto power = (rms[0] * rms[0] + rms[1] * rms[1]) / 2.0;
     if (power <= std::pow(10.0, auto_gate_dbfs / 10.0))
         return;
-    const auto tau = state.auto_warm < auto_warm_seconds
-        ? auto_fast_seconds
-        : (state.auto_power > 0 && power > state.auto_power ? auto_rise_seconds : auto_slow_seconds);
+    const auto warming = state.auto_warm < auto_warm_seconds;
+    const auto tau = warming ? auto_fast_seconds : auto_section_seconds;
     state.auto_power = state.auto_power <= 0 ? power : state.auto_power + (power - state.auto_power) * std::min(1.0, dt / tau);
+    const auto section_db = 10.0 * std::log10(state.auto_power);
+    if (!state.auto_hold_valid) {
+        state.auto_hold_db = section_db;
+        state.auto_hold_valid = true;
+    } else if (warming) {
+        state.auto_hold_db += (section_db - state.auto_hold_db) * std::min(1.0, dt / auto_fast_seconds);
+    } else if (section_db > state.auto_hold_db) {
+        state.auto_hold_db += (section_db - state.auto_hold_db) * std::min(1.0, dt / auto_hold_rise_seconds);
+    } else {
+        state.auto_hold_db = std::max(section_db, state.auto_hold_db - auto_hold_decay_db_per_second * dt);
+    }
     state.auto_warm += dt;
-    state.auto_reference
-        = std::clamp(10.0 * std::log10(state.auto_power) + auto_average_vu_offset, auto_reference_min, auto_reference_max);
+    state.auto_reference = std::clamp(state.auto_hold_db + auto_loud_vu_offset, auto_reference_min, auto_reference_max);
 }
 
 // 讀這一格的音量，更新兩支指針；有動到要重畫就傳回 true
@@ -1624,6 +1646,10 @@ bool update_needles(State& state, double dt)
     }
 
     const auto lamp_threshold = std::pow(10.0, peak_lamp_dbfs / 20.0);
+    // 「自動」峰值燈的冷卻慢慢回落；這一格兩聲道任一邊剛亮起來就把門檻再加高
+    state.lamp_cooldown = std::max(0.0, state.lamp_cooldown - auto_lamp_recover_db_per_second * dt);
+    const auto auto_lamp_level = auto_lamp_vu + state.lamp_cooldown;
+    bool any_lamp_on = false;
     // 暫停／停止時沒有訊號：改用比較慢、阻尼小一點的回落（約 1.1 秒），像錶頭的彈簧把指針慢慢拉回去
     // （2026-11-11 使用者說暫停時指針「沒緩衝地」直接回 0，不夠真實）
     const auto omega = live ? tuning.natural_frequency : rest_frequency;
@@ -1651,8 +1677,9 @@ bool update_needles(State& state, double dt)
             }
         }
         const auto lamp_on = tuning.automatic
-            ? lamp_rms[side] > 0 && 20.0 * std::log10(lamp_rms[side]) - reference >= auto_lamp_vu
+            ? lamp_rms[side] > 0 && 20.0 * std::log10(lamp_rms[side]) - reference >= auto_lamp_level
             : peaks[side] >= lamp_threshold;
+        any_lamp_on = any_lamp_on || lamp_on;
         if (lamp_on) {
             needle.lamp = 1.0;
             needle.lamp_hold = lamp_hold_seconds;
@@ -1664,6 +1691,9 @@ bool update_needles(State& state, double dt)
         if (std::abs(needle.pos - before_pos) > 0.0004 || needle.lamp != before_lamp)
             changed = true;
     }
+    if (tuning.automatic && any_lamp_on && !state.lamp_was_on)
+        state.lamp_cooldown += auto_lamp_cooldown_db;
+    state.lamp_was_on = any_lamp_on;
 #if defined(NOCTURNE_BUILD_DEV)
     log_needles(state, dt, rms, reference, targets, peaks, live);
 #endif
