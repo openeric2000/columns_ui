@@ -219,20 +219,18 @@ public:
         next_track_toast::show_cover.reset();
         next_track_toast::show_source_tag.reset();
         next_track_toast::position.reset();
-        next_track_toast::size_index.reset();
         playlist_item_helpers::keep_queue_on_play.reset();
         playlist_item_helpers::allow_duplicate_queue.reset();
     }
 
 private:
-    // 沒勾「顯示下一首」時，底下的秒數、卡片內容、位置、大小都反灰（2026-11-12 整理）
+    // 沒勾「顯示下一首」時，底下的秒數、卡片內容、位置都反灰（2026-11-12 整理；大小改成自動，不在設定頁）
     static void update_dependents(HWND wnd)
     {
         const auto enabled = IsDlgButtonChecked(wnd, IDC_NEXT_TOAST_ENABLED) == BST_CHECKED;
         for (const auto id : {IDC_NEXT_TOAST_SECONDS_LABEL, IDC_NEXT_TOAST_SECONDS, IDC_NEXT_TOAST_SECONDS_SPIN,
                  IDC_NEXT_TOAST_CONTENT_LABEL, IDC_NEXT_TOAST_SHOW_SECONDS, IDC_NEXT_TOAST_SHOW_COVER,
-                 IDC_NEXT_TOAST_SHOW_TAG, IDC_NEXT_TOAST_POSITION_LABEL, IDC_NEXT_TOAST_POSITION,
-                 IDC_NEXT_TOAST_SIZE_LABEL, IDC_NEXT_TOAST_SIZE})
+                 IDC_NEXT_TOAST_SHOW_TAG, IDC_NEXT_TOAST_POSITION_LABEL, IDC_NEXT_TOAST_POSITION})
             EnableWindow(GetDlgItem(wnd, id), enabled);
     }
 
@@ -246,7 +244,6 @@ private:
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_COVER, nocturne_text::next_toast_show_cover);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_POSITION_LABEL, nocturne_text::next_toast_position_label);
-        SetDlgItemText(wnd, IDC_NEXT_TOAST_SIZE_LABEL, nocturne_text::next_toast_size_label);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
         SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
         SetDlgItemText(wnd, IDC_QUEUE_ALLOW_DUPLICATES, nocturne_text::queue_allow_duplicates);
@@ -268,12 +265,6 @@ private:
             ComboBox_AddString(position_combo, name);
         ComboBox_SetCurSel(position_combo,
             gsl::narrow<int>(std::min(next_track_toast::position.get(), next_track_toast::position_count - 1)));
-
-        const auto size_combo = GetDlgItem(wnd, IDC_NEXT_TOAST_SIZE);
-        for (const auto& name : nocturne_text::next_toast_size_names)
-            ComboBox_AddString(size_combo, name);
-        ComboBox_SetCurSel(size_combo,
-            gsl::narrow<int>(std::min(next_track_toast::size_index.get(), next_track_toast::size_count - 1)));
 
         update_dependents(wnd);
     }
@@ -332,13 +323,6 @@ private:
                 const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
                 if (selection != CB_ERR)
                     next_track_toast::position = gsl::narrow<uint32_t>(selection);
-            }
-            break;
-        case IDC_NEXT_TOAST_SIZE:
-            if (code == CBN_SELCHANGE) {
-                const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
-                if (selection != CB_ERR)
-                    next_track_toast::size_index = gsl::narrow<uint32_t>(selection);
             }
             break;
         }

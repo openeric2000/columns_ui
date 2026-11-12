@@ -40,12 +40,7 @@ extern fbh::ConfigBool show_source_tag;
 // 放在哪個角落（position_*）
 extern fbh::ConfigUint32 position;
 
-// 卡片的大小（2026-11-05 起可在設定頁選）：存的是選項編號 0～3，對應小 85%、標準 100%、大 120%、特大 140%，預設標準。
-// 整張卡片（尺寸、邊距、字級、圈、封面）一起照比例放大縮小
-inline constexpr uint32_t size_count = 4;
-inline constexpr uint32_t size_default = 1;
-inline constexpr int size_percents[size_count] = {85, 100, 120, 140};
-extern fbh::ConfigUint32 size_index;
+// 卡片的大小：2026-11-05～11-12 可在設定頁選（小／標準／大／特大），11-12 起拿掉，改成跟著展開頁高度自動決定（見 next_track_toast.cpp 的 auto_size_percent）
 
 // GDI+ 字型表的暖機（啟動時在背景執行緒做，見 next_track_toast.cpp 的 font_warm_up）有沒有做完。
 // 進程裡第一次依名稱建立 GDI+ 字型家族，GDI+ 要列舉整台電腦的字型（這台 755 個字族，219 要 0.3～1.4 秒），

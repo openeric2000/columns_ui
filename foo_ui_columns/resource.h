@@ -419,8 +419,6 @@
 #define IDC_WHEEL_SHIFT_LABEL          1303
 #define IDC_WHEEL_SHIFT_SECONDS        1304
 #define IDC_WHEEL_SHIFT_SPIN           1305
-#define IDC_NEXT_TOAST_SIZE_LABEL      1310
-#define IDC_NEXT_TOAST_SIZE            1311
 #define IDC_CHIP_ENABLED               1320
 #define IDC_CHIP_CLICK                 1321
 #define IDC_CHIP_ALIASES               1322

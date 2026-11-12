@@ -26,10 +26,22 @@ fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
 fbh::ConfigUint32 position(
     GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_bottom_right);
-fbh::ConfigUint32 size_index(
-    GUID{0x6f1c2f68, 0x295e, 0x48fd, {0xa6, 0x40, 0x95, 0xd5, 0x21, 0x33, 0x33, 0x70}}, size_default);
+// （原本的 size_index 設定 2026-11-12 拿掉，改成 auto_size_percent；GUID 6f1c2f68-295e-48fd-a640-95d521333370 不要再拿來用）
 
 namespace {
+
+// 卡片大小（百分比）跟著展開頁高度（DIP）走：高 880 DIP（169 的展開頁）是 100%，
+// 夾在原本設定頁最小與最大的 85%～140% 之間，取到 5% 一格，拖視窗邊緣時才不會每一格都重建卡片
+constexpr double auto_size_reference_dip = 880;
+constexpr int auto_size_min_percent = 85;
+constexpr int auto_size_max_percent = 140;
+
+int auto_size_percent(double stage_height_dip)
+{
+    const auto raw = stage_height_dip / auto_size_reference_dip * 100.0;
+    const auto stepped = static_cast<int>(std::lround(raw / 5.0)) * 5;
+    return std::clamp(stepped, auto_size_min_percent, auto_size_max_percent);
+}
 
 using panels::splitter::FlatSplitterPanel;
 using Clock = std::chrono::steady_clock;
@@ -1211,9 +1223,10 @@ void Controller::tick()
     // 淡出時沿用最後一次的內容與位置；歌曲最後半秒（fading）的圈與數字用這一格算出的新值
     const auto& shown = want ? *want : *m_last_want;
     const auto dpi = std::max<UINT>(GetDpiForWindow(shown.owner), USER_DEFAULT_SCREEN_DPI);
-    // 使用者在設定頁選的大小（小／標準／大／特大）乘上螢幕縮放，整張卡片一起照比例變
-    const auto user_percent = size_percents[std::min(size_index.get(), size_count - 1)];
-    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * user_percent / 100.0;
+    // 卡片大小跟著展開頁的高度自動決定（2026-11-12 拿掉設定頁的「大小」）：乘上螢幕縮放，整張卡片一起照比例變
+    const auto stage_height_dip
+        = static_cast<double>(wil::rect_height(shown.stage)) * USER_DEFAULT_SCREEN_DPI / static_cast<double>(dpi);
+    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * auto_size_percent(stage_height_dip) / 100.0;
     const Layout layout(scale);
 
     // 第一次出現的這一格要建視窗、畫圖，會花一段時間；這一格先停在全透明，時間從下一格才開始算，
