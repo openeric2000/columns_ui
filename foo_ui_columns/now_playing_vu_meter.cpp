@@ -620,6 +620,17 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
     const auto column = cover_zoom::lyrics_column_in_stage(stage_width, stage_height);
     if (!column)
         return {};
+    // 版面標記有另外的 VU 欄（vu-left／vu-right）時，整組改成以 VU 欄中心置中（2026-11-12 219：靠歌詞左緣看起來偏右，
+    // 而且跟單獨 VU 模式的錶同一個中心，切換時不會左右跳）；沒有時照舊靠歌詞左緣
+    const auto vu_column = cover_zoom::vu_column_in_stage(stage_width, stage_height);
+    const auto place = [&](RECT rect) {
+        if (vu_column) {
+            const auto width = rect.right - rect.left;
+            rect.left = (vu_column->left + vu_column->right) / 2 - width / 2;
+            rect.right = rect.left + width;
+        }
+        return rect;
+    };
     const auto info_top = cover_zoom::info_top_in_stage(stage_width, stage_height);
     const auto info_bottom = cover_zoom::info_bottom_in_stage(stage_width, stage_height);
     if (info_top && info_bottom) {
@@ -651,7 +662,7 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
             const auto top = static_cast<LONG>(std::lround(box_top - margin_top_px * scale));
             const auto width = static_cast<LONG>(std::lround(body_w + 2.f * margin_x_px * scale));
             const auto height = static_cast<LONG>(std::lround(box_h + (margin_top_px + margin_bottom_px) * scale));
-            return WindowPlan{RECT{left, top, left + width, top + height}, scale};
+            return WindowPlan{place(RECT{left, top, left + width, top + height}), scale};
         }
         // 頻譜：寬度照舊（縮 combined_scale 倍），高度依 box 算
         const auto panel_w = spec_ref_w * plan->scale * combined_scale;
@@ -674,7 +685,7 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
         const auto top = static_cast<LONG>(std::lround(panel_top - spec_margin_top * u));
         const auto width = static_cast<LONG>(std::lround(panel_w + 2.f * spec_margin_x * u));
         const auto height = static_cast<LONG>(std::lround((spec_margin_top + spec_margin_bottom) * u + panel_h));
-        return WindowPlan{RECT{left, top, left + width, top + height}, u};
+        return WindowPlan{place(RECT{left, top, left + width, top + height}), u};
     }
 
     const auto split = std::clamp(cover_zoom::lyrics_split_y(stage_height), 0, stage_height);
