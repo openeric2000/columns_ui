@@ -80,6 +80,13 @@ protected:
     virtual UINT dialog_id() const = 0;
     virtual void on_init_dialog(HWND wnd) = 0;
     virtual void on_command(HWND wnd, WPARAM wp) = 0;
+
+public:
+    // 「Reset page」：只還原這一頁的設定（2026-11-12 起；原本不管停在哪一頁都會把七頁全部還原）。
+    // 還原後設定視窗會把目前分頁重建一次，畫面跟著更新
+    virtual void reset_to_defaults() = 0;
+
+protected:
     // 自繪控制項（SS_OWNERDRAW）；畫了就傳回 true
     virtual bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) { return false; }
 
@@ -117,6 +124,19 @@ public:
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_PLAYBACK; }
+
+public:
+    void reset_to_defaults() override
+    {
+        now_playing_progress::wheel_seek_enabled.reset();
+        now_playing_progress::wheel_step_seconds.reset();
+        now_playing_progress::wheel_shift_step_seconds.reset();
+        output_chip::enabled.reset();
+        output_chip::click_to_switch.reset();
+        volume_chip::enabled.reset();
+    }
+
+private:
 
     void on_init_dialog(HWND wnd) override
     {
@@ -189,6 +209,21 @@ private:
     }
 
     UINT dialog_id() const override { return IDD_PREFS_NEXT_TRACK_TOAST; }
+
+public:
+    void reset_to_defaults() override
+    {
+        next_track_toast::enabled.reset();
+        next_track_toast::seconds.reset();
+        next_track_toast::show_seconds_in_ring.reset();
+        next_track_toast::show_cover.reset();
+        next_track_toast::show_source_tag.reset();
+        next_track_toast::position.reset();
+        next_track_toast::size_index.reset();
+        playlist_item_helpers::keep_queue_on_play.reset();
+    }
+
+private:
 
     void on_init_dialog(HWND wnd) override
     {
@@ -311,6 +346,21 @@ private:
     }
 
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FONT; }
+
+public:
+    // 字型分頁的「Reset page」：字型不動，能調大小的區塊（清單、分頁、資料夾樹、其餘介面文字）大小改回「標準」。
+    // 換字型要寫主題檔、重開 foobar2000，不適合一個按鈕就洗掉使用者選的字型
+    void reset_to_defaults() override
+    {
+        for (size_t region{}; region < theme_font::font_region_count(); ++region) {
+            if (!theme_font::font_region_has_size(region))
+                continue;
+            if (const auto family = theme_font::current_family_index(region))
+                theme_font::apply_font(region, *family, theme_font::default_size_option());
+        }
+    }
+
+private:
 
     // 「全部區塊」下面的分隔線（2026-11-12 使用者要求）：在控制項中間畫一條 1 像素的線，用工具列分隔線的顏色（深色時灰 88；分頁框線色跟底色一樣看不到）
     bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) override
@@ -572,6 +622,16 @@ public:
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_APPEARANCE; }
 
+public:
+    void reset_to_defaults() override
+    {
+        thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
+        playlist_marquee::set_enabled(playlist_marquee::enabled_default);
+        startup_hold_until_ready.reset();
+    }
+
+private:
+
     void on_init_dialog(HWND wnd) override
     {
         // 捲軸
@@ -620,6 +680,19 @@ public:
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FOLDER; }
+
+public:
+    void reset_to_defaults() override
+    {
+        thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
+        thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
+        folder_search_position::set_on_top(folder_search_position::on_top_default);
+        hide_instrumental::set_enabled(hide_instrumental::enabled_default);
+        hide_instrumental::set_keywords(hide_instrumental::keywords_default);
+        hide_instrumental::set_custom(hide_instrumental::custom_default);
+    }
+
+private:
 
     // 「自訂關鍵字」只在勾了隱藏時能點；輸入框那一行只在勾了自訂時出現
     static void update_controls(HWND wnd)
@@ -715,6 +788,18 @@ public:
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_EXPANDED; }
+
+public:
+    void reset_to_defaults() override
+    {
+        expanded_cover_bg::enabled.reset();
+        expanded_cover_bg::cap_percent.reset();
+        main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
+        main_menu::on_now_playing_modes_changed();
+        lyrics_lock::set_enabled(lyrics_lock::enabled_default);
+    }
+
+private:
 
     static void show_cap(HWND wnd, bool visible)
     {
@@ -877,6 +962,11 @@ public:
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_ABOUT; }
 
+public:
+    void reset_to_defaults() override {}
+
+private:
+
     void on_init_dialog(HWND wnd) override
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::about_tab_title);
@@ -978,40 +1068,15 @@ service_factory_single_t<WebKeyFromConsole> g_web_key_from_console;
 
 // 設定視窗的「Reset page」：播放、下一首與佇列、介面三個分頁的所有設定還原成預設。
 // 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
+// 「Reset page」：只還原目前停的那一頁（2026-11-12 使用者同意；原本七頁一起還原，
+// 例如在字型分頁按一下會把展開頁勾的模式洗回全勾）。各頁要還原哪些設定見各分頁的 reset_to_defaults
 void reset_nocturne_settings()
 {
-    now_playing_progress::wheel_seek_enabled.reset();
-    now_playing_progress::wheel_step_seconds.reset();
-    now_playing_progress::wheel_shift_step_seconds.reset();
-    playlist_item_helpers::keep_queue_on_play.reset();
-    output_chip::enabled.reset();
-    output_chip::click_to_switch.reset();
-    volume_chip::enabled.reset();
-
-    next_track_toast::enabled.reset();
-    next_track_toast::seconds.reset();
-    next_track_toast::show_seconds_in_ring.reset();
-    next_track_toast::show_cover.reset();
-    next_track_toast::show_source_tag.reset();
-    next_track_toast::position.reset();
-    next_track_toast::size_index.reset();
-
-    startup_hold_until_ready.reset();
-
-    thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
-    thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
-    thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
-    folder_search_position::set_on_top(folder_search_position::on_top_default);
-    hide_instrumental::set_enabled(hide_instrumental::enabled_default);
-    hide_instrumental::set_keywords(hide_instrumental::keywords_default);
-    hide_instrumental::set_custom(hide_instrumental::custom_default);
-    playlist_marquee::set_enabled(playlist_marquee::enabled_default);
-
-    expanded_cover_bg::enabled.reset();
-    expanded_cover_bg::cap_percent.reset();
-    main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
-    main_menu::on_now_playing_modes_changed();
-    lyrics_lock::set_enabled(lyrics_lock::enabled_default);
+    const auto index = cfg_nocturne_active_tab.get_value();
+    if (index < 0 || index >= static_cast<int>(std::size(g_nocturne_tabs)))
+        return;
+    // g_nocturne_tabs 裡全部都是 NocturneTab
+    static_cast<NocturneTab*>(g_nocturne_tabs[index])->reset_to_defaults();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）
