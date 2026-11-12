@@ -160,8 +160,7 @@ inline constexpr auto mode_lyrics_vu_description = "Shows the lyrics with a smal
 inline constexpr auto mode_lyrics_spectrum_name = "Now Playing: Lyrics + Spectrum";
 inline constexpr auto mode_lyrics_spectrum_description = "Shows the lyrics with a smaller spectrum analyser below them.";
 inline constexpr auto mode_button_name = "Switch Now Playing Content";
-inline constexpr auto mode_button_description
-    = "Switches what the now playing view shows (next one or a menu, as set in Preferences).";
+inline constexpr auto mode_button_description = "Moves the now playing view to the next content.";
 // 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
 inline constexpr wchar_t mode_short_names[10][48] = {L"Lyrics", L"Cover only", L"VU meter", L"VU meter (not in this layout)",
     L"Spectrum", L"Spectrum (not in this layout)", L"Lyrics + VU meter", L"Lyrics + VU meter (not in this layout)",
@@ -171,16 +170,13 @@ inline constexpr const char* mode_toast_names[6]
     = {"Lyrics", "Cover only", "VU meter", "Spectrum", "Lyrics + VU meter", "Lyrics + spectrum"};
 // 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
 inline constexpr wchar_t mode_picker_unavailable[] = L"Not in this layout";
-// 設定頁「介面」分頁、展開頁那一段
-inline constexpr wchar_t mode_button_label[] = L"Top-left button";
-inline constexpr wchar_t mode_button_names[2][32] = {L"Next one (default)", L"Menu"};
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
 inline constexpr auto expanded_page_tab_name = "Now Playing View";
 inline constexpr wchar_t expanded_section_background[] = L"Background";
 inline constexpr wchar_t expanded_section_content[] = L"Content";
 inline constexpr wchar_t expanded_section_lyrics[] = L"Lyrics";
 inline constexpr wchar_t mode_note[]
-    = L"Only the ticked ones show up on the top-left button.";
+    = L"Top-left button: click for the next one, right-click for a menu. Only the ticked ones show up.";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"Show";
 inline constexpr wchar_t modes_separator[] = L", ";
@@ -392,7 +388,7 @@ inline constexpr auto mode_lyrics_vu_description = "展開頁歌詞往上，下�
 inline constexpr auto mode_lyrics_spectrum_name = "展開頁：歌詞＋頻譜";
 inline constexpr auto mode_lyrics_spectrum_description = "展開頁歌詞往上，下面放縮小的頻譜。";
 inline constexpr auto mode_button_name = "切換展開頁顯示內容";
-inline constexpr auto mode_button_description = "切換展開頁顯示的內容（換下一種或跳出選單，依設定頁）。";
+inline constexpr auto mode_button_description = "展開頁換成下一種顯示內容。";
 // 彈出選單與切換時的提示（3～6 的下一格是版面沒標記歌詞欄位置、不能用時的灰色項目；位置見 main_menu::mode_name_index）
 inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"VU 表", L"VU 表（版面不支援）", L"頻譜",
     L"頻譜（版面不支援）", L"歌詞＋VU 表", L"歌詞＋VU 表（版面不支援）", L"歌詞＋頻譜", L"歌詞＋頻譜（版面不支援）"};
@@ -400,15 +396,12 @@ inline constexpr wchar_t mode_short_names[10][48] = {L"歌詞", L"純封面", L"
 inline constexpr const char* mode_toast_names[6] = {"歌詞", "純封面", "VU 表", "頻譜", "歌詞＋VU 表", "歌詞＋頻譜"};
 // 左上角按鈕跳出的版面縮圖卡（2026-11-12）：這個版面不支援的模式縮圖上的字
 inline constexpr wchar_t mode_picker_unavailable[] = L"版面不支援";
-// 設定頁「介面」分頁、展開頁那一段
-inline constexpr wchar_t mode_button_label[] = L"左上角按鈕";
-inline constexpr wchar_t mode_button_names[2][32] = {L"換下一種（預設）", L"跳出選單"};
 // 「展開頁」分頁（2026-11-11）：背景、顯示內容、歌詞三段
 inline constexpr auto expanded_page_tab_name = "展開頁";
 inline constexpr wchar_t expanded_section_background[] = L"背景";
 inline constexpr wchar_t expanded_section_content[] = L"顯示內容";
 inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
-inline constexpr wchar_t mode_note[] = L"只有勾選的會出現在左上角按鈕。";
+inline constexpr wchar_t mode_note[] = L"左上角按鈕：左鍵換下一種、右鍵跳出選單；只有勾選的會出現。";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"展開頁要有";
 inline constexpr wchar_t modes_separator[] = L"、";

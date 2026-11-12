@@ -491,15 +491,10 @@ void show_now_playing_mode_menu()
         set_now_playing_mode(static_cast<main_menu::NowPlayingMode>(chosen));
 }
 
-// 左上角按鈕：依設定換下一種（旁邊提示模式名稱）或跳出選單
+// 左上角按鈕左鍵：換下一種（旁邊提示模式名稱）。右鍵跳卡片在 splitter_window.cpp 的播放列子類別處理
+// （2026-11-12 使用者同意：原本設定頁二選一，改成左右鍵各一種，拿掉設定）
 void on_now_playing_mode_button()
 {
-    if (main_menu::now_playing_mode_button::opens_menu()) {
-        hide_mode_toast();
-        show_now_playing_mode_menu();
-        return;
-    }
-
     const auto next = next_now_playing_mode();
     set_now_playing_mode(next);
     show_mode_toast(next);
@@ -1072,6 +1067,12 @@ NowPlayingMode get_now_playing_mode()
 bool is_vu_mode_available()
 {
     return commands::vu_mode_available();
+}
+
+void show_now_playing_mode_picker()
+{
+    commands::hide_mode_toast();
+    commands::show_now_playing_mode_menu();
 }
 
 void on_now_playing_modes_changed()

@@ -686,7 +686,7 @@ private:
 // ---- 展開頁（2026-11-11）----
 // 使用者說設定放滿了就開新分頁、維持鬆弛度。三個小標題：
 // - 背景：封面虛化背景＋亮度上限（原本在「介面」分頁，邏輯在 expanded_cover_bg.cpp）；沒勾時亮度上限整個藏起來
-// - 顯示內容：左上角按鈕點一下是換下一種（預設）還是跳出選單（邏輯在 menu_items.cpp 的 on_now_playing_mode_button）
+// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）
 // - 歌詞：歌詞防誤拖（邏輯在 now_playing_cover_zoom.cpp 的 lyrics_lock）
 // 都是改了馬上生效
 class TabNocturneExpanded : public NocturneTab {
@@ -814,17 +814,12 @@ private:
         CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
         show_cap(wnd, expanded_cover_bg::enabled.get());
 
-        // 顯示內容：0＝換下一種、1＝跳出選單
+        // 顯示內容
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_section_content);
-        SetDlgItemText(wnd, IDC_MODE_BUTTON_LABEL, nocturne_text::mode_button_label);
         SetDlgItemText(wnd, IDC_MODE_NOTE, nocturne_text::mode_note);
         SetDlgItemText(wnd, IDC_MODES_LABEL, nocturne_text::modes_label);
         update_modes_text(wnd);
         SetWindowSubclass(GetDlgItem(wnd, IDC_MODES), s_modes_combo_proc, 1, 0);
-        const auto mode_combo = GetDlgItem(wnd, IDC_MODE_BUTTON);
-        for (const auto& name : nocturne_text::mode_button_names)
-            ComboBox_AddString(mode_combo, name);
-        ComboBox_SetCurSel(mode_combo, main_menu::now_playing_mode_button::opens_menu() ? 1 : 0);
 
         // 歌詞
         SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::expanded_section_lyrics);
@@ -847,10 +842,6 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
-        } else if (id == IDC_MODE_BUTTON && code == CBN_SELCHANGE) {
-            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
-            if (selection != CB_ERR)
-                main_menu::now_playing_mode_button::set_opens_menu(selection == 1);
         } else if (id == IDC_LYRICS_LOCK && code == BN_CLICKED) {
             lyrics_lock::set_enabled(IsDlgButtonChecked(wnd, IDC_LYRICS_LOCK) == BST_CHECKED);
         }
@@ -1000,7 +991,6 @@ void reset_nocturne_settings()
 
     expanded_cover_bg::enabled.reset();
     expanded_cover_bg::cap_percent.reset();
-    main_menu::now_playing_mode_button::set_opens_menu(main_menu::now_playing_mode_button::opens_menu_default);
     main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
     main_menu::on_now_playing_modes_changed();
     lyrics_lock::set_enabled(lyrics_lock::enabled_default);

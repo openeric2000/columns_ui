@@ -1929,7 +1929,39 @@ wil::unique_hbitmap FlatSplitterPanel::s_capture_now_playing_stage(RECT& screen_
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
+    // 展開頁左上角按鈕（main.xml 的 mode-button：離左上 12、56×56 DIP）上的右鍵：跳出版面縮圖卡，不出 ESLyric 的右鍵選單
+    // （2026-11-12）。只在展開完成時算數；收合時那顆按鈕被裁掉，右鍵照舊交給 ESLyric
+    const auto on_mode_button = [](POINT client) {
+        RECT stage{};
+        HWND owner{};
+        if (!s_get_now_playing_stage(stage, owner))
+            return false;
+        const auto lo = uih::scale_dpi_value(12);
+        const auto hi = uih::scale_dpi_value(12 + 56);
+        return client.x >= lo && client.x < hi && client.y >= lo && client.y < hi;
+    };
+
     switch (msg) {
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
+        if (on_mode_button({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}))
+            return 0;
+        break;
+    case WM_RBUTTONUP:
+        // 卡片開著時再按右鍵：按下那一下已經被卡片的滑鼠攔截關掉，show 這邊會因為「剛關掉」不再開，等於開關切換
+        if (on_mode_button({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)})) {
+            main_menu::show_now_playing_mode_picker();
+            return 0;
+        }
+        break;
+    case WM_CONTEXTMENU:
+        if (lp != -1) {
+            POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ScreenToClient(wnd, &point);
+            if (on_mode_button(point))
+                return 0;
+        }
+        break;
     case WM_LBUTTONDBLCLK:
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它，改當成一般的按下。
         // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，

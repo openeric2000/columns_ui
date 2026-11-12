@@ -135,22 +135,6 @@ inline constexpr bool mode_shows_lyrics(NowPlayingMode mode)
 }
 NowPlayingMode get_now_playing_mode();
 
-// 左上角按鈕點一下的動作：false＝換下一種（預設，旁邊跳出模式名稱）、true＝跳出選單。存在 fb2k 共用設定
-namespace now_playing_mode_button {
-inline constexpr char config_key[] = "nocturne.nowPlaying.modeButtonMenu";
-inline constexpr bool opens_menu_default = false;
-
-inline bool opens_menu()
-{
-    return fb2k::configStore::get()->getConfigBool(config_key, opens_menu_default);
-}
-
-inline void set_opens_menu(bool value)
-{
-    fb2k::configStore::get()->setConfigBool(config_key, value);
-}
-} // namespace now_playing_mode_button
-
 // 展開頁要有哪幾種（2026-11-11 使用者要求：設定頁用下拉鈕勾選）：bit0 歌詞、bit1 純封面、bit2 VU 表、bit3 頻譜、
 // bit4 歌詞＋VU 表、bit5 歌詞＋頻譜，預設全勾。
 // 左上角按鈕的「換下一種」與「跳出選單」都只出現勾選的；至少留一種（設定頁擋掉全部取消）。存在 fb2k 共用設定
@@ -188,5 +172,8 @@ void on_now_playing_modes_changed();
 
 // 版面裡有沒有 VU 表可以用（「展開頁右側」面板＋main.xml 標記的歌詞欄位置）。主執行緒
 bool is_vu_mode_available();
+
+// 左上角按鈕按右鍵：跳出版面縮圖卡（2026-11-12 起左鍵固定換下一種、右鍵固定跳卡片，設定頁不再有這個選項）。主執行緒
+void show_now_playing_mode_picker();
 
 } // namespace cui::main_menu
