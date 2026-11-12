@@ -451,8 +451,9 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         &line_format, &muted);
 }
 
-// 動態那一層：倒數圈（每格重畫）
-void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, double ratio, int number)
+// 動態那一層：倒數圈（每格重畫）。skip_glyph＝滑鼠停在卡片上：圈裡的數字換成「⏭」，告訴人點下去是跳到下一首（2026-11-12）
+void draw_ring(
+    Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, double ratio, int number, bool skip_glyph)
 {
     Gdiplus::Graphics g(&bitmap);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -475,6 +476,23 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
         g.DrawEllipse(&arc, rect);
     else if (ratio > 0.0005)
         g.DrawArc(&arc, rect, -90.f, static_cast<float>(360.0 * ratio));
+
+    if (skip_glyph) {
+        // ⏭：兩個三角形＋一條直線，整組置中，大小跟著圈走（圈內沒開秒數也照樣畫）
+        const auto h = layout.ring * 0.30f;
+        const auto w = h * 0.62f;
+        const auto gap = h * 0.04f;
+        const auto bar = std::max(1.5f, h * 0.14f);
+        const auto x0 = center_x - (w * 2 + gap + bar) / 2.f;
+        const Gdiplus::SolidBrush glyph(rgba(255, 241, 241, 241));
+        const Gdiplus::PointF first[3]{{x0, center_y - h / 2}, {x0, center_y + h / 2}, {x0 + w, center_y}};
+        const Gdiplus::PointF second[3]{
+            {x0 + w, center_y - h / 2}, {x0 + w, center_y + h / 2}, {x0 + w * 2, center_y}};
+        g.FillPolygon(&glyph, first, 3);
+        g.FillPolygon(&glyph, second, 3);
+        g.FillRectangle(&glyph, Gdiplus::RectF(x0 + w * 2 + gap, center_y - h / 2, bar, h));
+        return;
+    }
 
     if (content.show_number) {
         const auto family = create_font_family();
@@ -759,6 +777,9 @@ void Controller::set_hover(HWND wnd, bool inside)
         TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
         TrackMouseEvent(&track);
     }
+    // 「下一首」與「點一下立即播放」在靜態那一層，進出卡片時要重畫
+    if (m_hover != inside)
+        m_static_dirty = true;
     m_hover = inside;
 }
 
@@ -1090,7 +1111,6 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
         m_content.show_number = show_seconds_in_ring.get();
         m_content.show_cover = cover_wanted;
         m_content.show_tag = show_source_tag.get();
-        m_content.caption = nocturne_text::next_caption;
         m_content.tag = want.next.from_queue ? nocturne_text::next_source_queue : nocturne_text::next_source_list;
         m_content.title = format_track_text(want.next.handle, "$if2(%title%,%filename%)");
         m_content.artist = format_track_text(want.next.handle, "[%artist%]");
@@ -1106,6 +1126,8 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
         m_content_valid = true;
     }
 
+    // 滑鼠停在卡片上時「下一首」換成「點一下立即播放」（2026-11-12 使用者選的 C：配合圈裡的 ⏭）
+    m_content.caption = m_hover ? nocturne_text::next_caption_hover : nocturne_text::next_caption;
     m_static_dirty = false;
     draw_static_layer(m_surface.static_layer(), layout, m_content, m_cover.get());
 }
@@ -1115,7 +1137,7 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
     const auto eased = ease(m_alpha);
     m_surface.copy_static_to_canvas();
     // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
-    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
+    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)), m_hover);
 
     m_corner_radius = layout.radius;
     if (m_hover) {

@@ -24,6 +24,7 @@ inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view near the end of a track.";
 inline constexpr wchar_t next_caption[] = L"Up next";
+inline constexpr wchar_t next_caption_hover[] = L"Click to play now";
 inline constexpr wchar_t next_source_queue[] = L"Queue";
 inline constexpr wchar_t next_source_list[] = L"Playlist";
 // 播放列的輸出裝置顯示（output_chip.cpp）
@@ -231,6 +232,7 @@ inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description
     = "歌曲最後幾秒，在展開頁角落顯示下一首。";
 inline constexpr wchar_t next_caption[] = L"下一首";
+inline constexpr wchar_t next_caption_hover[] = L"點一下立即播放";
 inline constexpr wchar_t next_source_queue[] = L"佇列";
 inline constexpr wchar_t next_source_list[] = L"清單";
 // 播放列的輸出裝置顯示（output_chip.cpp）
