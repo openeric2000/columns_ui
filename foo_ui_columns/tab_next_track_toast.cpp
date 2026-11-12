@@ -221,15 +221,27 @@ public:
         next_track_toast::position.reset();
         next_track_toast::size_index.reset();
         playlist_item_helpers::keep_queue_on_play.reset();
+        playlist_item_helpers::allow_duplicate_queue.reset();
     }
 
 private:
+    // 沒勾「顯示下一首」時，底下的秒數、卡片內容、位置、大小都反灰（2026-11-12 整理）
+    static void update_dependents(HWND wnd)
+    {
+        const auto enabled = IsDlgButtonChecked(wnd, IDC_NEXT_TOAST_ENABLED) == BST_CHECKED;
+        for (const auto id : {IDC_NEXT_TOAST_SECONDS_LABEL, IDC_NEXT_TOAST_SECONDS, IDC_NEXT_TOAST_SECONDS_SPIN,
+                 IDC_NEXT_TOAST_CONTENT_LABEL, IDC_NEXT_TOAST_SHOW_SECONDS, IDC_NEXT_TOAST_SHOW_COVER,
+                 IDC_NEXT_TOAST_SHOW_TAG, IDC_NEXT_TOAST_POSITION_LABEL, IDC_NEXT_TOAST_POSITION,
+                 IDC_NEXT_TOAST_SIZE_LABEL, IDC_NEXT_TOAST_SIZE})
+            EnableWindow(GetDlgItem(wnd, id), enabled);
+    }
 
     void on_init_dialog(HWND wnd) override
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::next_toast_title);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_ENABLED, nocturne_text::next_toast_enabled);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SECONDS_LABEL, nocturne_text::next_toast_seconds_label);
+        SetDlgItemText(wnd, IDC_NEXT_TOAST_CONTENT_LABEL, nocturne_text::next_toast_content_label);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, nocturne_text::next_toast_show_seconds);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_COVER, nocturne_text::next_toast_show_cover);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
@@ -237,8 +249,11 @@ private:
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SIZE_LABEL, nocturne_text::next_toast_size_label);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
         SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
+        SetDlgItemText(wnd, IDC_QUEUE_ALLOW_DUPLICATES, nocturne_text::queue_allow_duplicates);
 
         CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
+        CheckDlgButton(
+            wnd, IDC_QUEUE_ALLOW_DUPLICATES, check_state(playlist_item_helpers::allow_duplicate_queue.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_ENABLED, check_state(next_track_toast::enabled.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, check_state(next_track_toast::show_seconds_in_ring.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_COVER, check_state(next_track_toast::show_cover.get()));
@@ -259,6 +274,8 @@ private:
             ComboBox_AddString(size_combo, name);
         ComboBox_SetCurSel(size_combo,
             gsl::narrow<int>(std::min(next_track_toast::size_index.get(), next_track_toast::size_count - 1)));
+
+        update_dependents(wnd);
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -272,9 +289,15 @@ private:
             if (code == BN_CLICKED)
                 playlist_item_helpers::keep_queue_on_play = is_checked();
             break;
-        case IDC_NEXT_TOAST_ENABLED:
+        case IDC_QUEUE_ALLOW_DUPLICATES:
             if (code == BN_CLICKED)
+                playlist_item_helpers::allow_duplicate_queue = is_checked();
+            break;
+        case IDC_NEXT_TOAST_ENABLED:
+            if (code == BN_CLICKED) {
                 next_track_toast::enabled = is_checked();
+                update_dependents(wnd);
+            }
             break;
         case IDC_NEXT_TOAST_SHOW_SECONDS:
             if (code == BN_CLICKED)

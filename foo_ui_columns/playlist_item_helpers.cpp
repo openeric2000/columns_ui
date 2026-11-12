@@ -6,6 +6,9 @@ namespace cui::playlist_item_helpers {
 fbh::ConfigBool keep_queue_on_play(
     GUID{0x4b2e8a17, 0x6d03, 0x4e95, {0xa8, 0x1c, 0x72, 0xf0, 0x3d, 0x95, 0xbe, 0x26}}, true);
 
+fbh::ConfigBool allow_duplicate_queue(
+    GUID{0x34bd1e22, 0x8b0e, 0x433b, {0x9e, 0xc5, 0x79, 0x05, 0x89, 0x99, 0x22, 0x9b}}, false);
+
 namespace {
 
 template <typename RunDefaultAction>
@@ -63,8 +66,23 @@ void action_add_to_queue(bool on_item, size_t idx)
     if (on_item) {
         const auto api = playlist_manager::get();
         const auto active = api->get_active_playlist();
-        if (active != -1)
-            api->queue_add_item_playlist(active, idx);
+        if (active == -1)
+            return;
+
+        // 沒允許重複時，同一首已經在佇列裡（不管從哪份清單加的）就不再加（2026-11-12）
+        if (!allow_duplicate_queue.get()) {
+            metadb_handle_ptr handle;
+            pfc::list_t<t_playback_queue_item> queue;
+            api->queue_get_contents(queue);
+            if (api->playlist_get_item_handle(handle, active, idx)) {
+                for (size_t index = 0; index < queue.get_count(); index++) {
+                    if (queue[index].m_handle == handle)
+                        return;
+                }
+            }
+        }
+
+        api->queue_add_item_playlist(active, idx);
     }
 }
 

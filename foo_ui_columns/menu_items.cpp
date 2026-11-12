@@ -20,6 +20,7 @@
 #include "now_playing_cover_zoom.h"
 #include "now_playing_style_transition.h"
 #include "now_playing_mode_picker.h"
+#include "playlist_item_helpers.h"
 
 namespace cui::main_menu {
 
@@ -740,17 +741,26 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 10; }
+    t_uint32 get_field_count() override { return 11; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
-            "cui_now_playing_mode", "cui_now_playing_mode_toast"};
+            "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // %cui_queue_allow_duplicates%：設定頁勾了「同一首可以重複加入佇列」時為 1，沒勾時不存在（2026-11-12）。
+        // 標頭網頁按「加入佇列」前讀它，決定要不要跳過已在佇列的歌
+        if (index == 10) {
+            if (!playlist_item_helpers::allow_duplicate_queue.get())
+                return false;
+            out->write(titleformat_inputtypes::meta, "1");
+            return true;
+        }
+
         if (index == 1) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(now_playing_style_value()));
             return true;
