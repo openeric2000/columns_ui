@@ -1,5 +1,9 @@
 #include "pch.h"
 
+#if __has_include("nocturne_build_info.h")
+#include "nocturne_build_info.h"
+#endif
+
 #include "now_playing_style_transition.h"
 #include "now_playing_cover_zoom.h"
 #include "splitter.h"
@@ -81,6 +85,95 @@ struct Transition {
 };
 
 std::unique_ptr<Transition> g_transition;
+
+#if defined(NOCTURNE_BUILD_DEV)
+// 開發版才有的動畫紀錄（2026-11-12 使用者說封面⇄資訊卡的淡出＋微縮放不順，先量再改）：
+// 環境變數 NOCTURNE_ANIM_LOG＝文字檔路徑時，每次切換記一段：每一格的時間、跟上一格的間隔、合成花多久、截圖判斷花多久，
+// 結束時記總結（格數、最長間隔、超過 25／50 毫秒的次數）。動畫跑完才一次寫檔；沒設環境變數就什麼都不做
+struct AnimLog {
+    bool checked{};
+    std::wstring path;
+    LARGE_INTEGER frequency{};
+    LARGE_INTEGER start{};
+    double last_frame{-1};
+    std::vector<double> gaps;
+    std::string text;
+
+    bool enabled()
+    {
+        if (!checked) {
+            checked = true;
+            wchar_t buffer[MAX_PATH]{};
+            if (GetEnvironmentVariable(L"NOCTURNE_ANIM_LOG", buffer, MAX_PATH))
+                path = buffer;
+            QueryPerformanceFrequency(&frequency);
+        }
+        return !path.empty();
+    }
+    double now() const
+    {
+        LARGE_INTEGER value{};
+        QueryPerformanceCounter(&value);
+        return static_cast<double>(value.QuadPart - start.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+    }
+    void begin(const char* kind)
+    {
+        if (!enabled())
+            return;
+        QueryPerformanceCounter(&start);
+        last_frame = -1;
+        gaps.clear();
+        text = fmt::format("== {}\n", kind);
+    }
+    void line(const std::string& value)
+    {
+        if (!path.empty())
+            text += value + "\n";
+    }
+    void frame(double present_ms, double poll_ms, bool ready)
+    {
+        if (path.empty())
+            return;
+        const auto t = now();
+        const auto gap = last_frame < 0 ? 0.0 : t - last_frame;
+        if (last_frame >= 0)
+            gaps.push_back(gap);
+        last_frame = t;
+        text += fmt::format("frame t={:.1f} gap={:.1f} present={:.1f} poll={:.1f} ready={}\n", t, gap, present_ms, poll_ms, ready ? 1 : 0);
+    }
+    void end()
+    {
+        if (path.empty() || text.empty())
+            return;
+        double max_gap{};
+        int over25{}, over50{};
+        for (const auto gap : gaps) {
+            max_gap = std::max(max_gap, gap);
+            over25 += gap > 25 ? 1 : 0;
+            over50 += gap > 50 ? 1 : 0;
+        }
+        text += fmt::format("end t={:.1f} frames={} max_gap={:.1f} over25={} over50={}\n", now(), gaps.size() + 1, max_gap, over25, over50);
+        FILE* file{};
+        if (_wfopen_s(&file, path.c_str(), L"ab") == 0 && file) {
+            fwrite(text.data(), 1, text.size(), file);
+            fclose(file);
+        }
+        text.clear();
+    }
+};
+AnimLog g_anim_log;
+#define ANIM_LOG_BEGIN(kind) g_anim_log.begin(kind)
+#define ANIM_LOG_LINE(value) g_anim_log.line(value)
+#define ANIM_LOG_NOW() g_anim_log.now()
+#define ANIM_LOG_FRAME(present, poll, ready) g_anim_log.frame(present, poll, ready)
+#define ANIM_LOG_END() g_anim_log.end()
+#else
+#define ANIM_LOG_BEGIN(kind) ((void)0)
+#define ANIM_LOG_LINE(value) ((void)0)
+#define ANIM_LOG_NOW() 0.0
+#define ANIM_LOG_FRAME(present, poll, ready) ((void)0)
+#define ANIM_LOG_END() ((void)0)
+#endif
 
 // 截下螢幕上 screen 那一塊（用展開頁截圖：PrintWindow 整個主視窗，不含蓋層這種另外的視窗）
 std::unique_ptr<Gdiplus::Bitmap> capture(const RECT& screen)
@@ -275,6 +368,7 @@ void finish()
         return;
 
     auto transition = std::move(g_transition);
+    ANIM_LOG_END();
     if (transition->wnd) {
         KillTimer(transition->wnd, frame_timer_id);
         DestroyWindow(transition->wnd);
@@ -349,15 +443,24 @@ void on_frame()
     auto& transition = *g_transition;
     const auto now = GetTickCount64();
 
+    [[maybe_unused]] const auto poll_start = ANIM_LOG_NOW();
+    const bool was_ready = transition.ready;
     if (!transition.ready)
         poll_ready(transition, now);
+    [[maybe_unused]] const auto poll_ms = was_ready ? 0.0 : ANIM_LOG_NOW() - poll_start;
+    if (!was_ready && transition.ready)
+        ANIM_LOG_LINE(fmt::format("ready t={:.1f} (since apply {} ms)", ANIM_LOG_NOW(), transition.ready_at - transition.applied_at));
 
     if (transition.whole_stage) {
         // 畫好之前舊畫面整張蓋著；畫好之後整張淡出
-        if (!transition.ready)
+        if (!transition.ready) {
+            ANIM_LOG_FRAME(0.0, poll_ms, false);
             return;
+        }
+        [[maybe_unused]] const auto present_start = ANIM_LOG_NOW();
         const auto progress = eased(now, transition.ready_at);
         set_overlay_alpha(transition.wnd, 1.0 - progress);
+        ANIM_LOG_FRAME(ANIM_LOG_NOW() - present_start, poll_ms, true);
         if (progress >= 1.0)
             finish();
         return;
@@ -366,7 +469,9 @@ void on_frame()
     // 封面方塊：舊的一面一按就開始縮小淡出，新的一面等 ESLyric 畫好才放大淡入
     const auto old_progress = eased(now, transition.applied_at);
     const auto new_progress = transition.ready ? eased(now, transition.ready_at) : 0.0;
+    [[maybe_unused]] const auto present_start = ANIM_LOG_NOW();
     present(transition, old_progress, new_progress);
+    ANIM_LOG_FRAME(ANIM_LOG_NOW() - present_start, poll_ms, transition.ready);
 
     if (transition.ready && new_progress >= 1.0)
         finish();
@@ -448,11 +553,13 @@ void run(std::function<void()> apply)
     InflateRect(&screen, pad, pad);
     IntersectRect(&screen, &screen, &stage);
 
+    ANIM_LOG_BEGIN("cover");
     auto transition = std::make_unique<Transition>();
     transition->screen = screen;
     transition->cover = cover_screen;
     OffsetRect(&transition->cover, -screen.left, -screen.top);
     transition->before = capture(screen);
+    ANIM_LOG_LINE(fmt::format("captured t={:.1f} size={}x{}", ANIM_LOG_NOW(), wil::rect_width(screen), wil::rect_height(screen)));
 
     if (!transition->before) {
         apply();
@@ -473,9 +580,12 @@ void run(std::function<void()> apply)
     ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
     [[maybe_unused]] const auto hr = DwmFlush();
 
+    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
     g_transition = std::move(transition);
     apply();
-    g_transition->applied_at = GetTickCount64();    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    ANIM_LOG_LINE(fmt::format("applied t={:.1f}", ANIM_LOG_NOW()));
+    g_transition->applied_at = GetTickCount64();
+    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
 }
 
 void run_stage(std::function<void()> apply)
@@ -494,10 +604,12 @@ void run_stage(std::function<void()> apply)
     }
 
     auto transition = std::make_unique<Transition>();
+    ANIM_LOG_BEGIN("stage");
     transition->whole_stage = true;
     transition->screen = stage;
     transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
     transition->before = capture(stage);
+    ANIM_LOG_LINE(fmt::format("captured t={:.1f} size={}x{}", ANIM_LOG_NOW(), wil::rect_width(stage), wil::rect_height(stage)));
 
     if (!transition->before) {
         apply();
@@ -516,9 +628,12 @@ void run_stage(std::function<void()> apply)
     ShowWindow(transition->wnd, SW_SHOWNOACTIVATE);
     [[maybe_unused]] const auto hr = DwmFlush();
 
+    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
     g_transition = std::move(transition);
     apply();
-    g_transition->applied_at = GetTickCount64();    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
+    ANIM_LOG_LINE(fmt::format("applied t={:.1f}", ANIM_LOG_NOW()));
+    g_transition->applied_at = GetTickCount64();
+    SetTimer(g_transition->wnd, frame_timer_id, frame_interval_ms, nullptr);
 }
 
 } // namespace cui::style_transition
