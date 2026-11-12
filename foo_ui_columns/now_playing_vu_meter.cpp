@@ -1,5 +1,6 @@
 #include "pch.h"
 
+#include <array>
 #include <cmath>
 #include <unordered_map>
 
@@ -33,6 +34,9 @@ constexpr UINT_PTR recapture_timer_id = 2;
 constexpr UINT_PTR recapture_late_timer_id = 3;
 constexpr UINT recapture_delay_ms = 600;
 constexpr UINT recapture_late_delay_ms = 1800;
+// 切到 VU／頻譜模式時多一次提早重截（2026-11-12）：模式切換動畫約 0.3 秒，結束後上一個模式的歌詞就不在了
+constexpr UINT_PTR recapture_early_timer_id = 4;
+constexpr UINT recapture_early_delay_ms = 350;
 
 // 出現時淡入（同放大鈕）
 constexpr ULONGLONG fade_in_ms = 180;
@@ -969,16 +973,63 @@ void fill_backdrop(State& state, const std::vector<uint32_t>& pixels, int stage_
     };
     constexpr int band_near = 3;
     constexpr int band_far = 10;
+    const auto luma = [](const Rgb& c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; };
+    // 2026-11-12：剛切過來時外圍那圈常有上一個模式的歌詞字（亮），平均進去會往內拉成一條條直條紋。
+    // 歌詞字都比虛化背景亮，所以每點只取那一小段裡最暗的三個平均
     const auto band = [&](int x0, int y0, int step_x, int step_y) {
+        std::array<Rgb, band_far - band_near + 1> samples{};
+        for (int d = band_near; d <= band_far; ++d)
+            samples[d - band_near] = at(x0 + step_x * d, y0 + step_y * d);
+        std::sort(samples.begin(), samples.end(), [&](const Rgb& a, const Rgb& b) { return luma(a) < luma(b); });
+        constexpr int darkest = 3;
         Rgb sum{};
-        for (int d = band_near; d <= band_far; ++d) {
-            const auto c = at(x0 + step_x * d, y0 + step_y * d);
-            sum.r += c.r;
-            sum.g += c.g;
-            sum.b += c.b;
+        for (int i = 0; i < darkest; ++i) {
+            sum.r += samples[i].r;
+            sum.g += samples[i].g;
+            sum.b += samples[i].b;
         }
-        const auto n = static_cast<float>(band_far - band_near + 1);
-        return Rgb{sum.r / n, sum.g / n, sum.b / n};
+        return Rgb{sum.r / darkest, sum.g / darkest, sum.b / darkest};
+    };
+    // 字的筆畫可能整段都亮：沿著邊比附近（左右 48 像素內）最暗的那點亮太多的，當成字丟掉，用左右留下來的點線性補上
+    const auto reject_text = [&](std::vector<Rgb>& edge) {
+        const auto n = static_cast<int>(edge.size());
+        if (n < 3)
+            return;
+        constexpr int window = 48;
+        constexpr float tolerance = 18.f;
+        std::vector<float> lum(edge.size());
+        for (int i = 0; i < n; ++i)
+            lum[i] = luma(edge[i]);
+        std::vector<bool> keep(edge.size());
+        int kept = 0;
+        for (int i = 0; i < n; ++i) {
+            auto floor = lum[i];
+            for (int k = std::max(0, i - window); k <= std::min(n - 1, i + window); ++k)
+                floor = std::min(floor, lum[k]);
+            keep[i] = lum[i] <= floor + tolerance;
+            kept += keep[i] ? 1 : 0;
+        }
+        if (kept == 0 || kept == n)
+            return;
+        int previous = -1;
+        for (int i = 0; i < n; ++i) {
+            if (!keep[i])
+                continue;
+            if (previous < 0) {
+                for (int k = 0; k < i; ++k)
+                    edge[k] = edge[i];
+            } else if (i - previous > 1) {
+                for (int k = previous + 1; k < i; ++k) {
+                    const auto t = static_cast<float>(k - previous) / (i - previous);
+                    edge[k] = {edge[previous].r + (edge[i].r - edge[previous].r) * t,
+                        edge[previous].g + (edge[i].g - edge[previous].g) * t,
+                        edge[previous].b + (edge[i].b - edge[previous].b) * t};
+                }
+            }
+            previous = i;
+        }
+        for (int k = previous + 1; k < n; ++k)
+            edge[k] = edge[previous];
     };
     std::vector<Rgb> top(w), bottom(w), left(h), right(h);
     for (int x = 0; x < w; ++x) {
@@ -1008,6 +1059,10 @@ void fill_backdrop(State& state, const std::vector<uint32_t>& pixels, int stage_
             edge.swap(out);
         }
     };
+    reject_text(top);
+    reject_text(bottom);
+    reject_text(left);
+    reject_text(right);
     smooth(top);
     smooth(bottom);
     smooth(left);
@@ -3746,6 +3801,7 @@ void recapture(HWND wnd)
 
 void schedule_recapture(HWND wnd)
 {
+    SetTimer(wnd, recapture_early_timer_id, recapture_early_delay_ms, nullptr);
     SetTimer(wnd, recapture_timer_id, recapture_delay_ms, nullptr);
     SetTimer(wnd, recapture_late_timer_id, recapture_late_delay_ms, nullptr);
 }
@@ -3828,7 +3884,7 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             }
             return 0;
         }
-        if (wp == recapture_timer_id || wp == recapture_late_timer_id) {
+        if (wp == recapture_timer_id || wp == recapture_late_timer_id || wp == recapture_early_timer_id) {
             KillTimer(wnd, wp);
             recapture(wnd);
 #if defined(NOCTURNE_BUILD_DEV)
