@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include <deque>
 #include <unordered_map>
 
 #if __has_include("nocturne_build_info.h")
@@ -179,6 +180,20 @@ constexpr double spec_peak_fall_per_second[spectrum_fall_count] = {0.5, 1.0, 2.0
 constexpr double spec_floor_db = -70.0;
 constexpr double spec_range_db = 55.0;
 constexpr double spec_tilt_db_per_octave = 3.0;
+// 自動增益（2026-11-14，219 實錄 16 首、每首 0:00～1:32 調的；仿 VU 的「自動」）：
+// 上面三個值對流行歌剛好（平均高度約 0.64、頂到頂約 1%），但古典、鋼琴、吹奏樂平均只有 0.15～0.31，大半貼底。
+// 每格取各頻段（加 tilt 後）第 90 百分位，2 秒平均當段落音量；參考值追目前為止最大聲的段落
+// （變大聲 2 秒跟上、否則每秒退 0.02 dB；換歌後 3 秒內 1 秒時間常數快速對位，起點沿用上一首），
+// 參考值低於 target 就整體補上差額、最多 max_boost。模擬：流行歌幾乎不補（0.64→0.65），
+// 鋼琴 0.31→0.45、吹奏樂 0.20→0.39、Rosamunde 0.15→0.30、電影配樂 0.36→0.55，頂到頂都在 3% 以下；曲子裡的大小聲照樣保留
+constexpr double spec_auto_target_db = -25.0;
+constexpr double spec_auto_max_boost_db = 18.0;
+constexpr double spec_auto_quantile = 0.9;
+constexpr double spec_auto_segment_s = 2.0;
+constexpr double spec_auto_attack_s = 2.0;
+constexpr double spec_auto_decay_db_per_s = 0.02;
+constexpr double spec_auto_warm_s = 3.0;
+constexpr double spec_auto_warm_tau_s = 1.0;
 constexpr int spec_max_bands = 48;
 constexpr int spec_glow_downsample = 3; // 發光那層用三分之一解析度畫、模糊
 // 歌詞＋VU 表／歌詞＋頻譜（2026-11-12，使用者看了三版後定的規則）：
@@ -227,6 +242,13 @@ struct State {
     double levels[spec_max_bands]{};
     double peaks[spec_max_bands]{};
     double peak_holds[spec_max_bands]{};
+    // 頻譜自動增益（2026-11-14）：最近約 2 秒每格的音量（時間, dB）與總和、目前為止最大聲段落的參考值、換歌後量了幾秒
+    std::deque<std::pair<double, double>> spec_auto_segment;
+    double spec_auto_segment_sum{};
+    double spec_auto_clock{};
+    double spec_auto_reference{};
+    bool spec_auto_valid{};
+    double spec_auto_warm{};
     visualisation_stream_v2::ptr spectrum_stream;
     audio_chunk_impl spectrum_chunk;
     // 每格重畫的範圍、那一層（預乘 RGBA 浮點）與發光用的縮小層
@@ -2720,11 +2742,49 @@ void log_spectrum(const State& state, const double* raw_db, int bands)
 
 // 讀這一格的頻譜，更新各條高度與峰值點；有動到要重畫就傳回 true。
 // 頻段：30 Hz～20 kHz 對數等分，中心頻率 fc，範圍 fc 前後半格；範圍不到一個 FFT 格就在中心內插，否則取範圍內最大值
+// 頻譜自動增益（見 spec_auto_* 常數）：回傳這一格要整體補幾 dB
+double update_spectrum_auto(State& state, const double* tilted, int n, double dt)
+{
+    // 這一格的音量：各頻段（加 tilt 後）的第 90 百分位
+    std::vector<double> sorted(tilted, tilted + n);
+    std::ranges::sort(sorted);
+    const auto k = (n - 1) * spec_auto_quantile;
+    const auto lo = static_cast<int>(k);
+    const auto hi = std::min(lo + 1, n - 1);
+    const auto level = sorted[lo] + (sorted[hi] - sorted[lo]) * (k - lo);
+
+    // 段落音量：最近 spec_auto_segment_s 秒的平均
+    state.spec_auto_clock += dt;
+    auto& segment = state.spec_auto_segment;
+    segment.emplace_back(state.spec_auto_clock, level);
+    state.spec_auto_segment_sum += level;
+    while (segment.size() > 1 && segment.front().first < state.spec_auto_clock - spec_auto_segment_s) {
+        state.spec_auto_segment_sum -= segment.front().second;
+        segment.pop_front();
+    }
+    const auto average = state.spec_auto_segment_sum / static_cast<double>(segment.size());
+
+    // 參考值：換歌後先快速對位，之後追目前為止最大聲的段落、平常慢慢退
+    if (!state.spec_auto_valid) {
+        state.spec_auto_reference = average;
+        state.spec_auto_valid = true;
+    } else if (state.spec_auto_warm < spec_auto_warm_s) {
+        state.spec_auto_reference += (average - state.spec_auto_reference) * std::min(1.0, dt / spec_auto_warm_tau_s);
+    } else if (average > state.spec_auto_reference) {
+        state.spec_auto_reference += (average - state.spec_auto_reference) * std::min(1.0, dt / spec_auto_attack_s);
+    } else {
+        state.spec_auto_reference -= spec_auto_decay_db_per_s * dt;
+    }
+    state.spec_auto_warm += dt;
+    return std::clamp(spec_auto_target_db - state.spec_auto_reference, 0.0, spec_auto_max_boost_db);
+}
+
 bool update_spectrum(State& state, double dt)
 {
     const auto n = std::clamp(state.spectrum_bands, 2, spec_max_bands);
     double targets[spec_max_bands]{};
     double raw_db[spec_max_bands]{};
+    double tilted[spec_max_bands]{};
     bool have_data = false;
     const auto playback = play_control::get();
     const auto live = playback->is_playing() && !playback->is_paused();
@@ -2766,9 +2826,11 @@ bool update_spectrum(State& state, double dt)
                     }
                     const auto db = 20.0 * std::log10(std::max(value, 1e-9));
                     raw_db[i] = db;
-                    targets[i] = std::clamp(
-                        (db + spec_tilt_db_per_octave * std::log2(fc / 1000.0) - spec_floor_db) / spec_range_db, 0.0, 1.0);
+                    tilted[i] = db + spec_tilt_db_per_octave * std::log2(fc / 1000.0);
                 }
+                const auto boost = update_spectrum_auto(state, tilted, n, dt);
+                for (int i = 0; i < n; ++i)
+                    targets[i] = std::clamp((tilted[i] + boost - spec_floor_db) / spec_range_db, 0.0, 1.0);
             }
         }
     }
@@ -3928,8 +3990,10 @@ public:
             SetTimer(wnd, recapture_late_timer_id, recapture_late_delay_ms, nullptr);
         }
         // 換歌：「自動」校準重新快速找位置（保留上一首的平均當起點，同一張專輯不會跳）
-        for (const auto& [wnd, state] : states())
+        for (const auto& [wnd, state] : states()) {
             state->auto_warm = 0;
+            state->spec_auto_warm = 0;
+        }
         ++track_serial;
     }
     void on_playback_starting(play_control::t_track_command command, bool paused) override {}
