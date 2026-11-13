@@ -591,7 +591,7 @@ void set_enabled(bool enabled)
 // 關鍵字（2026-11-11 使用者要可以自己輸入，預設先填好）：分號分隔，比對檔名與歌名。鍵名、預設值要跟 Album list 一致
 inline constexpr char keywords_config_key[] = "nocturne.folderTree.hideInstrumental.keywords";
 inline constexpr char keywords_default[]
-    = "instrumental;inst.;(inst;[inst;inst);inst];off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
+    = "instrumental;inst.;(inst;[inst;inst);inst];inst ver;-inst-;game inst;off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
       "\xAA\xE3\x82\xB1;backing track;without vocal;\xE4\xBC\xB4\xE5\xA5\x8F"; // …;カラオケ;…;伴奏
 
 std::string get_keywords()
