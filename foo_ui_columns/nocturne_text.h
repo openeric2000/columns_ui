@@ -96,7 +96,8 @@ inline constexpr wchar_t thin_autohide_horizontal[] = L"Auto-hide the horizontal
 inline constexpr wchar_t thin_autohide_needs_thin[] = L"Needs thin scroll bars (Interface tab).";
 // 資料夾樹的搜尋框放上面還是下面（2026-11-09）
 inline constexpr wchar_t folder_search_position_label[] = L"Search box position";
-inline constexpr wchar_t folder_search_position_names[2][16] = {L"Top", L"Bottom (default)"};
+// 英文「Bottom (default)」16 個字＋結尾 0 超過 16，陣列放寬到 24（2026-11-13 編公開英文版才發現）
+inline constexpr wchar_t folder_search_position_names[2][24] = {L"Top", L"Bottom (default)"};
 // 播放清單框選方框（2026-11-09）
 inline constexpr wchar_t playlist_marquee[] = L"Playlist: drag to box-select";
 // 暫時隱藏伴奏版（2026-11-11）：只影響「目前選取資料夾」，邏輯在自編 Album list 的 playlist_utils.cpp
