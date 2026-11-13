@@ -7,11 +7,13 @@ namespace cui::playlist_item_helpers {
 // 佇列會短暫變空一下。設定頁在 tab_next_track_toast.cpp，預設開
 extern fbh::ConfigBool keep_queue_on_play;
 
+// 自編版新增（2026-11-12）：同一首可不可以重複加入佇列，預設不行。
+// 管得到的是標頭「加入佇列」按鈕（讀 %cui_queue_allow_duplicates%，見 menu_items.cpp）與播放清單的中鍵「加入佇列」；
+// fb2k 自己的右鍵選單管不到，重複時佇列號碼欄位顯示「1+」
+extern fbh::ConfigBool allow_duplicate_queue;
+
 void play_item_keeping_queue(size_t playlist, size_t item);
 void play_active_item_keeping_queue(size_t item);
-
-// 補回佇列的過程中（包含核心清佇列的通知）為 true，別的元件用來略過這一瞬間的空佇列
-bool is_restoring_queue();
 
 using MiddleClickFunction = void (*)(bool, size_t);
 

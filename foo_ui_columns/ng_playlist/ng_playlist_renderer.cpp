@@ -190,7 +190,21 @@ void PlaylistViewRenderer::render_item(const uih::lv::RendererContext& context, 
         }
     }
     if (is_item_focused) {
-        render_focus_rect(context, should_hide_focus, rc);
+        // 自編版（2026-11-12）：不再畫舊式的點點虛線焦點框。
+        // - 焦點列有選取：選取底色就看得出來，什麼都不畫
+        // - 焦點列沒選取：畫一圈很淡的實線（文字色 22%＋底色 78%），鍵盤上下移動時還找得到在哪
+        // - 高對比模式照原本的畫法（無障礙）
+        if (context.high_contrast_active) {
+            render_focus_rect(context, should_hide_focus, rc);
+        } else if (!is_selected) {
+            const auto mix = [](COLORREF fg, COLORREF bg, int fg_percent) {
+                const auto channel = [&](int f, int b) { return (f * fg_percent + b * (100 - fg_percent)) / 100; };
+                return RGB(channel(GetRValue(fg), GetRValue(bg)), channel(GetGValue(fg), GetGValue(bg)),
+                    channel(GetBValue(fg), GetBValue(bg)));
+            };
+            uih::draw_rect_outline(
+                context.dc, rc, mix(context.colours.m_text, context.colours.m_background, 22), uih::scale_dpi_value(1));
+        }
     }
 }
 

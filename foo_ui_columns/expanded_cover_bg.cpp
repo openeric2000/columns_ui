@@ -61,14 +61,17 @@ constexpr double shade_value = 10.0;
 constexpr double max_dim = 0.95;
 // 壓暗後補彩度：飽和度放大倍數＝1＋這個值×壓暗比例（壓暗 85% 約放大 2.7 倍），放大後的飽和度最高到 max_saturation
 constexpr double saturation_boost = 2.0;
-constexpr double max_saturation = 0.9;
+// 飽和度天花板（2026-11-09 使用者看了紅色封面整片太豔，對照 0.9／0.85／0.8／0.75／0.65 並在 219 實看 0.8 與 0.85 後，先用 0.85 試用）：
+// 補彩度最多補到這裡；封面本來就超過的（鮮紅、鮮藍）也壓回這裡，亮度維持不變。偏灰的封面碰不到，不受影響
+constexpr double max_saturation = 0.85;
 // 實際存成圖檔的大小：小圖放大到這個解析度並抖色（見 generate 裡的說明）。640×320 約 4 倍於面板放大前的像素，PNG 約 100～200 KB
 constexpr int output_width = 640;
 constexpr int output_height = 320;
 // 抖色雜訊的幅度（8 位元色階數）
 constexpr double noise_amplitude = 1.5;
-// 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度；3：放大並抖色，避免暗色漸層的色階斷層；4：抖色幅度 1→1.5）
-constexpr unsigned algorithm_version = 4;
+// 改演算法時加一，舊檔案就不會被拿來用（2：壓暗後補彩度；3：放大並抖色，避免暗色漸層的色階斷層；4：抖色幅度 1→1.5；
+// 5：飽和度天花板 0.8，原本就太豔的也往下壓；6：天花板改 0.85）
+constexpr unsigned algorithm_version = 6;
 // 等背景執行緒的最長時間（ESLyric 在主執行緒要圖，所以這段時間介面是停住的）。逾時就先回空：
 // 實測 ESLyric 只在換歌時才讀這個路徑，所以逾時的那首歌就沒有背景（下一首起恢復），寧可多等一點。
 // 平常下一首已經提前做好，不會真的等；沒預測到（隨機、點別首歌）才會等 60～200 毫秒
@@ -302,10 +305,12 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
 
             const double top = std::max({r, g, b});
             const double bottom = std::min({r, g, b});
-            if (dim > 0.0 && top > 1.0 && top > bottom) {
+            if (top > 1.0 && top > bottom) {
                 const double saturation = (top - bottom) / top;
-                const double wanted = std::min(saturation * saturation_gain, max_saturation);
-                if (wanted > saturation) {
+                // 有壓暗才補彩度；不論有沒有壓暗，超過天花板的都壓回天花板
+                const double boosted = dim > 0.0 ? saturation * saturation_gain : saturation;
+                const double wanted = std::min(boosted, max_saturation);
+                if (wanted != saturation) {
                     const double before = 0.299 * r + 0.587 * g + 0.114 * b;
                     const double scale = wanted / saturation;
                     r = top - (top - r) * scale;
@@ -383,12 +388,24 @@ std::optional<std::string> generate(const metadb_handle_ptr& track, uint32_t cap
         std::error_code ignored;
         std::filesystem::create_directories(folder, ignored);
 
-        // 先存成暫存檔再改名，面板不會讀到寫到一半的圖
-        const auto temp_path = final_path + L".tmp";
-        if (result.Save(temp_path.c_str(), &png, nullptr) != Gdiplus::Ok)
+        // 先存成暫存檔再改名，面板不會讀到寫到一半的圖。
+        // 暫存檔名加上執行緒編號（2026-11-09）：換歌時「預先替下一首做圖」和「目前這首要圖」常常是同一張封面（同專輯），
+        // 兩條執行緒原本寫同一個 .tmp，會互相搶，其中一條失敗回「沒有圖」，那首歌就整首沒有虛化背景
+        wchar_t temp_suffix[32];
+        std::swprintf(temp_suffix, std::size(temp_suffix), L".%lu.tmp", GetCurrentThreadId());
+        const auto temp_path = final_path + temp_suffix;
+        if (result.Save(temp_path.c_str(), &png, nullptr) != Gdiplus::Ok) {
+            DeleteFileW(temp_path.c_str());
+            // 存不了，但別條執行緒可能已經把同一張做好了
+            if (std::filesystem::exists(final_path, ignored))
+                return to_utf8(final_path);
             return std::nullopt;
+        }
         if (!MoveFileExW(temp_path.c_str(), final_path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
             DeleteFileW(temp_path.c_str());
+            // 換不過去（例如面板正開著同名的圖）時，只要同一張已經在了就算成功：檔名是封面內容的雜湊，內容一樣
+            if (std::filesystem::exists(final_path, ignored))
+                return to_utf8(final_path);
             return std::nullopt;
         }
 
@@ -440,8 +457,18 @@ Entry acquire(const metadb_handle_ptr& track, uint32_t cap, bool& cache_hit)
         Entry created{promise->get_future().share(), std::make_shared<std::atomic<bool>>(false)};
         found = g_entries.emplace(key, created).first;
 
-        std::thread([promise, late = created.late, track, cap] {
-            promise->set_value(generate(track, cap));
+        std::thread([promise, late = created.late, track, cap, key] {
+            const auto result = generate(track, cap);
+            promise->set_value(result);
+            // 失敗不記住（2026-11-09）：拿掉這筆，下次要圖時重做。原本失敗結果會一直留在記憶體，
+            // 一次偶發失敗（例如兩條執行緒搶同一個暫存檔）就讓這首歌整個開啟期間都沒有背景。
+            // 只拿掉自己這筆（late 指標相同），中間被清空重建過的新紀錄不動
+            if (!result) {
+                std::scoped_lock lock(g_mutex);
+                const auto it = g_entries.find(key);
+                if (it != g_entries.end() && it->second.late == late)
+                    g_entries.erase(it);
+            }
             if (late->load())
                 settings_changed();
         }).detach();

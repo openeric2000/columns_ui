@@ -13,6 +13,7 @@
 #include "../playlist_item_helpers.h"
 #include "../playlist_view_tfhooks.h"
 #include "../button_items.h"
+#include "../playlist_marquee.h"
 
 namespace cui::artwork_panel {
 // extern cfg_string cfg_front;
@@ -1077,6 +1078,9 @@ void PlaylistView::sort_by_column_fb2k_v2_26(size_t column_index, bool is_descen
 void PlaylistView::notify_on_initialisation()
 {
     set_use_dark_mode(colours::is_dark_mode_active());
+    // 框選方框（自編版新增）：只有播放清單打開，篩選面板、播放清單切換器等其他清單維持原本的拖曳選取
+    playlist_marquee::sync_to_list_views();
+    set_marquee_selection_allowed(true);
     set_are_group_headers_sticky(cfg_sticky_group_headers);
     set_group_level_indentation_enabled(cfg_indent_groups);
 

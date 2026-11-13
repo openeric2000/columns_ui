@@ -4,6 +4,8 @@
 #include "now_playing_progress.h"
 #include "output_chip.h"
 #include "volume_chip.h"
+#include "now_playing_cover_zoom.h"
+#include "now_playing_vu_meter.h"
 
 namespace cui::panels::splitter {
 
@@ -377,8 +379,14 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_output_chip_wnd = output_chip::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_volume_chip_wnd)
         m_volume_chip_wnd = volume_chip::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_cover_zoom_wnd)
+        m_cover_zoom_wnd = cover_zoom::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_lyrics_lock_wnd)
+        m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_vu_meter_wnd)
+        m_vu_meter_wnd = vu_meter::create(get_wnd());
 
-    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 3);
+    HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 5);
     if (dwp) {
         unsigned size_cumulative = 0;
         for (size_t n = 0; n < count; n++) {
@@ -412,6 +420,12 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = output_chip::defer_layout(dwp, m_output_chip_wnd, now_playing_bar_rect);
         if (m_volume_chip_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = volume_chip::defer_layout(dwp, m_volume_chip_wnd, now_playing_bar_rect);
+        if (m_cover_zoom_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = cover_zoom::defer_layout(dwp, m_cover_zoom_wnd, now_playing_bar_rect);
+        if (m_lyrics_lock_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = lyrics_lock::defer_layout(dwp, m_lyrics_lock_wnd, now_playing_bar_rect);
+        if (m_vu_meter_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = vu_meter::defer_layout(dwp, m_vu_meter_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -443,6 +457,18 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_volume_chip_wnd = volume_chip::create(get_wnd());
         if (m_volume_chip_wnd)
             volume_chip::layout(m_volume_chip_wnd, now_playing_bar_rect);
+        if (!m_cover_zoom_wnd)
+            m_cover_zoom_wnd = cover_zoom::create(get_wnd());
+        if (m_cover_zoom_wnd)
+            cover_zoom::layout(m_cover_zoom_wnd, now_playing_bar_rect);
+        if (!m_lyrics_lock_wnd)
+            m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
+        if (m_lyrics_lock_wnd)
+            lyrics_lock::layout(m_lyrics_lock_wnd, now_playing_bar_rect);
+        if (!m_vu_meter_wnd)
+            m_vu_meter_wnd = vu_meter::create(get_wnd());
+        if (m_vu_meter_wnd)
+            vu_meter::layout(m_vu_meter_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
@@ -450,16 +476,58 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_output_chip_wnd, nullptr));
         if (m_volume_chip_wnd)
             DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
+        if (m_cover_zoom_wnd)
+            DestroyWindow(std::exchange(m_cover_zoom_wnd, nullptr));
+        if (m_lyrics_lock_wnd)
+            DestroyWindow(std::exchange(m_lyrics_lock_wnd, nullptr));
+        if (m_vu_meter_wnd)
+            DestroyWindow(std::exchange(m_vu_meter_wnd, nullptr));
     }
 
-    // 展開頁樣式 2（靠左＋VU 表）已在 2026-11-07 拿掉。舊的版面裡可能還留著自訂標題「展開頁右側」的面板（VU 表），
-    // 不能讓它變成一般面板擠進版面，所以一律藏起來；版面設定檔有檔頭雜湊不能手改，要移掉它得從 Columns UI 的版面設定畫面刪
-    if (now_playing_side && now_playing_side->m_wnd) {
-        SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
-            SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
+    layout_now_playing_side();
 
     RedrawWindow(get_wnd(), nullptr, nullptr, RDW_UPDATENOW);
+}
+
+void FlatSplitterPanel::layout_now_playing_side()
+{
+    // 自訂標題「展開頁右側」的面板（VU 表）不能變成一般面板擠進版面：平常一律藏起來（版面設定檔有檔頭雜湊不能手改，
+    // 要移掉它得從 Columns UI 的版面設定畫面刪）。2026-11-11 起展開頁切到「VU 表」模式時疊到歌詞欄的位置
+    // （位置照 main.xml 標記的歌詞欄算，見 cover_zoom::vu_rect_in_stage）；展開動畫、截圖還在時先不顯示，等展開頁整塊出來
+    const auto now_playing_side = get_now_playing_side_panel();
+    if (!now_playing_side || !now_playing_side->m_wnd)
+        return;
+
+    // 2026-11-11 起 VU 表改由 Columns UI 自己畫（now_playing_vu_meter，玻璃錶框、透出虛化背景），外掛 VU 面板一律藏起來
+    SetWindowPos(now_playing_side->m_wnd, nullptr, 0, 0, 0, 0,
+        SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+bool FlatSplitterPanel::s_has_now_playing_side()
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto side = g_instances[index]->get_now_playing_side_panel();
+        if (side && side->m_wnd)
+            return true;
+    }
+    return false;
+}
+
+void FlatSplitterPanel::s_refresh_now_playing()
+{
+    for (size_t index = 0; index < g_instances.get_count(); index++) {
+        const auto splitter = g_instances[index];
+        if (!splitter->get_now_playing_bar_panel())
+            continue;
+
+        splitter->layout_now_playing_side();
+        if (splitter->m_cover_zoom_wnd)
+            cover_zoom::layout(splitter->m_cover_zoom_wnd, splitter->m_now_playing_bar_rect);
+        if (splitter->m_lyrics_lock_wnd)
+            lyrics_lock::layout(splitter->m_lyrics_lock_wnd, splitter->m_now_playing_bar_rect);
+        if (splitter->m_vu_meter_wnd)
+            vu_meter::layout(splitter->m_vu_meter_wnd, splitter->m_now_playing_bar_rect);
+    }
 }
 
 void FlatSplitterPanel::on_size_changed()
@@ -1438,6 +1506,7 @@ void FlatSplitterPanel::start_now_playing_animation()
 
     if (!now_playing_bar || !now_playing_bar->m_wnd) {
         on_size_changed();
+        on_now_playing_animation_finished();
         return;
     }
 
@@ -1677,6 +1746,26 @@ void FlatSplitterPanel::finish_now_playing_slide()
     }
 
     DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+
+    // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
+    if (m_cover_zoom_wnd)
+        cover_zoom::layout(m_cover_zoom_wnd, m_now_playing_bar_rect);
+    // VU 表模式的面板、歌詞防誤拖蓋層也是這時才出現
+    layout_now_playing_side();
+    if (m_lyrics_lock_wnd)
+        lyrics_lock::layout(m_lyrics_lock_wnd, m_now_playing_bar_rect);
+    if (m_vu_meter_wnd)
+        vu_meter::layout(m_vu_meter_wnd, m_now_playing_bar_rect);
+
+    on_now_playing_animation_finished();
+}
+
+void FlatSplitterPanel::on_now_playing_animation_finished()
+{
+    // 收合完成（展開頁已經看不到）：資訊卡切回封面，下次打開一定是封面（2026-11-09 使用者要求）。
+    // 不在打開的那一刻才切：展開動畫一開始就截圖，那時 ESLyric 還沒畫好封面，會先看到資訊卡再跳成封面
+    if (!m_now_playing_expanded)
+        main_menu::reset_now_playing_style_to_cover();
 }
 
 void FlatSplitterPanel::on_now_playing_animation_frame()
@@ -1713,6 +1802,7 @@ void FlatSplitterPanel::on_now_playing_animation_frame()
         // 最終區域
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_UPDATENOW | RDW_ALLCHILDREN);
+        on_now_playing_animation_finished();
     } else {
         RECT client_rect{};
         GetClientRect(m_wnd, &client_rect);
@@ -1839,7 +1929,39 @@ wil::unique_hbitmap FlatSplitterPanel::s_capture_now_playing_stage(RECT& screen_
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
+    // 展開頁左上角按鈕（main.xml 的 mode-button：離左上 12、56×56 DIP）上的右鍵：跳出版面縮圖卡，不出 ESLyric 的右鍵選單
+    // （2026-11-12）。只在展開完成時算數；收合時那顆按鈕被裁掉，右鍵照舊交給 ESLyric
+    const auto on_mode_button = [](POINT client) {
+        RECT stage{};
+        HWND owner{};
+        if (!s_get_now_playing_stage(stage, owner))
+            return false;
+        const auto lo = uih::scale_dpi_value(12);
+        const auto hi = uih::scale_dpi_value(12 + 56);
+        return client.x >= lo && client.x < hi && client.y >= lo && client.y < hi;
+    };
+
     switch (msg) {
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
+        if (on_mode_button({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)}))
+            return 0;
+        break;
+    case WM_RBUTTONUP:
+        // 卡片開著時再按右鍵：按下那一下已經被卡片的滑鼠攔截關掉，show 這邊會因為「剛關掉」不再開，等於開關切換
+        if (on_mode_button({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)})) {
+            main_menu::show_now_playing_mode_picker();
+            return 0;
+        }
+        break;
+    case WM_CONTEXTMENU:
+        if (lp != -1) {
+            POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ScreenToClient(wnd, &point);
+            if (on_mode_button(point))
+                return 0;
+        }
+        break;
     case WM_LBUTTONDBLCLK:
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它，改當成一般的按下。
         // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，

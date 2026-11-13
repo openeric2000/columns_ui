@@ -674,9 +674,6 @@
     <ClCompile Include="next_track_toast.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
-    <ClCompile Include="stopped_page.cpp">
-      <Filter>Utilities</Filter>
-    </ClCompile>
     <ClCompile Include="now_playing_progress.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -684,6 +681,21 @@
       <Filter>Utilities</Filter>
     </ClCompile>
     <ClCompile Include="volume_chip.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="now_playing_cover_zoom.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="now_playing_vu_meter.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="now_playing_mode_picker.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="popup_dismiss.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="now_playing_style_transition.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
     <ClCompile Include="nocturne_default_stub.cpp">
@@ -1071,6 +1083,30 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="volume_chip.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_cover_zoom.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_vu_meter.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_mode_picker.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="popup_dismiss.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="nocturne_surface.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClCompile Include="nocturne_tooltip.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClInclude Include="nocturne_tooltip.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_style_transition.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_default_stub.h">

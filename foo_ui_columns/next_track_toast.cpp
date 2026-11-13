@@ -7,9 +7,9 @@
 #include "next_track_toast.h"
 #include "font_utils.h"
 #include "menu_items.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "nocturne_timing.h"
-#include "playlist_item_helpers.h"
 #include "splitter.h"
 
 #pragma comment(lib, "shlwapi.lib")
@@ -27,10 +27,22 @@ fbh::ConfigBool show_source_tag(
     GUID{0x9d03b6e8, 0x7f2a, 0x4c55, {0xa4, 0x19, 0x68, 0xe0, 0x2d, 0xb7, 0x53, 0xfc}}, true);
 fbh::ConfigUint32 position(
     GUID{0x5d2f8c17, 0x4a63, 0x4e9b, {0xb0, 0xd1, 0x86, 0xc3, 0xe7, 0xa2, 0xf5, 0x94}}, position_bottom_right);
-fbh::ConfigUint32 size_index(
-    GUID{0x6f1c2f68, 0x295e, 0x48fd, {0xa6, 0x40, 0x95, 0xd5, 0x21, 0x33, 0x33, 0x70}}, size_default);
+// （原本的 size_index 設定 2026-11-12 拿掉，改成 auto_size_percent；GUID 6f1c2f68-295e-48fd-a640-95d521333370 不要再拿來用）
 
 namespace {
+
+// 卡片大小（百分比）跟著展開頁高度（DIP）走：高 880 DIP（169 的展開頁）是 100%，
+// 夾在原本設定頁最小與最大的 85%～140% 之間，取到 5% 一格，拖視窗邊緣時才不會每一格都重建卡片
+constexpr double auto_size_reference_dip = 880;
+constexpr int auto_size_min_percent = 85;
+constexpr int auto_size_max_percent = 140;
+
+int auto_size_percent(double stage_height_dip)
+{
+    const auto raw = stage_height_dip / auto_size_reference_dip * 100.0;
+    const auto stepped = static_cast<int>(std::lround(raw / 5.0)) * 5;
+    return std::clamp(stepped, auto_size_min_percent, auto_size_max_percent);
+}
 
 using panels::splitter::FlatSplitterPanel;
 using Clock = std::chrono::steady_clock;
@@ -73,7 +85,7 @@ struct Layout {
         pad_left = px(21);
         pad_right = px(24);
         gap = px(16);
-        radius = px(16);
+        radius = px(nocturne_surface::card_radius_dip); // 統一圓角（原本 16）
         ring = px(46);
         cover = px(67);
         cover_radius = px(8);
@@ -205,7 +217,6 @@ std::wstring format_track_text(const metadb_handle_ptr& handle, const char* scri
 
 // 提示畫面上要顯示的文字與開關（內容變了才重畫靜態的那一層）
 struct Content {
-    bool stopped{};
     bool show_number{};
     bool show_cover{};
     bool show_tag{};
@@ -342,11 +353,12 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
     const auto width = static_cast<float>(layout.width);
     const auto height = static_cast<float>(layout.height);
 
+    // 底色、細邊跟其他浮動元件統一（nocturne_surface.h），不透明度維持 card_alpha（半透明，透出展開頁背景色）
     Gdiplus::GraphicsPath card;
     add_round_rect(card, Gdiplus::RectF(0.5f, 0.5f, width - 1, height - 1), static_cast<float>(layout.radius));
-    Gdiplus::SolidBrush background(rgba(card_alpha, 30, 31, 33));
+    Gdiplus::SolidBrush background(nocturne_surface::fill_colour(card_alpha));
     g.FillPath(&background, &card);
-    Gdiplus::Pen border(rgba(26, 255, 255, 255), 1.f);
+    Gdiplus::Pen border(nocturne_surface::edge_colour(), 1.f);
     g.DrawPath(&border, &card);
 
     auto x = static_cast<float>(layout.pad_left + layout.ring + layout.gap);
@@ -453,8 +465,9 @@ void draw_static_layer(Gdiplus::Bitmap& bitmap, const Layout& layout, const Cont
         &line_format, &muted);
 }
 
-// 動態那一層：倒數圈（每格重畫）
-void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, double ratio, int number)
+// 動態那一層：倒數圈（每格重畫）。skip_glyph＝滑鼠停在卡片上：圈裡的數字換成「⏭」，告訴人點下去是跳到下一首（2026-11-12）
+void draw_ring(
+    Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& content, double ratio, int number, bool skip_glyph)
 {
     Gdiplus::Graphics g(&bitmap);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -468,16 +481,6 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
     Gdiplus::Pen track(rgba(255, 61, 61, 61), layout.stroke);
     g.DrawEllipse(&track, rect);
 
-    if (content.stopped) {
-        // 已停止：圈裡放一個播放符號，不倒數
-        const auto t = layout.ring * 0.36f;
-        const Gdiplus::PointF points[3]{{center_x - t * 0.32f, center_y - t * 0.5f},
-            {center_x - t * 0.32f, center_y + t * 0.5f}, {center_x + t * 0.58f, center_y}};
-        const Gdiplus::SolidBrush glyph(rgba(255, 241, 241, 241));
-        g.FillPolygon(&glyph, points, 3);
-        return;
-    }
-
     // 從 12 點鐘方向順時針畫剩餘的弧，剩餘變少時弧的末端往逆時針退
     Gdiplus::Pen arc(rgba(255, 229, 38, 43), layout.stroke); // 主題紅 #e5262b
     arc.SetStartCap(Gdiplus::LineCapRound);
@@ -487,6 +490,23 @@ void draw_ring(Gdiplus::Bitmap& bitmap, const Layout& layout, const Content& con
         g.DrawEllipse(&arc, rect);
     else if (ratio > 0.0005)
         g.DrawArc(&arc, rect, -90.f, static_cast<float>(360.0 * ratio));
+
+    if (skip_glyph) {
+        // ⏭：兩個三角形＋一條直線，整組置中，大小跟著圈走（圈內沒開秒數也照樣畫）
+        const auto h = layout.ring * 0.30f;
+        const auto w = h * 0.62f;
+        const auto gap = h * 0.04f;
+        const auto bar = std::max(1.5f, h * 0.14f);
+        const auto x0 = center_x - (w * 2 + gap + bar) / 2.f;
+        const Gdiplus::SolidBrush glyph(rgba(255, 241, 241, 241));
+        const Gdiplus::PointF first[3]{{x0, center_y - h / 2}, {x0, center_y + h / 2}, {x0 + w, center_y}};
+        const Gdiplus::PointF second[3]{
+            {x0 + w, center_y - h / 2}, {x0 + w, center_y + h / 2}, {x0 + w * 2, center_y}};
+        g.FillPolygon(&glyph, first, 3);
+        g.FillPolygon(&glyph, second, 3);
+        g.FillRectangle(&glyph, Gdiplus::RectF(x0 + w * 2 + gap, center_y - h / 2, bar, h));
+        return;
+    }
 
     if (content.show_number) {
         const auto family = create_font_family();
@@ -574,7 +594,7 @@ private:
     std::unique_ptr<Gdiplus::Bitmap> m_static;
 };
 
-// 卡片可以點（2026-11-07）：點下去等於按「下一首」（已停止的「接下來」卡片則是開始播放）。
+// 卡片可以點（2026-11-07）：點下去等於按「下一首」。
 // 實作在 Controller 之後（要讀它的狀態）；視窗訊息這邊只轉過去
 bool toast_hit_test(LPARAM screen_point);
 void toast_set_hover(HWND wnd, bool inside);
@@ -673,12 +693,9 @@ public:
     void activate();
 
 private:
-    enum class Mode { countdown, stopped };
-
     struct Want {
         RECT stage{};
         HWND owner{};
-        Mode mode{Mode::countdown};
         double remaining{};
         double ratio{};
         // 歌曲最後 fade_out_seconds 秒：提示邊淡出邊把倒數圈與數字走到 0（2026-11-05），不再凍結在「1」
@@ -774,24 +791,25 @@ void Controller::set_hover(HWND wnd, bool inside)
         TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
         TrackMouseEvent(&track);
     }
+    // 「下一首」與「點一下立即播放」在靜態那一層，進出卡片時要重畫
+    if (m_hover != inside)
+        m_static_dirty = true;
     m_hover = inside;
 }
 
-// 點卡片：播放中＝跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）；已停止＝開始播放
+// 點卡片：跳到下一首（走核心的「下一首」，跟按鈕、快速鍵一樣會照佇列與播放順序）
 void Controller::activate()
 {
     if (!m_content_valid)
         return;
 
-    const auto stopped = m_content.stopped;
-
     // 不在自己的視窗訊息裡直接換歌：換歌會馬上收掉這個視窗（on_new_track），改排到下一輪主執行緒訊息再做
-    fb2k::inMainThread([stopped] {
+    fb2k::inMainThread([] {
         if (!g_alive)
             return;
 
         try {
-            play_control::get()->start(stopped ? play_control::track_command_play : play_control::track_command_next);
+            play_control::get()->start(play_control::track_command_next);
         }
         CATCH_LOG()
     });
@@ -939,7 +957,13 @@ std::optional<Controller::Want> Controller::evaluate()
     const auto count = static_cast<int>(std::clamp(seconds.get(), min_seconds, max_seconds));
     metadb_handle_ptr now_playing;
 
-    if (playback->is_playing()) {
+    // 停止中不顯示（2026-11-12 起停止一律收起展開頁，不再有「已停止 · 接下來」）
+    if (!playback->is_playing()) {
+        m_smoother.reset();
+        return {};
+    }
+
+    {
         if (!playback->get_now_playing(now_playing)) {
             m_smoother.reset();
             return {};
@@ -969,17 +993,9 @@ std::optional<Controller::Want> Controller::evaluate()
         if (remaining > count)
             return {};
 
-        want.mode = Mode::countdown;
         want.fading = remaining <= fade_out_seconds;
         want.remaining = std::max(remaining, 0.0);
         want.ratio = want.remaining / count;
-    } else {
-        m_smoother.reset();
-
-        if (playlist_manager::get()->queue_get_count() == 0)
-            return {};
-
-        want.mode = Mode::stopped;
     }
 
     update_next(now_playing);
@@ -1092,8 +1108,7 @@ void Controller::on_cover_loaded(uint64_t generation, std::shared_ptr<Gdiplus::B
 
 void Controller::rebuild_content(const Want& want, const Layout& layout)
 {
-    const auto stopped = want.mode == Mode::stopped;
-    const uint32_t key = (stopped ? 1u : 0u) | (show_seconds_in_ring.get() ? 2u : 0u) | (show_cover.get() ? 4u : 0u)
+    const uint32_t key = (show_seconds_in_ring.get() ? 2u : 0u) | (show_cover.get() ? 4u : 0u)
         | (show_source_tag.get() ? 8u : 0u) | (want.next.from_queue ? 16u : 0u);
 
     const auto unchanged = m_content_valid && m_content_key == key && m_content_track == want.next.handle
@@ -1107,11 +1122,9 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
         const auto cover_wanted = show_cover.get();
         const auto cover_toggled_on = cover_wanted && (m_content_key & 4u) == 0;
 
-        m_content.stopped = stopped;
         m_content.show_number = show_seconds_in_ring.get();
         m_content.show_cover = cover_wanted;
         m_content.show_tag = show_source_tag.get();
-        m_content.caption = stopped ? nocturne_text::next_caption_stopped : nocturne_text::next_caption;
         m_content.tag = want.next.from_queue ? nocturne_text::next_source_queue : nocturne_text::next_source_list;
         m_content.title = format_track_text(want.next.handle, "$if2(%title%,%filename%)");
         m_content.artist = format_track_text(want.next.handle, "[%artist%]");
@@ -1127,6 +1140,8 @@ void Controller::rebuild_content(const Want& want, const Layout& layout)
         m_content_valid = true;
     }
 
+    // 滑鼠停在卡片上時「下一首」換成「點一下立即播放」（2026-11-12 使用者選的 C：配合圈裡的 ⏭）
+    m_content.caption = m_hover ? nocturne_text::next_caption_hover : nocturne_text::next_caption;
     m_static_dirty = false;
     draw_static_layer(m_surface.static_layer(), layout, m_content, m_cover.get());
 }
@@ -1136,7 +1151,7 @@ void Controller::render_and_present(const Want& want, const Layout& layout, doub
     const auto eased = ease(m_alpha);
     m_surface.copy_static_to_canvas();
     // 數字四捨五入：每個數字各顯示 1 秒，「0」出現在最後半秒（剛好是淡出那段）。原本進位，剩不到 1 秒都顯示「1」，看不到 0
-    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)));
+    draw_ring(m_surface.canvas(), layout, m_content, want.ratio, static_cast<int>(std::lround(want.remaining)), m_hover);
 
     m_corner_radius = layout.radius;
     if (m_hover) {
@@ -1210,9 +1225,10 @@ void Controller::tick()
     // 淡出時沿用最後一次的內容與位置；歌曲最後半秒（fading）的圈與數字用這一格算出的新值
     const auto& shown = want ? *want : *m_last_want;
     const auto dpi = std::max<UINT>(GetDpiForWindow(shown.owner), USER_DEFAULT_SCREEN_DPI);
-    // 使用者在設定頁選的大小（小／標準／大／特大）乘上螢幕縮放，整張卡片一起照比例變
-    const auto user_percent = size_percents[std::min(size_index.get(), size_count - 1)];
-    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * user_percent / 100.0;
+    // 卡片大小跟著展開頁的高度自動決定（2026-11-12 拿掉設定頁的「大小」）：乘上螢幕縮放，整張卡片一起照比例變
+    const auto stage_height_dip
+        = static_cast<double>(wil::rect_height(shown.stage)) * USER_DEFAULT_SCREEN_DPI / static_cast<double>(dpi);
+    const auto scale = static_cast<double>(dpi) / USER_DEFAULT_SCREEN_DPI * auto_size_percent(stage_height_dip) / 100.0;
     const Layout layout(scale);
 
     // 第一次出現的這一格要建視窗、畫圖，會花一段時間；這一格先停在全透明，時間從下一格才開始算，
@@ -1265,20 +1281,10 @@ public:
 
 initquit_factory_t<NextTrackToastInitQuit> next_track_toast_initquit;
 
-// 佇列有變動：馬上重算下一首。停止中使用者把佇列清空，展開頁就沒有東西可以顯示，自動收合（跟「停止就收」一致）
-// 只看使用者移除的那一種：播放推進時佇列變空，不能收（那時下一首正要開始播）
-// 雙擊播放別首歌時，核心會先清佇列、再由 playlist_item_helpers 補回（2026-11-03），那一瞬間的空佇列不算使用者清空
+// 佇列有變動：馬上重算下一首
 class QueueChangeCallback : public playback_queue_callback {
 public:
-    void on_changed(t_change_origin origin) override
-    {
-        controller().invalidate_next();
-
-        if (origin == changed_user_removed && !play_control::get()->is_playing()
-            && playlist_manager::get()->queue_get_count() == 0 && FlatSplitterPanel::s_is_now_playing_expanded()
-            && !playlist_item_helpers::is_restoring_queue())
-            FlatSplitterPanel::s_toggle_now_playing();
-    }
+    void on_changed(t_change_origin origin) override { controller().invalidate_next(); }
 };
 
 service_factory_single_t<QueueChangeCallback> queue_change_callback;

@@ -3,6 +3,7 @@
 #include "config.h"
 #include "next_track_toast.h"
 #include "nocturne_text.h"
+#include "nocturne_tooltip.h"
 #include "dark_mode_dialog.h"
 #include "main_window.h"
 #include "now_playing_progress.h"
@@ -11,7 +12,16 @@
 #include "playlist_item_helpers.h"
 #include "theme_font.h"
 #include "thin_scrollbar.h"
+#include "playlist_marquee.h"
 #include "expanded_cover_bg.h"
+#include "menu_items.h"
+#include "now_playing_cover_zoom.h"
+
+// 建置資訊（版本種類、日期）：build_columns_ui.ps1 每次建置時產生，不進版控。
+// 沒有這個檔（例如直接從原始碼編）時，「關於」只顯示版本號，跟公開版一樣
+#if __has_include("nocturne_build_info.h")
+#include "nocturne_build_info.h"
+#endif
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
@@ -19,8 +29,9 @@
 // - 下一首與佇列：展開頁角落的下一首提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）＋播放別首歌時保留播放佇列
 //   （佇列 11/02 起放在這一頁底下，11/05 併進「播放」，11/06 獨立成分頁，11/08 使用者說一個選項一個分頁太浪費，又併回這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
-// - 介面：細捲軸開關（11/08）、封面虛化背景與亮度上限（11/08）、主視窗等網頁面板載好再顯示（開機優化 B，11/06）。
-//   這三個原本各自一個分頁、各只有一個設定，11/08 使用者要求合併成一頁（小標題分開）
+// - 介面：細捲軸開關（11/08）、主視窗等網頁面板載好再顯示（開機優化 B，11/06）。
+//   原本各自一個分頁、各只有一個設定，11/08 使用者要求合併成一頁（小標題分開）
+// - 展開頁（2026-11-11 新增，第六個分頁）：封面虛化背景與亮度上限（從介面搬過來）、左上角按鈕的動作、歌詞防誤拖
 // - 關於：只放產品名稱與版本號（2026-11-06）
 // 設定都是改了立刻生效，沒有套用鈕；對話框的文字依語言在 WM_INITDIALOG 填入（.rc 裡只放版面）
 // 設定視窗下方的「Reset page」會把播放、下一首與佇列、介面三個分頁還原成預設（字型分頁不動）
@@ -71,6 +82,15 @@ protected:
     virtual void on_init_dialog(HWND wnd) = 0;
     virtual void on_command(HWND wnd, WPARAM wp) = 0;
 
+public:
+    // 「Reset page」：只還原這一頁的設定（2026-11-12 起；原本不管停在哪一頁都會把七頁全部還原）。
+    // 還原後設定視窗會把目前分頁重建一次，畫面跟著更新
+    virtual void reset_to_defaults() = 0;
+
+protected:
+    // 自繪控制項（SS_OWNERDRAW）；畫了就傳回 true
+    virtual bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) { return false; }
+
     // 填值時控制項會送出變更通知，先擋掉，免得把還沒填完的值寫回設定
     bool m_initialising{};
 
@@ -87,6 +107,8 @@ private:
             if (!m_initialising)
                 on_command(wnd, wp);
             break;
+        case WM_DRAWITEM:
+            return on_draw_item(wnd, *reinterpret_cast<const DRAWITEMSTRUCT*>(lp)) ? TRUE : FALSE;
         }
         return 0;
     }
@@ -103,6 +125,19 @@ public:
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_PLAYBACK; }
+
+public:
+    void reset_to_defaults() override
+    {
+        now_playing_progress::wheel_seek_enabled.reset();
+        now_playing_progress::wheel_step_seconds.reset();
+        now_playing_progress::wheel_shift_step_seconds.reset();
+        output_chip::enabled.reset();
+        output_chip::click_to_switch.reset();
+        volume_chip::enabled.reset();
+    }
+
+private:
 
     void on_init_dialog(HWND wnd) override
     {
@@ -176,20 +211,47 @@ private:
 
     UINT dialog_id() const override { return IDD_PREFS_NEXT_TRACK_TOAST; }
 
+public:
+    void reset_to_defaults() override
+    {
+        next_track_toast::enabled.reset();
+        next_track_toast::seconds.reset();
+        next_track_toast::show_seconds_in_ring.reset();
+        next_track_toast::show_cover.reset();
+        next_track_toast::show_source_tag.reset();
+        next_track_toast::position.reset();
+        playlist_item_helpers::keep_queue_on_play.reset();
+        playlist_item_helpers::allow_duplicate_queue.reset();
+    }
+
+private:
+    // 沒勾「顯示下一首」時，底下的秒數、卡片內容、位置都反灰（2026-11-12 整理；大小改成自動，不在設定頁）
+    static void update_dependents(HWND wnd)
+    {
+        const auto enabled = IsDlgButtonChecked(wnd, IDC_NEXT_TOAST_ENABLED) == BST_CHECKED;
+        for (const auto id : {IDC_NEXT_TOAST_SECONDS_LABEL, IDC_NEXT_TOAST_SECONDS, IDC_NEXT_TOAST_SECONDS_SPIN,
+                 IDC_NEXT_TOAST_CONTENT_LABEL, IDC_NEXT_TOAST_SHOW_SECONDS, IDC_NEXT_TOAST_SHOW_COVER,
+                 IDC_NEXT_TOAST_SHOW_TAG, IDC_NEXT_TOAST_POSITION_LABEL, IDC_NEXT_TOAST_POSITION})
+            EnableWindow(GetDlgItem(wnd, id), enabled);
+    }
+
     void on_init_dialog(HWND wnd) override
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::next_toast_title);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_ENABLED, nocturne_text::next_toast_enabled);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SECONDS_LABEL, nocturne_text::next_toast_seconds_label);
+        SetDlgItemText(wnd, IDC_NEXT_TOAST_CONTENT_LABEL, nocturne_text::next_toast_content_label);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, nocturne_text::next_toast_show_seconds);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_COVER, nocturne_text::next_toast_show_cover);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_SHOW_TAG, nocturne_text::next_toast_show_tag);
         SetDlgItemText(wnd, IDC_NEXT_TOAST_POSITION_LABEL, nocturne_text::next_toast_position_label);
-        SetDlgItemText(wnd, IDC_NEXT_TOAST_SIZE_LABEL, nocturne_text::next_toast_size_label);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::keep_queue_title);
         SetDlgItemText(wnd, IDC_KEEP_QUEUE_ON_PLAY, nocturne_text::keep_queue_on_play);
+        SetDlgItemText(wnd, IDC_QUEUE_ALLOW_DUPLICATES, nocturne_text::queue_allow_duplicates);
 
         CheckDlgButton(wnd, IDC_KEEP_QUEUE_ON_PLAY, check_state(playlist_item_helpers::keep_queue_on_play.get()));
+        CheckDlgButton(
+            wnd, IDC_QUEUE_ALLOW_DUPLICATES, check_state(playlist_item_helpers::allow_duplicate_queue.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_ENABLED, check_state(next_track_toast::enabled.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_SECONDS, check_state(next_track_toast::show_seconds_in_ring.get()));
         CheckDlgButton(wnd, IDC_NEXT_TOAST_SHOW_COVER, check_state(next_track_toast::show_cover.get()));
@@ -205,11 +267,7 @@ private:
         ComboBox_SetCurSel(position_combo,
             gsl::narrow<int>(std::min(next_track_toast::position.get(), next_track_toast::position_count - 1)));
 
-        const auto size_combo = GetDlgItem(wnd, IDC_NEXT_TOAST_SIZE);
-        for (const auto& name : nocturne_text::next_toast_size_names)
-            ComboBox_AddString(size_combo, name);
-        ComboBox_SetCurSel(size_combo,
-            gsl::narrow<int>(std::min(next_track_toast::size_index.get(), next_track_toast::size_count - 1)));
+        update_dependents(wnd);
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -223,9 +281,15 @@ private:
             if (code == BN_CLICKED)
                 playlist_item_helpers::keep_queue_on_play = is_checked();
             break;
-        case IDC_NEXT_TOAST_ENABLED:
+        case IDC_QUEUE_ALLOW_DUPLICATES:
             if (code == BN_CLICKED)
+                playlist_item_helpers::allow_duplicate_queue = is_checked();
+            break;
+        case IDC_NEXT_TOAST_ENABLED:
+            if (code == BN_CLICKED) {
                 next_track_toast::enabled = is_checked();
+                update_dependents(wnd);
+            }
             break;
         case IDC_NEXT_TOAST_SHOW_SECONDS:
             if (code == BN_CLICKED)
@@ -262,13 +326,6 @@ private:
                     next_track_toast::position = gsl::narrow<uint32_t>(selection);
             }
             break;
-        case IDC_NEXT_TOAST_SIZE:
-            if (code == CBN_SELCHANGE) {
-                const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
-                if (selection != CB_ERR)
-                    next_track_toast::size_index = gsl::narrow<uint32_t>(selection);
-            }
-            break;
         }
     }
 };
@@ -297,6 +354,35 @@ private:
     }
 
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FONT; }
+
+public:
+    // 字型分頁的「Reset page」：字型不動，能調大小的區塊（清單、分頁、資料夾樹、其餘介面文字）大小改回「標準」。
+    // 換字型要寫主題檔、重開 foobar2000，不適合一個按鈕就洗掉使用者選的字型
+    void reset_to_defaults() override
+    {
+        for (size_t region{}; region < theme_font::font_region_count(); ++region) {
+            if (!theme_font::font_region_has_size(region))
+                continue;
+            if (const auto family = theme_font::current_family_index(region))
+                theme_font::apply_font(region, *family, theme_font::default_size_option());
+        }
+    }
+
+private:
+
+    // 「全部區塊」下面的分隔線（2026-11-12 使用者要求）：在控制項中間畫一條 1 像素的線，用工具列分隔線的顏色（深色時灰 88；分頁框線色跟底色一樣看不到）
+    bool on_draw_item(HWND wnd, const DRAWITEMSTRUCT& item) override
+    {
+        if (item.CtlID != IDC_FONT_ROW_DIVIDER)
+            return false;
+        const auto& rect = item.rcItem;
+        const auto colour = dark::get_colour(dark::ColourID::ToolbarDivider, colours::is_dark_mode_active());
+        const wil::unique_hbrush brush(CreateSolidBrush(colour));
+        const auto mid = (rect.top + rect.bottom) / 2;
+        const RECT line{rect.left, mid, rect.right, mid + 1};
+        FillRect(item.hDC, &line, brush.get());
+        return true;
+    }
 
     void on_init_dialog(HWND wnd) override
     {
@@ -468,20 +554,92 @@ private:
 // - 展開頁：封面虛化背景一個勾選＋「亮度上限」下拉（10～35％，每 5％一格）；沒勾時亮度上限整個藏起來。
 //   之後有別的展開頁選項（例如封面光暈）放在這一塊。邏輯在 expanded_cover_bg.cpp；改了馬上生效
 // - 啟動：開機優化 B，主視窗等網頁面板回報「好了」再顯示（邏輯在 main_window.cpp）。設定在啟動時才讀，所以改了要下次啟動才有效
+// 資料夾樹（自編版 Album list）的搜尋框放上面還是下面（2026-11-09 使用者要求加開關）：存在 fb2k 共用設定，
+// Album list 登記了變更通知，寫入就當場重排。鍵名、預設值要跟 Album list 的 main.cpp 一致；預設 false＝下方
+namespace folder_search_position {
+inline constexpr char config_key[] = "nocturne.folderTree.searchOnTop";
+inline constexpr bool on_top_default = false;
+
+bool is_on_top()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, on_top_default);
+}
+
+void set_on_top(bool on_top)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, on_top);
+}
+} // namespace folder_search_position
+
+// 暫時隱藏伴奏版（2026-11-11 使用者要求）：存在 fb2k 共用設定，自編 Album list 讀它、送「目前選取資料夾」時略過伴奏版，
+// 也登記了變更通知，寫入就用目前的資料夾重送一次。鍵名、預設值要跟 Album list 的 playlist_utils.h 一致；
+// 預設 true＝隱藏（2026-11-12 使用者決定改成預設勾，朋友版也一樣；已手動切過的環境照存的值）
+namespace hide_instrumental {
+inline constexpr char config_key[] = "nocturne.folderTree.hideInstrumental";
+inline constexpr bool enabled_default = true;
+
+bool is_enabled()
+{
+    return fb2k::configStore::get()->getConfigBool(config_key, enabled_default);
+}
+
+void set_enabled(bool enabled)
+{
+    fb2k::configStore::get()->setConfigBool(config_key, enabled);
+}
+
+// 關鍵字（2026-11-11 使用者要可以自己輸入，預設先填好）：分號分隔，比對檔名與歌名。鍵名、預設值要跟 Album list 一致
+inline constexpr char keywords_config_key[] = "nocturne.folderTree.hideInstrumental.keywords";
+inline constexpr char keywords_default[]
+    = "instrumental;inst.;(inst;[inst;inst);inst];off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
+      "\xAA\xE3\x82\xB1;backing track;without vocal;\xE4\xBC\xB4\xE5\xA5\x8F"; // …;カラオケ;…;伴奏
+
+std::string get_keywords()
+{
+    return fb2k::configStore::get()->getConfigString(keywords_config_key, keywords_default)->c_str();
+}
+
+void set_keywords(const std::string& keywords)
+{
+    if (keywords != get_keywords())
+        fb2k::configStore::get()->setConfigString(keywords_config_key, keywords.c_str());
+}
+
+// 「自訂關鍵字」開關：關著（預設）Album list 一律用上面的預設值，開著才用輸入的關鍵字
+inline constexpr char custom_config_key[] = "nocturne.folderTree.hideInstrumental.customKeywords";
+inline constexpr bool custom_default = false;
+
+bool is_custom()
+{
+    return fb2k::configStore::get()->getConfigBool(custom_config_key, custom_default);
+}
+
+void set_custom(bool custom)
+{
+    fb2k::configStore::get()->setConfigBool(custom_config_key, custom);
+}
+} // namespace hide_instrumental
+
+// 2026-11-11：「展開頁」那一段（封面虛化背景）搬到新的「展開頁」分頁；
+// 2026-11-12：資料夾樹的捲軸自動隱藏與搜尋框位置搬到「資料夾」分頁。這頁剩捲軸與清單、啟動兩段
 class TabNocturneInterface : public NocturneTab {
 public:
-    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
+    TabNocturneInterface() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
 
     const char* get_name() override { return nocturne_text::interface_tab_name; }
 
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_APPEARANCE; }
 
-    static void show_cap(HWND wnd, bool visible)
+public:
+    void reset_to_defaults() override
     {
-        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
-        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
+        thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
+        playlist_marquee::set_enabled(playlist_marquee::enabled_default);
+        startup_hold_until_ready.reset();
     }
+
+private:
 
     void on_init_dialog(HWND wnd) override
     {
@@ -491,8 +649,270 @@ private:
         SetDlgItemText(wnd, IDC_THIN_SCROLLBAR_NOTE, nocturne_text::thin_scrollbar_note);
         CheckDlgButton(wnd, IDC_THIN_SCROLLBAR, check_state(thin_scrollbar::is_enabled()));
 
-        // 展開頁
-        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_tab_title);
+        // 播放清單框選方框
+        SetDlgItemText(wnd, IDC_PLAYLIST_MARQUEE, nocturne_text::playlist_marquee);
+        CheckDlgButton(wnd, IDC_PLAYLIST_MARQUEE, check_state(playlist_marquee::is_enabled()));
+
+        // 啟動
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::startup_tab_title);
+        SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
+        SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
+        CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if (id == IDC_THIN_SCROLLBAR && code == BN_CLICKED) {
+            thin_scrollbar::set_enabled(IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED);
+        } else if (id == IDC_PLAYLIST_MARQUEE && code == BN_CLICKED) {
+            playlist_marquee::set_enabled(IsDlgButtonChecked(wnd, IDC_PLAYLIST_MARQUEE) == BST_CHECKED);
+        } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
+            startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        }
+    }
+};
+
+// ---- 資料夾（2026-11-11）----
+// 使用者要的：介面分頁太擠，另開一頁。兩段：
+// - 資料夾樹（2026-11-12 從「介面」搬過來）：兩個捲軸自動隱藏（只對細捲軸有意義，細捲軸開關在「介面」分頁，
+//   沒開時變灰並在下面寫原因；切分頁時這頁會重建，所以在 on_init_dialog 判斷一次就夠）、搜尋框位置
+// - 目前選取資料夾：預設只有「隱藏伴奏版」一個勾選；再勾「自訂關鍵字」才出現關鍵字輸入框
+//   （沒勾就用預設那組）。邏輯在自編 Album list 的 playlist_utils.cpp，改了馬上用目前選的資料夾重送一次
+class TabNocturneFolder : public NocturneTab {
+public:
+    TabNocturneFolder() : NocturneTab({IDC_TITLE1, IDC_TITLE2}) {}
+
+    const char* get_name() override { return nocturne_text::folder_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_FOLDER; }
+
+public:
+    void reset_to_defaults() override
+    {
+        thin_scrollbar::set_autohide(true, thin_scrollbar::autohide_default);
+        thin_scrollbar::set_autohide(false, thin_scrollbar::autohide_default);
+        folder_search_position::set_on_top(folder_search_position::on_top_default);
+        hide_instrumental::set_enabled(hide_instrumental::enabled_default);
+        hide_instrumental::set_keywords(hide_instrumental::keywords_default);
+        hide_instrumental::set_custom(hide_instrumental::custom_default);
+    }
+
+private:
+
+    // 「自訂關鍵字」只在勾了隱藏時能點；輸入框那一行只在勾了自訂時出現
+    static void update_controls(HWND wnd)
+    {
+        const auto hide = IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED;
+        const auto custom = IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM) == BST_CHECKED;
+        EnableWindow(GetDlgItem(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM), hide);
+        for (const auto id : {IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL, IDC_HIDE_INSTRUMENTAL_KEYWORDS, IDC_HIDE_INSTRUMENTAL_NOTE}) {
+            const auto control = GetDlgItem(wnd, id);
+            ShowWindow(control, custom ? SW_SHOW : SW_HIDE);
+            EnableWindow(control, hide);
+        }
+    }
+
+    // 關鍵字在輸入框離開時才存（每打一個字就存的話，資料夾樹會每次都重送一次清單）
+    static void save_keywords(HWND wnd)
+    {
+        const auto edit = GetDlgItem(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS);
+        std::wstring text(static_cast<size_t>(GetWindowTextLength(edit)) + 1, L'\0');
+        text.resize(static_cast<size_t>(GetWindowText(edit, text.data(), static_cast<int>(text.size()))));
+        hide_instrumental::set_keywords(mmh::to_utf8(text));
+    }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        // 資料夾樹
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::folder_tree_title);
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_VERTICAL, nocturne_text::thin_autohide_vertical);
+        SetDlgItemText(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, nocturne_text::thin_autohide_horizontal);
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_VERTICAL, check_state(thin_scrollbar::is_autohide(true)));
+        CheckDlgButton(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL, check_state(thin_scrollbar::is_autohide(false)));
+        const auto thin = thin_scrollbar::is_enabled();
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_VERTICAL), thin);
+        EnableWindow(GetDlgItem(wnd, IDC_THIN_AUTOHIDE_HORIZONTAL), thin);
+        SetDlgItemText(wnd, IDC_FOLDER_AUTOHIDE_NOTE, nocturne_text::thin_autohide_needs_thin);
+        ShowWindow(GetDlgItem(wnd, IDC_FOLDER_AUTOHIDE_NOTE), thin ? SW_HIDE : SW_SHOW);
+
+        // 搜尋框位置：0＝上方、1＝下方
+        SetDlgItemText(wnd, IDC_FOLDER_SEARCH_POS_LABEL, nocturne_text::folder_search_position_label);
+        const auto search_combo = GetDlgItem(wnd, IDC_FOLDER_SEARCH_POS);
+        for (const auto& name : nocturne_text::folder_search_position_names)
+            ComboBox_AddString(search_combo, name);
+        ComboBox_SetCurSel(search_combo, folder_search_position::is_on_top() ? 0 : 1);
+
+        // 目前選取資料夾
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::hide_instrumental_title);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL, nocturne_text::hide_instrumental);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM, nocturne_text::hide_instrumental_custom);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS_LABEL, nocturne_text::hide_instrumental_keywords_label);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_NOTE, nocturne_text::hide_instrumental_note);
+        SetDlgItemText(wnd, IDC_HIDE_INSTRUMENTAL_KEYWORDS, mmh::to_utf16(hide_instrumental::get_keywords()).c_str());
+        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL, check_state(hide_instrumental::is_enabled()));
+        CheckDlgButton(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM, check_state(hide_instrumental::is_custom()));
+        update_controls(wnd);
+    }
+
+    void on_command(HWND wnd, WPARAM wp) override
+    {
+        const auto id = LOWORD(wp);
+        const auto code = HIWORD(wp);
+
+        if ((id == IDC_THIN_AUTOHIDE_VERTICAL || id == IDC_THIN_AUTOHIDE_HORIZONTAL) && code == BN_CLICKED) {
+            thin_scrollbar::set_autohide(id == IDC_THIN_AUTOHIDE_VERTICAL, IsDlgButtonChecked(wnd, id) == BST_CHECKED);
+        } else if (id == IDC_FOLDER_SEARCH_POS && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                folder_search_position::set_on_top(selection == 0);
+        } else if (id == IDC_HIDE_INSTRUMENTAL && code == BN_CLICKED) {
+            save_keywords(wnd);
+            hide_instrumental::set_enabled(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL) == BST_CHECKED);
+            update_controls(wnd);
+        } else if (id == IDC_HIDE_INSTRUMENTAL_CUSTOM && code == BN_CLICKED) {
+            save_keywords(wnd);
+            hide_instrumental::set_custom(IsDlgButtonChecked(wnd, IDC_HIDE_INSTRUMENTAL_CUSTOM) == BST_CHECKED);
+            update_controls(wnd);
+        } else if (id == IDC_HIDE_INSTRUMENTAL_KEYWORDS && code == EN_KILLFOCUS) {
+            save_keywords(wnd);
+        }
+    }
+};
+
+// ---- 展開頁（2026-11-11）----
+// 使用者說設定放滿了就開新分頁、維持鬆弛度。三個小標題：
+// - 背景：封面虛化背景＋亮度上限（原本在「介面」分頁，邏輯在 expanded_cover_bg.cpp）；沒勾時亮度上限整個藏起來
+// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）
+// - 歌詞：歌詞防誤拖（邏輯在 now_playing_cover_zoom.cpp 的 lyrics_lock）
+// 都是改了馬上生效
+class TabNocturneExpanded : public NocturneTab {
+public:
+    TabNocturneExpanded() : NocturneTab({IDC_TITLE1, IDC_TITLE2, IDC_TITLE3}) {}
+
+    const char* get_name() override { return nocturne_text::expanded_page_tab_name; }
+
+private:
+    UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_EXPANDED; }
+
+public:
+    void reset_to_defaults() override
+    {
+        expanded_cover_bg::enabled.reset();
+        expanded_cover_bg::cap_percent.reset();
+        main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
+        main_menu::on_now_playing_modes_changed();
+        lyrics_lock::set_enabled(lyrics_lock::enabled_default);
+    }
+
+private:
+
+    static void show_cap(HWND wnd, bool visible)
+    {
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP_LABEL), visible ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(wnd, IDC_EXPANDED_BG_CAP), visible ? SW_SHOW : SW_HIDE);
+    }
+
+    // 「展開頁要有」：外觀用跟下面一樣的下拉選單（2026-11-11 使用者說原本的按鈕是白底、跟下面的不一樣），
+    // 裡面只放一項＝勾選的模式用頓號接起來；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
+    static void update_modes_text(HWND wnd)
+    {
+        using main_menu::NowPlayingMode;
+        const auto mask = main_menu::now_playing_modes::get_mask();
+        std::wstring text;
+        const auto& modes = main_menu::now_playing_mode_order;
+        for (size_t i = 0; i < std::size(modes); ++i) {
+            if ((mask & main_menu::now_playing_modes::bit_of(modes[i])) == 0)
+                continue;
+            if (!text.empty())
+                text += nocturne_text::modes_separator;
+            text += nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i])];
+        }
+        const auto combo = GetDlgItem(wnd, IDC_MODES);
+        ComboBox_ResetContent(combo);
+        ComboBox_AddString(combo, text.c_str());
+        ComboBox_SetCurSel(combo, 0);
+    }
+
+    static LRESULT CALLBACK s_modes_combo_proc(
+        HWND combo, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
+    {
+        switch (msg) {
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+            SetFocus(combo);
+            choose_modes(GetParent(combo));
+            return 0;
+        case WM_KEYDOWN:
+            if (wp == VK_F4 || wp == VK_SPACE || wp == VK_RETURN) {
+                choose_modes(GetParent(combo));
+                return 0;
+            }
+            if (wp == VK_UP || wp == VK_DOWN || wp == VK_HOME || wp == VK_END || wp == VK_PRIOR || wp == VK_NEXT)
+                return 0;
+            break;
+        case WM_SYSKEYDOWN:
+            if (wp == VK_DOWN || wp == VK_UP) {
+                choose_modes(GetParent(combo));
+                return 0;
+            }
+            break;
+        case WM_MOUSEWHEEL:
+            return 0;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(combo, s_modes_combo_proc, id);
+            break;
+        }
+        return DefSubclassProc(combo, msg, wp, lp);
+    }
+
+    // 按下拉鈕：在按鈕正下方開一個可以勾選的選單；點一項就切換勾選並馬上生效，選單再開一次，點選單外面才關。
+    // 最後一個勾選的不能取消（至少要留一種）。沒有 VU 元件時 VU 表一樣可以勾（記住喜好），只是註明沒有安裝
+    static void choose_modes(HWND wnd)
+    {
+        using main_menu::NowPlayingMode;
+        const auto button = GetDlgItem(wnd, IDC_MODES);
+        RECT rect{};
+        GetWindowRect(button, &rect);
+        const auto vu_available = main_menu::is_vu_mode_available();
+
+        for (;;) {
+            const wil::unique_hmenu menu(CreatePopupMenu());
+            if (!menu)
+                return;
+            const auto mask = main_menu::now_playing_modes::get_mask();
+            const auto& modes = main_menu::now_playing_mode_order;
+            for (size_t i = 0; i < std::size(modes); ++i) {
+                const auto available = vu_available || !main_menu::mode_needs_lyrics_column(modes[i]);
+                const auto checked = (mask & main_menu::now_playing_modes::bit_of(modes[i])) != 0;
+                const auto text = nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i], available)];
+                AppendMenu(menu.get(), MF_STRING | (checked ? MF_CHECKED : MF_UNCHECKED), i + 1, text);
+            }
+
+            const auto chosen = TrackPopupMenu(menu.get(), TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN,
+                rect.left, rect.bottom, 0, wnd, nullptr);
+            if (chosen < 1 || chosen > static_cast<int>(std::size(modes)))
+                return;
+
+            const auto bit = main_menu::now_playing_modes::bit_of(modes[chosen - 1]);
+            const auto next = mask ^ bit;
+            if (next == 0) {
+                MessageBeep(MB_OK);
+                continue;
+            }
+            main_menu::now_playing_modes::set_mask(next);
+            main_menu::on_now_playing_modes_changed();
+            update_modes_text(wnd);
+        }
+    }
+
+    void on_init_dialog(HWND wnd) override
+    {
+        // 背景
+        SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::expanded_section_background);
         SetDlgItemText(wnd, IDC_EXPANDED_BG, nocturne_text::expanded_bg);
         SetDlgItemText(wnd, IDC_EXPANDED_BG_CAP_LABEL, nocturne_text::expanded_bg_cap_label);
 
@@ -506,11 +926,18 @@ private:
         CheckDlgButton(wnd, IDC_EXPANDED_BG, check_state(expanded_cover_bg::enabled.get()));
         show_cap(wnd, expanded_cover_bg::enabled.get());
 
-        // 啟動
-        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::startup_tab_title);
-        SetDlgItemText(wnd, IDC_STARTUP_HOLD, nocturne_text::startup_hold);
-        SetDlgItemText(wnd, IDC_STARTUP_HOLD_NOTE, nocturne_text::startup_hold_note);
-        CheckDlgButton(wnd, IDC_STARTUP_HOLD, check_state(startup_hold_until_ready.get()));
+        // 顯示內容
+        SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::expanded_section_content);
+        SetDlgItemText(wnd, IDC_MODE_NOTE, nocturne_text::mode_note);
+        SetDlgItemText(wnd, IDC_MODES_LABEL, nocturne_text::modes_label);
+        update_modes_text(wnd);
+        SetWindowSubclass(GetDlgItem(wnd, IDC_MODES), s_modes_combo_proc, 1, 0);
+
+        // 歌詞
+        SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::expanded_section_lyrics);
+        SetDlgItemText(wnd, IDC_LYRICS_LOCK, nocturne_text::lyrics_lock);
+        SetDlgItemText(wnd, IDC_LYRICS_LOCK_NOTE, nocturne_text::lyrics_lock_note);
+        CheckDlgButton(wnd, IDC_LYRICS_LOCK, check_state(lyrics_lock::is_enabled()));
     }
 
     void on_command(HWND wnd, WPARAM wp) override
@@ -518,9 +945,7 @@ private:
         const auto id = LOWORD(wp);
         const auto code = HIWORD(wp);
 
-        if (id == IDC_THIN_SCROLLBAR && code == BN_CLICKED) {
-            thin_scrollbar::set_enabled(IsDlgButtonChecked(wnd, IDC_THIN_SCROLLBAR) == BST_CHECKED);
-        } else if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
+        if (id == IDC_EXPANDED_BG && code == BN_CLICKED) {
             const auto checked = IsDlgButtonChecked(wnd, IDC_EXPANDED_BG) == BST_CHECKED;
             expanded_cover_bg::enabled = checked;
             show_cap(wnd, checked);
@@ -529,8 +954,8 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
-        } else if (id == IDC_STARTUP_HOLD && code == BN_CLICKED) {
-            startup_hold_until_ready = IsDlgButtonChecked(wnd, IDC_STARTUP_HOLD) == BST_CHECKED;
+        } else if (id == IDC_LYRICS_LOCK && code == BN_CLICKED) {
+            lyrics_lock::set_enabled(IsDlgButtonChecked(wnd, IDC_LYRICS_LOCK) == BST_CHECKED);
         }
     }
 };
@@ -546,11 +971,25 @@ public:
 private:
     UINT dialog_id() const override { return IDD_PREFS_NOCTURNE_ABOUT; }
 
+public:
+    void reset_to_defaults() override {}
+
+private:
+
     void on_init_dialog(HWND wnd) override
     {
         SetDlgItemText(wnd, IDC_TITLE1, nocturne_text::about_tab_title);
         SetDlgItemText(wnd, IDC_ABOUT_NAME, nocturne_text::about_product_name);
-        const std::wstring version = std::wstring(nocturne_text::about_version_prefix) + nocturne_text::nocturne_version;
+        std::wstring version = std::wstring(nocturne_text::about_version_prefix) + nocturne_text::nocturne_version;
+        // 開發版（219、169）與個人版（主環境）後面加上種類與建置日期；公開版與朋友版只顯示版本號
+#if defined(NOCTURNE_BUILD_DEV) || defined(NOCTURNE_BUILD_PERSONAL)
+#if defined(NOCTURNE_BUILD_DEV)
+        version += nocturne_text::about_edition_dev;
+#else
+        version += nocturne_text::about_edition_personal;
+#endif
+        version += L" · " NOCTURNE_BUILD_DATE;
+#endif
         SetDlgItemText(wnd, IDC_ABOUT_VERSION, version.c_str());
     }
 
@@ -561,14 +1000,17 @@ TabNocturnePlayback g_tab_nocturne_playback;
 TabNextTrackToast g_tab_next_track_toast;
 TabNocturneFont g_tab_nocturne_font;
 TabNocturneInterface g_tab_nocturne_interface;
+TabNocturneExpanded g_tab_nocturne_expanded;
+TabNocturneFolder g_tab_nocturne_folder;
 TabNocturneAbout g_tab_nocturne_about;
 
 // 分頁順序：播放、下一首與佇列、字型、介面、關於。
 // 存的「最後開啟的分頁」是這個順序的編號，所以合併或插入分頁（2026-11-06 播放佇列插在播放後面、11/08 外觀與展開頁插在關於前面、
 // 11/08 晚把播放佇列／啟動／外觀／展開頁併成現在這五頁）之後，已經用過的人更新後第一次開設定頁可能停在不同的分頁
 // （編號超出範圍時由分頁架構處理），無傷大雅；之後新增分頁盡量加在最後面（關於之前）
+// 2026-11-11 在關於之前加了「展開頁」，之後又在關於之前加了「資料夾」
 PreferencesTab* g_nocturne_tabs[] = {&g_tab_nocturne_playback, &g_tab_next_track_toast, &g_tab_nocturne_font,
-    &g_tab_nocturne_interface, &g_tab_nocturne_about};
+    &g_tab_nocturne_interface, &g_tab_nocturne_expanded, &g_tab_nocturne_folder, &g_tab_nocturne_about};
 
 // 最後開啟的分頁（存分頁順序，見上面 g_nocturne_tabs 的說明）
 cfg_int cfg_nocturne_active_tab(
@@ -592,6 +1034,69 @@ constexpr std::string_view open_preferences_marker = "[Nocturne] open-preference
 // - 「[Nocturne] ready」：網頁第一次載入完成（標頭、封面都套用了）。主視窗啟動時先不顯示，收到這句才顯示（開機優化 B，2026-11-06）；
 //   視窗不在等的時候（網頁重新載入、已經顯示）收到只是忽略
 constexpr std::string_view page_ready_marker = "[Nocturne] ready";
+// - 「[Nocturne] tip show <左> <上> <右> <下> <網頁寬> <網頁高> <文字>」：網頁元件的滑鼠提示（2026-11-12）。
+//   座標是網頁裡的實體像素（CSS 像素×devicePixelRatio）；用網頁寬高找出是哪個網頁面板，換成螢幕座標後畫在元件正下方
+//   （nocturne_tooltip.h）。「[Nocturne] tip hide」收起
+constexpr std::string_view web_tip_show_marker = "[Nocturne] tip show ";
+constexpr std::string_view web_tip_hide_marker = "[Nocturne] tip hide";
+
+// 主視窗底下、網頁內容大小等於 width×height（容許 2 像素誤差）的 WebView2 內容視窗
+HWND find_web_content_window(int width, int height)
+{
+    struct Search {
+        int width, height;
+        HWND found;
+    } search{width, height, nullptr};
+    EnumChildWindows(
+        core_api::get_main_window(),
+        [](HWND wnd, LPARAM lp) -> BOOL {
+            auto& s = *reinterpret_cast<Search*>(lp);
+            wchar_t name[64]{};
+            GetClassName(wnd, name, static_cast<int>(std::size(name)));
+            if (wcscmp(name, L"Chrome_RenderWidgetHostHWND") != 0 || !IsWindowVisible(wnd))
+                return TRUE;
+            RECT client{};
+            GetClientRect(wnd, &client);
+            if (std::abs(client.right - s.width) <= 2 && std::abs(client.bottom - s.height) <= 2) {
+                s.found = wnd;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+void handle_web_tip(std::string_view args)
+{
+    std::array<int, 6> numbers{};
+    auto cursor = args.data();
+    const auto end = args.data() + args.size();
+    for (auto& number : numbers) {
+        const auto result = std::from_chars(cursor, end, number);
+        if (result.ec != std::errc{} || result.ptr == end || *result.ptr != ' ')
+            return;
+        cursor = result.ptr + 1;
+    }
+    std::string text(cursor, end);
+    while (!text.empty() && (text.back() == '\r' || text.back() == '\n'))
+        text.pop_back();
+    if (text.empty())
+        return;
+
+    fb2k::inMainThread([numbers, text = std::move(text)] {
+        const auto content = find_web_content_window(numbers[4], numbers[5]);
+        if (!content)
+            return;
+        POINT top_left{numbers[0], numbers[1]};
+        POINT bottom_right{numbers[2], numbers[3]};
+        ClientToScreen(content, &top_left);
+        ClientToScreen(content, &bottom_right);
+        const RECT anchor{top_left.x, top_left.y, bottom_right.x, bottom_right.y};
+        nocturne_tooltip::show_below(
+            anchor, pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr(), GetDpiForWindow(content));
+    });
+}
 
 class WebKeyFromConsole : public console_receiver {
 public:
@@ -600,6 +1105,15 @@ public:
         // SDK 的 console::print(const char*) 對所有 receiver 都傳 SIZE_MAX（＝以 \0 結尾、沒給長度），
         // 直接當長度用，字串搜尋會往記憶體後面一路讀下去（2026-11-05 實測：std::string_view::find 內部 memmove 寫爆堆疊，fb2k 啟動就崩潰）
         const std::string_view text(message, length == SIZE_MAX ? std::strlen(message) : length);
+
+        if (const auto position = text.find(web_tip_show_marker); position != std::string_view::npos) {
+            handle_web_tip(text.substr(position + web_tip_show_marker.size()));
+            return;
+        }
+        if (text.find(web_tip_hide_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { nocturne_tooltip::hide_below(); });
+            return;
+        }
 
         if (text.find(open_preferences_marker) != std::string_view::npos) {
             // 這個函式可能在任何執行緒被呼叫，開設定視窗一定要回主執行緒做
@@ -635,30 +1149,15 @@ service_factory_single_t<WebKeyFromConsole> g_web_key_from_console;
 
 // 設定視窗的「Reset page」：播放、下一首與佇列、介面三個分頁的所有設定還原成預設。
 // 字型分頁不動——字型是改 Columns UI 字型項目與主題檔，沒有「預設字型」可以還原，要回到原本的設計請把整體大小選「標準」
+// 「Reset page」：只還原目前停的那一頁（2026-11-12 使用者同意；原本七頁一起還原，
+// 例如在字型分頁按一下會把展開頁勾的模式洗回全勾）。各頁要還原哪些設定見各分頁的 reset_to_defaults
 void reset_nocturne_settings()
 {
-    now_playing_progress::wheel_seek_enabled.reset();
-    now_playing_progress::wheel_step_seconds.reset();
-    now_playing_progress::wheel_shift_step_seconds.reset();
-    playlist_item_helpers::keep_queue_on_play.reset();
-    output_chip::enabled.reset();
-    output_chip::click_to_switch.reset();
-    volume_chip::enabled.reset();
-
-    next_track_toast::enabled.reset();
-    next_track_toast::seconds.reset();
-    next_track_toast::show_seconds_in_ring.reset();
-    next_track_toast::show_cover.reset();
-    next_track_toast::show_source_tag.reset();
-    next_track_toast::position.reset();
-    next_track_toast::size_index.reset();
-
-    startup_hold_until_ready.reset();
-
-    thin_scrollbar::set_enabled(thin_scrollbar::enabled_default);
-
-    expanded_cover_bg::enabled.reset();
-    expanded_cover_bg::cap_percent.reset();
+    const auto index = cfg_nocturne_active_tab.get_value();
+    if (index < 0 || index >= static_cast<int>(std::size(g_nocturne_tabs)))
+        return;
+    // g_nocturne_tabs 裡全部都是 NocturneTab
+    static_cast<NocturneTab*>(g_nocturne_tabs[index])->reset_to_defaults();
 }
 
 // 頁面名稱是品牌名，中英文版相同；父頁面是 Tools（跟 ESLyric 同一層）
@@ -666,6 +1165,11 @@ service_factory_single_t<PreferencesTabsHost> g_nocturne_preferences_page("Noctu
     guid_nocturne_preferences_page, preferences_page::guid_tools, cfg_nocturne_active_tab, reset_nocturne_settings);
 
 } // namespace
+
+void show_nocturne_font_tab()
+{
+    g_nocturne_preferences_page.get_static_instance().show_tab(nocturne_text::font_tab_name);
+}
 
 PreferencesTab* g_get_tab_next_track_toast()
 {

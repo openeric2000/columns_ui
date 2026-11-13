@@ -10,7 +10,8 @@
 #include "dark_mode_dialog.h"
 #include "nocturne_text.h"
 
-// 自編版新增：View/Layout/主題字型…
+// 自編版新增：主題字型（設定頁 Preferences → Tools → Nocturne →「字型」分頁；View/Layout/主題字型… 也是開這一頁）
+// 2026-11-12 起舊的「主題字型」對話框退休（跟字型分頁的「全部區塊」那一列做一樣的事，說明要維護兩份），只留分頁
 // 選一個字型，一次換掉主題用到的 5 個 Columns UI 字型項目，以及兩個主題檔（ESLyric 佈局 main.xml、標頭 index.html）
 // - 字級＝主題預設字級 × 選的整體大小，所以重複使用不會越來越大，選「標準」就回到原本的設計
 // - 整體大小只影響這 5 項（Columns UI 會自己調列高）；播放列與標頭是固定高度，主題檔裡的字級不動
@@ -52,11 +53,6 @@ constexpr std::array size_options{
     SizeOption{nocturne_text::size_standard, 1.0f},
     SizeOption{nocturne_text::size_large, 1.15f},
     SizeOption{nocturne_text::size_extra_large, 1.3f},
-};
-
-struct Selection {
-    size_t family_index{};
-    size_t size_option_index{default_size_option_index};
 };
 
 struct ThemeFile {
@@ -104,16 +100,6 @@ std::wstring get_english_family_name(const uih::direct_write::FontFamily& family
     return name;
 }
 
-std::wstring get_current_family_name()
-{
-    const auto description = g_font_manager_data.resolve_font_description(g_font_manager_data.m_common_items_entry);
-
-    if (!description.typographic_family_name.empty())
-        return description.typographic_family_name;
-
-    return description.wss ? description.wss->family_name : std::wstring{};
-}
-
 // 依某個字型項目目前的字級找最接近的整體大小，對不上就用「標準」
 size_t get_current_size_option_index(const ThemeFontItem& item)
 {
@@ -128,12 +114,6 @@ size_t get_current_size_option_index(const ThemeFontItem& item)
         return default_size_option_index;
 
     return gsl::narrow<size_t>(std::distance(size_options.begin(), iter));
-}
-
-// 主題對話框用：照「Playlist view: Items」目前的字級判斷整體大小
-size_t get_current_size_option_index()
-{
-    return get_current_size_option_index(theme_font_items[size_reference_item_index]);
 }
 
 // 把字型套到 items 這幾個 Columns UI 字型項目（整體大小＝預設字級 × scale）
@@ -242,152 +222,7 @@ FileUpdateResult update_theme_file(
     return {.changed = true};
 }
 
-std::optional<Selection> run_dialog(HWND parent_wnd, const std::vector<uih::direct_write::FontFamily>& families)
-{
-    std::optional<Selection> selection;
-
-    dark::modal_dialog_box(IDD_THEME_FONT,
-        {.button_ids = {IDOK, IDCANCEL},
-            .combo_box_ids = {IDC_THEME_FONT_FAMILY, IDC_THEME_FONT_SIZE},
-            .last_button_id = IDCANCEL},
-        parent_wnd, [&](HWND wnd, UINT msg, WPARAM wp, LPARAM lp) -> INT_PTR {
-            switch (msg) {
-            case WM_INITDIALOG: {
-                // 對話框的文字依語言填入（.rc 裡只放版面）
-                SetWindowText(wnd, nocturne_text::theme_font_title_w);
-                SetDlgItemText(wnd, IDC_THEME_FONT_INTRO, nocturne_text::theme_font_intro);
-                SetDlgItemText(wnd, IDC_THEME_FONT_FAMILY_LABEL, nocturne_text::theme_font_family_label);
-                SetDlgItemText(wnd, IDC_THEME_FONT_SIZE_LABEL, nocturne_text::theme_font_size_label);
-                SetDlgItemText(wnd, IDC_THEME_FONT_LYRICS_NOTE, nocturne_text::theme_font_lyrics_note);
-                SetDlgItemText(wnd, IDOK, nocturne_text::ok_text);
-                SetDlgItemText(wnd, IDCANCEL, nocturne_text::cancel_text);
-
-                const auto family_combo = GetDlgItem(wnd, IDC_THEME_FONT_FAMILY);
-                const auto current_name = get_current_family_name();
-
-                for (size_t index{}; index < families.size(); ++index) {
-                    ComboBox_AddString(family_combo, families[index].name.c_str());
-
-                    if (families[index].name == current_name)
-                        ComboBox_SetCurSel(family_combo, gsl::narrow<int>(index));
-                }
-
-                const auto size_combo = GetDlgItem(wnd, IDC_THEME_FONT_SIZE);
-                for (const auto& option : size_options)
-                    ComboBox_AddString(size_combo, option.label);
-
-                ComboBox_SetCurSel(size_combo, gsl::narrow<int>(get_current_size_option_index()));
-                return TRUE;
-            }
-            case WM_COMMAND:
-                switch (LOWORD(wp)) {
-                case IDOK: {
-                    const auto family_index = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_THEME_FONT_FAMILY));
-                    const auto size_index = ComboBox_GetCurSel(GetDlgItem(wnd, IDC_THEME_FONT_SIZE));
-                    if (family_index == CB_ERR || size_index == CB_ERR)
-                        return TRUE;
-
-                    selection = Selection{gsl::narrow<size_t>(family_index), gsl::narrow<size_t>(size_index)};
-                    EndDialog(wnd, IDOK);
-                    return TRUE;
-                }
-                case IDCANCEL:
-                    EndDialog(wnd, IDCANCEL);
-                    return TRUE;
-                }
-                break;
-            }
-            return FALSE;
-        });
-
-    return selection;
-}
-
 } // namespace
-
-void open_theme_font_dialog(HWND parent_wnd)
-{
-    constexpr auto title = nocturne_text::theme_font_title;
-
-    std::vector<uih::direct_write::FontFamily> families;
-    try {
-        families = uih::direct_write::Context::s_create()->get_font_families();
-    }
-    CATCH_LOG()
-
-    std::erase_if(families, [](const auto& family) { return family.is_symbol_font; });
-
-    if (families.empty()) {
-        dark::modal_info_box(
-            parent_wnd, title, nocturne_text::error_no_font_list, uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
-        return;
-    }
-
-    const auto selection = run_dialog(parent_wnd, families);
-    if (!selection)
-        return;
-
-    const auto& family = families[selection->family_index];
-    const auto& size_option = size_options[selection->size_option_index];
-    std::string file_family_name;
-
-    try {
-        const auto family_fonts = family.fonts();
-        const auto font = find_regular_font(family_fonts);
-
-        if (!font) {
-            dark::modal_info_box(parent_wnd, title, nocturne_text::error_no_usable_style, uih::InfoBoxType::Error,
-                uih::InfoBoxModalType::OK);
-            return;
-        }
-
-        std::array<const ThemeFontItem*, theme_font_items.size()> all_items{};
-        std::ranges::transform(theme_font_items, all_items.begin(), [](const ThemeFontItem& item) { return &item; });
-        apply_columns_ui_fonts(all_items, family, *font, size_option.scale);
-        file_family_name = mmh::to_utf8(get_english_family_name(family));
-    } catch (const std::exception& ex) {
-        const auto message = fmt::format(nocturne_text::error_change_failed, ex.what());
-        dark::modal_info_box(parent_wnd, title, message.c_str(), uih::InfoBoxType::Error, uih::InfoBoxModalType::OK);
-        return;
-    }
-
-    const std::filesystem::path profile_path
-        = mmh::to_utf16(::filesystem::g_get_native_path(core_api::get_profile_path()).c_str());
-
-    std::string failures;
-    bool is_any_file_changed{};
-    for (const auto& file : theme_files) {
-        const auto path = profile_path / file.relative_path;
-        const auto result = update_theme_file(path, file, file_family_name);
-
-        is_any_file_changed = is_any_file_changed || result.changed;
-
-        if (result.error)
-            failures += fmt::format(nocturne_text::failure_item, mmh::to_utf8(path.native()), *result.error);
-    }
-
-    // 主題檔沒有變（只改了大小）時，Columns UI 的項目已經即時套用，不用重開
-    if (!is_any_file_changed && failures.empty()) {
-        const auto message = fmt::format(
-            nocturne_text::applied_message, mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
-        dark::modal_info_box(
-            parent_wnd, title, message.c_str(), uih::InfoBoxType::Information, uih::InfoBoxModalType::OK);
-        return;
-    }
-
-    auto message
-        = fmt::format(nocturne_text::restart_message, mmh::to_utf8(family.name), mmh::to_utf8(size_option.label));
-
-    if (!failures.empty())
-        message += fmt::format(nocturne_text::failures_message, failures);
-
-    message += nocturne_text::restart_question;
-
-    if (dark::modal_info_box(parent_wnd, title, message.c_str(),
-            failures.empty() ? uih::InfoBoxType::Information : uih::InfoBoxType::Warning,
-            uih::InfoBoxModalType::YesNo))
-        standard_commands::main_restart();
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // 分區塊換字型（字型分頁用，見 theme_font.h）

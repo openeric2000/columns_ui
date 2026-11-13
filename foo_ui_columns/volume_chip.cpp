@@ -4,6 +4,7 @@
 #include "font_utils.h"
 #include "menu_items.h"
 #include "next_track_toast.h"
+#include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "output_chip.h"
 
@@ -16,11 +17,17 @@ constexpr wchar_t popup_class_name[] = L"columns_ui_volume_popup";
 
 constexpr UINT_PTR show_timer_id = 1;
 constexpr UINT_PTR hide_timer_id = 2;
-constexpr UINT_PTR bubble_timer_id = 3;
-// 滑過圖示多久彈出、離開圖示與滑桿多久收起、調整後 dB 提示泡留多久（預覽頁的暫定值，使用者看過沒意見）
+// 滑桿視窗自己的淡入淡出計時器（掛在滑桿視窗上，跟上面兩個掛在圖示視窗上的不衝突）
+constexpr UINT_PTR fade_timer_id = 1;
+// 滑桿淡出結束、視窗已隱藏時，通知圖示視窗清掉「使用中」狀態
+constexpr UINT wm_popup_hidden = WM_APP + 0x31;
+// 滑過圖示多久彈出、離開圖示與滑桿多久收起（預覽頁的暫定值，使用者看過沒意見）
 constexpr UINT show_delay_ms = 150;
 constexpr UINT hide_delay_ms = 300;
-constexpr UINT bubble_ms = 1200;
+// 淡入、淡出各花多久、動畫每格間隔（毫秒）
+constexpr UINT fade_in_ms = 120;
+constexpr UINT fade_out_ms = 200;
+constexpr UINT fade_frame_ms = 16;
 
 // 播放列右邊那串的寬度（DIP，時間欄右緣離播放列右緣），見 volume_chip.h
 constexpr int cluster_with_volume_bar = 433;
@@ -54,8 +61,7 @@ constexpr float wheel_step_db = 2.0f;
 const Gdiplus::Color icon_colour(255, 216, 216, 216);
 // 靜音：柔和的玫瑰紅（跟輸出裝置顯示的靜音同色）
 const Gdiplus::Color mute_colour(255, 214, 134, 134);
-const Gdiplus::Color pill_fill_colour(230, 24, 24, 24);
-const Gdiplus::Color pill_border_colour(26, 255, 255, 255);
+// 膠囊的底與邊統一在 nocturne_surface.h（2026-11-12，原本灰 24／90% 不透明）
 const Gdiplus::Color track_colour(255, 74, 74, 74);
 const Gdiplus::Color bright_colour(255, 241, 241, 241);
 const Gdiplus::Color muted_grey_colour(255, 138, 138, 138);
@@ -82,7 +88,8 @@ void add_round_rect(Gdiplus::GraphicsPath& path, const Gdiplus::RectF& rect, flo
 }
 
 // 把 draw 畫好的內容用 UpdateLayeredWindow 貼到 wnd（32 位元預乘 alpha 的 DIB）；跟 output_chip.cpp 同一套
-void present_layered(HWND wnd, const POINT* origin, int width, int height, const std::function<void(Gdiplus::Graphics&)>& draw)
+void present_layered(HWND wnd, const POINT* origin, int width, int height, const std::function<void(Gdiplus::Graphics&)>& draw,
+    BYTE alpha = 255)
 {
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -110,7 +117,7 @@ void present_layered(HWND wnd, const POINT* origin, int width, int height, const
 
     SIZE size{width, height};
     POINT source{0, 0};
-    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA};
     UpdateLayeredWindow(wnd, screen_dc.get(), const_cast<POINT*>(origin), &size, memory_dc.get(), &source, 0, &blend, ULW_ALPHA);
 }
 
@@ -322,12 +329,41 @@ public:
         y = std::max<LONG>(y, monitor_info.rcWork.top - m_shadow);
         m_origin = {x, y};
 
+        // 剛彈出：從全透明淡入；淡出到一半又被叫出來：從目前的透明度接著淡入；已經完整顯示：什麼都不變
+        const auto was_visible = visible();
+        if (!was_visible)
+            m_alpha = 0.f;
+        begin_fade(+1);
         render();
-        ShowWindow(m_wnd, SW_SHOWNOACTIVATE);
+        if (!was_visible)
+            ShowWindow(m_wnd, SW_SHOWNOACTIVATE);
     }
 
-    void hide()
+    // 游標離開：animate＝true 就淡出（淡完才隱藏），否則（版面被藏起來、視窗要銷毀等）立刻隱藏
+    void hide(bool animate = false)
     {
+        if (animate && visible()) {
+            if (m_fade_dir != -1)
+                begin_fade(-1);
+            return;
+        }
+        hide_now();
+    }
+
+    // 游標又回到圖示或滑桿上：淡出到一半就改回淡入
+    void cancel_fade_out()
+    {
+        if (m_fade_dir == -1)
+            begin_fade(+1);
+    }
+
+    // 視窗開著而且不在淡出中（圖示的反白框依這個決定要不要亮）
+    bool shown() const { return visible() && m_fade_dir != -1; }
+
+    void hide_now()
+    {
+        stop_fade();
+        m_alpha = 0.f;
         if (m_dragging) {
             m_dragging = false;
             if (GetCapture() == m_wnd)
@@ -335,9 +371,6 @@ public:
         }
         g_hover.popup = false;
         g_hover.dragging = false;
-        m_bubble = false;
-        if (m_zone_wnd)
-            KillTimer(m_zone_wnd, bubble_timer_id);
         if (m_wnd && IsWindowVisible(m_wnd))
             ShowWindow(m_wnd, SW_HIDE);
     }
@@ -356,24 +389,51 @@ public:
             render();
     }
 
-    // 調整音量時讓 dB 提示泡出現，停手 bubble_ms 之後由圖示視窗的計時器收掉
-    void bump_bubble()
-    {
-        m_bubble = true;
-        if (m_zone_wnd)
-            SetTimer(m_zone_wnd, bubble_timer_id, bubble_ms, nullptr);
-        refresh();
-    }
-
-    void clear_bubble()
-    {
-        if (!m_bubble)
-            return;
-        m_bubble = false;
-        refresh();
-    }
-
 private:
+    void stop_fade()
+    {
+        m_fade_dir = 0;
+        if (m_wnd)
+            KillTimer(m_wnd, fade_timer_id);
+    }
+
+    // 往 dir（+1 淡入、−1 淡出）的方向開始淡；已經在目標透明度就不動
+    void begin_fade(int dir)
+    {
+        const auto target = dir > 0 ? 255.f : 0.f;
+        if (!m_wnd || m_alpha == target) {
+            stop_fade();
+            return;
+        }
+        m_fade_dir = dir;
+        m_fade_tick = GetTickCount64();
+        SetTimer(m_wnd, fade_timer_id, fade_frame_ms, nullptr);
+    }
+
+    // 依實際經過的時間推進透明度（計時器被別的元件拖慢時，動畫總長度仍然一樣）
+    void step_fade()
+    {
+        if (m_fade_dir == 0)
+            return;
+        const auto now = GetTickCount64();
+        const auto elapsed = static_cast<float>(now - m_fade_tick);
+        m_fade_tick = now;
+        const auto duration = static_cast<float>(m_fade_dir > 0 ? fade_in_ms : fade_out_ms);
+        m_alpha = std::clamp(m_alpha + static_cast<float>(m_fade_dir) * 255.f * elapsed / duration, 0.f, 255.f);
+
+        if (m_fade_dir > 0 && m_alpha >= 255.f) {
+            stop_fade();
+            render();
+        } else if (m_fade_dir < 0 && m_alpha <= 0.f) {
+            const auto zone = m_zone_wnd;
+            hide_now();
+            if (zone && IsWindow(zone))
+                SendMessage(zone, wm_popup_hidden, 0, 0);
+        } else {
+            render();
+        }
+    }
+
     bool ensure_window(HWND zone_wnd)
     {
         const auto owner = GetAncestor(zone_wnd, GA_ROOT);
@@ -425,7 +485,8 @@ private:
     {
         if (!m_wnd)
             return;
-        present_layered(m_wnd, &m_origin, m_width, m_height, [this](Gdiplus::Graphics& g) { draw(g); });
+        present_layered(m_wnd, &m_origin, m_width, m_height, [this](Gdiplus::Graphics& g) { draw(g); },
+            static_cast<BYTE>(m_alpha + 0.5f));
     }
 
     void draw(Gdiplus::Graphics& g) const
@@ -442,24 +503,8 @@ private:
 
         const Gdiplus::RectF body(static_cast<float>(m_pill_x), static_cast<float>(m_pill_y), static_cast<float>(m_pill_w),
             static_cast<float>(m_pill_h));
-        const auto radius = static_cast<float>(m_pill_w) / 2.0f;
-
-        // 柔和陰影：往外擴的幾層很淡的圓角框
-        for (int i = m_shadow; i >= 1; i -= std::max(1, m_shadow / 5)) {
-            Gdiplus::GraphicsPath path;
-            add_round_rect(path,
-                Gdiplus::RectF(body.X - i, body.Y - i + m_shadow / 3.f, body.Width + 2.f * i, body.Height + 2.f * i),
-                radius + i);
-            const Gdiplus::SolidBrush brush(Gdiplus::Color(static_cast<BYTE>(10 + (m_shadow - i) * 2), 0, 0, 0));
-            g.FillPath(&brush, &path);
-        }
-
-        Gdiplus::GraphicsPath body_path;
-        add_round_rect(body_path, body, radius);
-        const Gdiplus::SolidBrush fill(pill_fill_colour);
-        g.FillPath(&fill, &body_path);
-        const Gdiplus::Pen border(pill_border_colour, 1.f);
-        g.DrawPath(&border, &body_path);
+        // 統一外觀（nocturne_surface.h）：柔和陰影＋實心底＋細邊，膠囊形
+        nocturne_surface::paint_panel(g, body, static_cast<float>(m_pill_w) / 2.0f, m_shadow);
 
         // 軌道、已填的部分、圓點
         const auto track_w = std::max(2.0f, dip_f(track_width_dip));
@@ -488,8 +533,8 @@ private:
             g.FillEllipse(&brush, centre_x - d / 2, thumb_y - d / 2, d, d);
         }
 
-        if (m_bubble)
-            draw_bubble(g, volume, muted, thumb_y);
+        // dB 提示泡：滑桿彈出就一直顯示目前音量
+        draw_bubble(g, volume, muted, thumb_y);
     }
 
     // dB 提示泡：貼在圓點左邊、高度跟著圓點
@@ -520,12 +565,8 @@ private:
         const auto right = static_cast<float>(m_pill_x - dip(bubble_gap_dip));
         const Gdiplus::RectF rect(right - width, thumb_y - height / 2, width, height);
 
-        Gdiplus::GraphicsPath path;
-        add_round_rect(path, rect, static_cast<float>(dip(6)));
-        const Gdiplus::SolidBrush fill(Gdiplus::Color(230, 24, 24, 24));
-        g.FillPath(&fill, &path);
-        const Gdiplus::Pen border(Gdiplus::Color(31, 255, 255, 255), 1.f);
-        g.DrawPath(&border, &path);
+        // dB 提示泡跟滑鼠提示同一種樣子（nocturne_surface.h 的提示泡圓角，不加陰影）
+        nocturne_surface::paint_panel(g, rect, dip_f(nocturne_surface::tip_radius_dip), 0);
 
         const Gdiplus::SolidBrush brush(muted ? mute_colour : bubble_text_colour);
         g.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
@@ -543,9 +584,6 @@ private:
         const auto position = std::clamp(
             static_cast<double>(m_track_bottom - y) / static_cast<double>(std::max(1, m_track_len)), 0.0, 1.0);
         playback_control::get()->set_volume(position_to_db(position));
-        m_bubble = true;
-        if (m_zone_wnd)
-            SetTimer(m_zone_wnd, bubble_timer_id, bubble_ms, nullptr);
         render();
     }
 
@@ -621,8 +659,14 @@ private:
             break;
         case WM_MOUSEWHEEL:
             nudge_volume(GET_WHEEL_DELTA_WPARAM(wp));
-            bump_bubble();
+            refresh();
             return 0;
+        case WM_TIMER:
+            if (wp == fade_timer_id) {
+                step_fade();
+                return 0;
+            }
+            break;
         case WM_SETCURSOR:
             SetCursor(LoadCursor(nullptr, IDC_ARROW));
             return TRUE;
@@ -637,7 +681,10 @@ private:
     POINT m_origin{};
     bool m_tracking{};
     bool m_dragging{};
-    bool m_bubble{};
+    // 淡入淡出：透明度 0～255、方向（+1 淡入、−1 淡出、0 沒在淡）、上一格的時間
+    float m_alpha{};
+    int m_fade_dir{};
+    ULONGLONG m_fade_tick{};
     // 這一次彈出時算好的尺寸（像素）：視窗、膠囊、軌道
     int m_shadow{};
     int m_room{};
@@ -660,6 +707,7 @@ void schedule_hover(HWND zone_wnd)
 
     if (over) {
         KillTimer(zone_wnd, hide_timer_id);
+        Popup::instance().cancel_fade_out();
         if (!Popup::instance().visible() && g_hover.zone)
             SetTimer(zone_wnd, show_timer_id, show_delay_ms, nullptr);
     } else {
@@ -737,11 +785,16 @@ public:
         render();
     }
 
-    void hide_popup()
+    // animate＝true：游標離開時的淡出（淡完才算收起，之後由 wm_popup_hidden 清狀態）；false：立刻收起
+    void hide_popup(bool animate = false)
     {
         KillTimer(m_wnd, show_timer_id);
         KillTimer(m_wnd, hide_timer_id);
-        Popup::instance().hide();
+        Popup::instance().hide(animate);
+        if (animate && Popup::instance().visible()) {
+            render();
+            return;
+        }
         if (g_active_zone == this)
             g_active_zone = nullptr;
         render();
@@ -774,7 +827,7 @@ private:
             g.FillRectangle(&hit_brush, 0, 0, width, height);
         }
 
-        const auto lit = m_hot || (g_active_zone == this && Popup::instance().visible());
+        const auto lit = m_hot || (g_active_zone == this && Popup::instance().shown());
         if (lit) {
             const auto size = static_cast<float>(dip(highlight_size_dip));
             Gdiplus::GraphicsPath path;
@@ -892,7 +945,12 @@ private:
         case WM_MOUSEWHEEL:
             nudge_volume(GET_WHEEL_DELTA_WPARAM(wp));
             show_popup();
-            Popup::instance().bump_bubble();
+            Popup::instance().refresh();
+            return 0;
+        case wm_popup_hidden:
+            if (g_active_zone == this)
+                g_active_zone = nullptr;
+            render();
             return 0;
         case WM_TIMER:
             if (wp == show_timer_id) {
@@ -904,12 +962,7 @@ private:
             if (wp == hide_timer_id) {
                 KillTimer(wnd, hide_timer_id);
                 if (!(g_hover.zone || g_hover.popup || g_hover.dragging))
-                    hide_popup();
-                return 0;
-            }
-            if (wp == bubble_timer_id) {
-                KillTimer(wnd, bubble_timer_id);
-                Popup::instance().clear_bubble();
+                    hide_popup(true);
                 return 0;
             }
             break;

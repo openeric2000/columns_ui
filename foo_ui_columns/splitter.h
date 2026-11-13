@@ -113,6 +113,10 @@ public:
     static wil::unique_hbitmap s_capture_now_playing_stage(RECT& screen_rect, HWND& owner);
     // 給標題格式欄位用（可能在別的執行緒讀），跟 m_now_playing_expanded 同步
     static std::atomic<bool> s_now_playing_expanded_for_fields;
+    // 自編版新增（2026-11-11，展開頁 VU 表模式）：版面裡有沒有自訂標題「展開頁右側」的面板（VU 表）
+    static bool s_has_now_playing_side();
+    // 切換展開頁顯示內容後重排：VU 表面板顯示或藏起來、歌詞防誤拖蓋上或拿掉
+    static void s_refresh_now_playing();
 
 private:
     struct SizeLimit {
@@ -235,8 +239,11 @@ private:
     Panel::Ptr find_panel_by_custom_title(const PanelTitles& titles) const;
     // 直向且同一層有主內容與播放列兩個面板時傳回播放列，否則 nullptr
     Panel::Ptr get_now_playing_bar_panel() const;
-    // 有播放列時，同一層自訂標題「展開頁右側」的面板（舊版面留下的 VU 表，一律藏起來），否則 nullptr
+    // 有播放列時，同一層自訂標題「展開頁右側」的面板（VU 表），否則 nullptr。
+    // 2026-11-07 拿掉樣式 2 後一律藏起來；2026-11-11 起展開頁切到「VU 表」模式時疊到歌詞欄的位置（layout_now_playing_side）
     Panel::Ptr get_now_playing_side_panel() const;
+    // 展開頁完全展開而且是 VU 表模式時，把「展開頁右側」面板放到歌詞欄的位置，否則藏起來
+    void layout_now_playing_side();
     // 自編版新增（展開頁動畫）：從目前看得到的區域開始，往 m_now_playing_expanded 的最終區域移動
     void start_now_playing_animation();
     void on_now_playing_animation_frame();
@@ -249,6 +256,8 @@ private:
     int get_now_playing_slide_offset() const;
     // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
     void finish_now_playing_slide();
+    // 自編版新增（2026-11-09）：展開／收合動畫完全結束時呼叫；收合完成就把資訊卡切回封面（下次打開一定是封面）
+    void on_now_playing_animation_finished();
     // 自編版新增：動畫每格送出下一格前，先讓播放列（ESLyric 的進度條與時間）更新
     void let_now_playing_bar_update();
     // 自編版新增：排定下一格動畫。先處理輸入佇列裡的滑鼠、鍵盤訊息（已投遞的訊息優先於輸入，不處理的話點擊要等整段動畫結束），再投遞下一格
@@ -277,6 +286,12 @@ private:
     HWND m_output_chip_wnd{};
     // 播放列上的音量圖示視窗（自己畫，見 volume_chip.h）；有播放列時才存在，設定頁沒開「音量條收成圖示」時藏起來
     HWND m_volume_chip_wnd{};
+    // 展開頁大封面右下角的放大鈕（自己畫，見 now_playing_cover_zoom.h）；有播放列時才存在，只在完全展開的封面模式顯示
+    HWND m_cover_zoom_wnd{};
+    // 歌詞欄上的防誤拖蓋層（看不見，見 now_playing_cover_zoom.h 的 lyrics_lock）；有播放列時才存在
+    HWND m_lyrics_lock_wnd{};
+    // 自編版新增（2026-11-11）：展開頁 VU 表模式的自繪 VU 表（now_playing_vu_meter）
+    HWND m_vu_meter_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
     int m_now_playing_slide_from{};

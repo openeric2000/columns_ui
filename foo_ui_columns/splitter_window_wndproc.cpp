@@ -39,6 +39,8 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             DestroyWindow(std::exchange(m_output_chip_wnd, nullptr));
         if (m_volume_chip_wnd)
             DestroyWindow(std::exchange(m_volume_chip_wnd, nullptr));
+        if (m_cover_zoom_wnd)
+            DestroyWindow(std::exchange(m_cover_zoom_wnd, nullptr));
         destroy_children();
         m_dark_mode_notifier.reset();
         if (!--g_count) {
