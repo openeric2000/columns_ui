@@ -45,6 +45,17 @@ constexpr int stage_changed_cells = 2;
 constexpr double stage_changed_average = 0.5;
 constexpr double stage_stable_average = 1.0;
 
+// 換歌交叉淡化（2026-11-14）：自然換歌在結束前這麼多秒先截圖蓋上（剩 pre_capture_window_s 秒內才排計時器）；
+// 蓋上後最多等這麼久換歌，沒等到就照常淡出
+// 2026-11-14 219 實測：結束前 0.25 秒排的計時器，實際在換歌前 344 ms 蓋上（計時器誤差＋截圖約 30 ms），改 0.18
+constexpr double pre_capture_lead_s = 0.18;
+constexpr double pre_capture_window_s = 2.5;
+constexpr ULONGLONG track_wait_limit_ms = 1500;
+// 換歌後不等畫面「穩定」：ESLyric 的封面自己溶 0.26 秒、歌詞會捲動，整個展開頁一直在動，照換模式的規則每次都等滿 0.45 秒
+// （實測換歌後停住 469～484 ms 才淡出）。改成至少等 track_settle_min_ms、看到畫面換了就淡出（底下還在溶沒關係），最多等 track_settle_limit_ms
+constexpr ULONGLONG track_settle_min_ms = 100;
+constexpr ULONGLONG track_settle_limit_ms = 300;
+
 // 跟 CSS 的 cubic-bezier(x1, y1, x2, y2) 相同（同 splitter_window.cpp），給時間比例 x 求進度
 double cubic_bezier(double x1, double y1, double x2, double y2, double x)
 {
@@ -241,6 +252,10 @@ struct Transition {
     bool ready{};
     // 整個展開頁淡出（切換展開頁顯示內容，2026-11-11）：蓋層放舊畫面，ESLyric 畫好後整個蓋層淡出、透出底下真的新畫面，不縮放
     bool whole_stage{};
+    // 換歌交叉淡化（2026-11-14）：舊畫面先蓋上、還沒換歌；換歌（on_playback_new_track）後才開始等 ESLyric 畫好
+    bool track{};
+    bool waiting_track{};
+    ULONGLONG shown_at{};
 };
 
 std::unique_ptr<Transition> g_transition;
@@ -460,6 +475,31 @@ void finish()
 void poll_ready(Transition& transition, ULONGLONG now)
 {
     const auto elapsed = now - transition.applied_at;
+
+    // 換歌：畫面跟蓋上時不一樣了（新的字畫出來了）就淡出，不等穩定
+    if (transition.track) {
+        if (elapsed < track_settle_min_ms)
+            return;
+        bool changed = false;
+        if (auto shot = capture(transition.screen)) {
+            const auto signature = signature_of(*shot, transition.cover);
+            int cells = 0;
+            for (size_t i = 0; i + 2 < signature.size() && i + 2 < transition.before_signature.size(); i += 3) {
+                const auto d = std::abs(signature[i] - transition.before_signature[i])
+                    + std::abs(signature[i + 1] - transition.before_signature[i + 1])
+                    + std::abs(signature[i + 2] - transition.before_signature[i + 2]);
+                if (d > stage_cell_threshold)
+                    cells++;
+            }
+            changed = cells >= stage_changed_cells || difference(signature, transition.before_signature) > stage_changed_average;
+        }
+        if (!changed && elapsed < track_settle_limit_ms)
+            return;
+        transition.ready = true;
+        transition.ready_at = now;
+        return;
+    }
+
     if (elapsed < settle_min_ms)
         return;
 
@@ -532,6 +572,15 @@ void on_timer()
 
     auto& transition = *g_transition;
     const auto now = GetTickCount64();
+
+    // 換歌交叉淡化：舊畫面蓋著等換歌；等太久（算錯結束時間、播完清單沒有下一首）就當作已經換了，照常淡出
+    if (transition.waiting_track) {
+        if (now - transition.shown_at < track_wait_limit_ms)
+            return;
+        ANIM_LOG_LINE(fmt::format("no new track after {} ms", now - transition.shown_at));
+        transition.waiting_track = false;
+        transition.applied_at = now;
+    }
 
     if (!transition.ready) {
         poll_ready(transition, now);
@@ -726,5 +775,150 @@ void run_stage(std::function<void()> apply)
     transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
     start(std::move(transition), owner, apply);
 }
+
+// ---- 換歌交叉淡化（2026-11-14，v1.4 待做清單第 11 個）----
+// ESLyric 換歌時封面會自己溶約 0.26 秒，但標題、資訊列、歌詞、背景是當下直接換掉。做法跟切換顯示內容一樣：
+// 舊畫面截下來蓋在整個展開頁上，換歌後等 ESLyric 畫好，整個蓋層由 DWM 淡出。
+// 舊畫面一定要在 ESLyric 換字之前截、而且蓋上去（換歌後才蓋，會先閃一下新畫面再跳回舊的）：
+// - 手動換歌（下一首、雙擊別首）：on_playback_starting，這時還沒開新歌
+// - 自然換歌沒有 starting：照播放位置排計時器，結束前 pre_capture_lead_s 秒截圖蓋上（最後這一下畫面停住，看不太出來）
+// 拖進度、暫停、停止時拿掉還在等換歌的蓋層
+namespace {
+
+UINT_PTR g_pre_capture_timer{};
+
+void cancel_pre_capture()
+{
+    if (g_pre_capture_timer) {
+        KillTimer(nullptr, g_pre_capture_timer);
+        g_pre_capture_timer = 0;
+    }
+}
+
+// 截下目前的展開頁、蓋上去，等換歌；展開頁沒完全展開、正在跑別的動畫時什麼都不做
+void cover_before_track_change(const char* reason)
+{
+    if (g_transition)
+        return;
+
+    RECT stage{};
+    HWND owner{};
+    if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage, owner))
+        return;
+
+    auto* g = graphics();
+    auto before = g ? capture(stage) : nullptr;
+    if (!before)
+        return;
+
+    ANIM_LOG_BEGIN(reason);
+    auto transition = std::make_unique<Transition>();
+    transition->whole_stage = true;
+    transition->track = true;
+    transition->waiting_track = true;
+    transition->screen = stage;
+    transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
+    transition->before_signature = signature_of(*before, transition->cover);
+
+    if (!show_overlay(*g, *transition, owner, *before, nullptr)) {
+        ANIM_LOG_LINE("overlay failed");
+        const auto wnd = transition->wnd;
+        transition.reset();
+        if (wnd)
+            DestroyWindow(wnd);
+        return;
+    }
+    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
+
+    g_transition = std::move(transition);
+    g_transition->shown_at = GetTickCount64();
+    SetTimer(g_transition->wnd, poll_timer_id, poll_interval_ms, nullptr);
+}
+
+void CALLBACK on_pre_capture_timer(HWND, UINT, UINT_PTR, DWORD)
+{
+    cancel_pre_capture();
+    // 計時器排好之後又被拖進度、暫停的話不截
+    const auto playback = play_control::get();
+    if (!playback->is_playing() || playback->is_paused())
+        return;
+    cover_before_track_change("track (natural)");
+}
+
+// 快播完了：排一個計時器在結束前 pre_capture_lead_s 秒截圖（on_playback_time 一秒一次，不夠準）
+void schedule_pre_capture()
+{
+    if (g_pre_capture_timer || g_transition)
+        return;
+
+    const auto playback = play_control::get();
+    metadb_handle_ptr track;
+    if (playback->is_paused() || !playback->get_now_playing(track) || !track.is_valid())
+        return;
+
+    const auto length = track->get_length();
+    const auto remaining = length - playback->playback_get_position();
+    if (length <= 0 || remaining <= pre_capture_lead_s || remaining > pre_capture_window_s)
+        return;
+
+    const auto delay = static_cast<UINT>((remaining - pre_capture_lead_s) * 1000.0);
+    g_pre_capture_timer = SetTimer(nullptr, 0, std::max(delay, 1u), on_pre_capture_timer);
+}
+
+// 還在等換歌的蓋層拿掉（拖進度、暫停、停止）；已經換歌、正在淡出的不動
+void drop_waiting_cover()
+{
+    cancel_pre_capture();
+    if (g_transition && g_transition->waiting_track) {
+        ANIM_LOG_LINE("dropped before new track");
+        finish();
+    }
+}
+
+class TrackTransitionCallback : public play_callback_static {
+public:
+    unsigned get_flags() override
+    {
+        return flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_stop | flag_on_playback_seek
+            | flag_on_playback_pause | flag_on_playback_time;
+    }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override
+    {
+        cancel_pre_capture();
+        if (!paused)
+            cover_before_track_change("track (manual)");
+    }
+
+    void on_playback_new_track(metadb_handle_ptr track) override
+    {
+        cancel_pre_capture();
+        if (g_transition && g_transition->waiting_track) {
+            g_transition->waiting_track = false;
+            g_transition->applied_at = GetTickCount64();
+            ANIM_LOG_LINE(fmt::format("new track t={:.1f} (covered {} ms before)", ANIM_LOG_NOW(),
+                g_transition->applied_at - g_transition->shown_at));
+        }
+    }
+
+    void on_playback_stop(play_control::t_stop_reason reason) override
+    {
+        if (reason != play_control::stop_reason_starting_another)
+            drop_waiting_cover();
+    }
+
+    void on_playback_seek(double time) override { drop_waiting_cover(); }
+    void on_playback_pause(bool state) override { drop_waiting_cover(); }
+    void on_playback_time(double time) override { schedule_pre_capture(); }
+
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<TrackTransitionCallback> g_track_transition_callback;
+
+} // namespace
 
 } // namespace cui::style_transition
