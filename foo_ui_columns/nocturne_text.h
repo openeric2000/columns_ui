@@ -9,7 +9,7 @@ namespace cui::nocturne_text {
 
 // 產品名稱與版本號（設定頁「關於」分頁顯示；中英文版共用，發布新版時只改這一行版本號）
 inline constexpr wchar_t about_product_name[] = L"Nocturne for foobar2000";
-inline constexpr wchar_t nocturne_version[] = L"1.40";
+inline constexpr wchar_t nocturne_version[] = L"1.50";
 
 #ifdef NOCTURNE_LANG_EN
 
