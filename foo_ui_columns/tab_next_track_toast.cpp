@@ -819,20 +819,33 @@ private:
     }
 
     // 「展開頁要有」：外觀用跟下面一樣的下拉選單（2026-11-11 使用者說原本的按鈕是白底、跟下面的不一樣），
-    // 裡面只放一項＝勾選的模式用頓號接起來；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
+    // 裡面只放一項＝勾選的摘要；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
+    // 摘要（2026-11-14 使用者說全列出來太長）：全勾＝「全部」、少一兩種＝「除了 …」、其他直接列出勾選的
     static void update_modes_text(HWND wnd)
     {
         using main_menu::NowPlayingMode;
         const auto mask = main_menu::now_playing_modes::get_mask();
-        std::wstring text;
         const auto& modes = main_menu::now_playing_mode_order;
-        for (size_t i = 0; i < std::size(modes); ++i) {
-            if ((mask & main_menu::now_playing_modes::bit_of(modes[i])) == 0)
-                continue;
-            if (!text.empty())
-                text += nocturne_text::modes_separator;
-            text += nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i])];
-        }
+        std::vector<NowPlayingMode> checked;
+        std::vector<NowPlayingMode> unchecked;
+        for (const auto mode : modes)
+            ((mask & main_menu::now_playing_modes::bit_of(mode)) != 0 ? checked : unchecked).push_back(mode);
+        const auto join = [](const std::vector<NowPlayingMode>& list) {
+            std::wstring joined;
+            for (const auto mode : list) {
+                if (!joined.empty())
+                    joined += nocturne_text::modes_separator;
+                joined += nocturne_text::mode_short_names[main_menu::mode_name_index(mode)];
+            }
+            return joined;
+        };
+        std::wstring text;
+        if (unchecked.empty())
+            text = nocturne_text::modes_all;
+        else if (unchecked.size() <= 2 && checked.size() > unchecked.size())
+            text = nocturne_text::modes_except + join(unchecked);
+        else
+            text = join(checked);
         const auto combo = GetDlgItem(wnd, IDC_MODES);
         ComboBox_ResetContent(combo);
         ComboBox_AddString(combo, text.c_str());

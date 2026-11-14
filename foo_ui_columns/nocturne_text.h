@@ -192,6 +192,8 @@ inline constexpr char cover_line_format_script[]
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "Played $if2(%play_count%,1) times[ · last $left(%last_played%,10)]";
 inline constexpr wchar_t modes_separator[] = L", ";
+inline constexpr wchar_t modes_all[] = L"All";
+inline constexpr wchar_t modes_except[] = L"All except ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
@@ -408,6 +410,8 @@ inline constexpr char cover_line_format_script[]
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "第 $if2(%play_count%,1) 次播放[　上次 $left(%last_played%,10)]";
 inline constexpr wchar_t modes_separator[] = L"、";
+inline constexpr wchar_t modes_all[] = L"全部";
+inline constexpr wchar_t modes_except[] = L"除了 ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"點或拖曳歌詞不會跳時間；滾輪和右鍵照常。";
