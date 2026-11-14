@@ -197,14 +197,12 @@ inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
     = L"Clicking or dragging the lyrics no longer seeks. The wheel and right-click still work.";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
-inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
 inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
 inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
-inline constexpr wchar_t vu_needle_title[] = L"Needle";
+inline constexpr wchar_t vu_backlight_names[2][8] = {L"Off", L"On"};
 inline constexpr wchar_t vu_needle_names[4][16] = {L"Standard", L"Lively", L"Snappy", L"Auto"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"Follows the song"};
 // 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
-inline constexpr wchar_t spectrum_picker_title[] = L"Spectrum style";
 inline constexpr wchar_t spectrum_style_names[6][32]
     = {L"LED · cover colour", L"LED · warm", L"Bars · cover glow", L"Bars · frost", L"Mirrored lines", L"Glow curve"};
 inline constexpr wchar_t spectrum_frame_title[] = L"Frame";
@@ -414,14 +412,12 @@ inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"點或拖曳歌詞不會跳時間；滾輪和右鍵照常。";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
-inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
 inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
 inline constexpr wchar_t vu_backlight[] = L"暖色背光";
-inline constexpr wchar_t vu_needle_title[] = L"指針";
+inline constexpr wchar_t vu_backlight_names[2][8] = {L"關", L"開"};
 inline constexpr wchar_t vu_needle_names[4][16] = {L"標準", L"活潑", L"靈敏", L"自動"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"跟著歌曲音量"};
 // 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
-inline constexpr wchar_t spectrum_picker_title[] = L"頻譜樣式";
 inline constexpr wchar_t spectrum_style_names[6][32]
     = {L"LED 點陣・封面色", L"LED 點陣・暖光", L"長條・封面色柔光", L"長條・霧白", L"鏡像細條", L"光帶曲線"};
 inline constexpr wchar_t spectrum_frame_title[] = L"外框";

@@ -13,6 +13,7 @@
 #include "now_playing_cover_zoom.h"
 #include "menu_items.h"
 #include "next_track_toast.h"
+#include "nocturne_segment.h"
 #include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "popup_dismiss.h"
@@ -3017,33 +3018,39 @@ void debug_dump(HWND wnd)
 // 點縮圖馬上換、卡片留著可以比較；點卡片外面或按 Esc 關
 namespace picker {
 
+// 2026-11-14 改成分段切換（共用 nocturne_segment.h；使用者在預覽頁選 D＋等級 2 動畫＋按住拖曳＋開關淡入淡出）：
+// - VU 表：三張縮圖放在一條軌道裡，選中那張後面鋪亮底、點別張亮底滑過去（縮圖只點不拖）；
+//   指針四段＋下面一行說明（dBFS／反應時間）；暖色背光改成「關／開」兩段
+// - 頻譜：六張縮圖（兩排三張）同一條軌道，亮底可以跨排滑；外框、頻段、峰值點落下各一條分段，左邊留小標
+// - 拿掉標題列、×、琥珀色框；點外面、Esc、切走程式照舊會關（popup_dismiss）
+namespace seg = nocturne_segment;
+
 constexpr wchar_t class_name[] = L"columns_ui_vu_style_picker";
 constexpr float shadow_dip = 18.f;
-constexpr float pad_dip = 16.f;
-constexpr float title_h_dip = 34.f;
+constexpr float pad_dip = 12.f;
 constexpr float tile_w_dip = 168.f;
 constexpr float tile_h_dip = 96.f;
-constexpr float tile_gap_dip = 12.f;
-constexpr float label_h_dip = 30.f;
-constexpr float row_h_dip = 40.f;
-constexpr float radius_dip = nocturne_surface::card_radius_dip; // 統一圓角（原本 14）
-constexpr int backlight_hit = 50;
-constexpr int needle_hit_base = 100; // 指針設定那排：100＋第幾個
-constexpr float section_h_dip = 26.f;
-constexpr float chip_h_dip = 46.f;
-constexpr float chip_gap_dip = 8.f;
+constexpr float spectrum_tile_h_dip = 76.f;
+constexpr float cell_pad_dip = 4.f;
+constexpr float tile_label_h_dip = 28.f;
+constexpr float tiles_pad_dip = 5.f;
+constexpr float tiles_gap_dip = 6.f;
+constexpr float tiles_radius_dip = 12.f;
+constexpr float cell_radius_dip = 9.f;
+constexpr float thumb_radius_dip = 9.f;
+constexpr float section_gap_dip = 10.f;
+constexpr float caption_h_dip = 26.f;
+constexpr float hair_gap_dip = 6.f;
+constexpr float light_row_h_dip = 34.f;
+constexpr float light_seg_w_dip = 120.f;
+constexpr float light_seg_h_dip = 32.f;
+constexpr float spectrum_row_pitch_dip = 44.f;
+constexpr float spectrum_label_w_dip = 104.f;
+constexpr float tile_font_dip = 14.f;
+constexpr float small_font_dip = 13.f;
+constexpr float radius_dip = nocturne_surface::card_radius_dip;
 // 縮圖由左到右的順序（2026-11-12 使用者要單錶雙指針跟圓形互換位置）；存的設定值仍是 Style 的數字
 constexpr Style display_order[style_count] = {Style::box, Style::dual, Style::round};
-
-// 頻譜卡（2026-11-12）：六張縮圖（兩排三張）＋外框、頻段、峰值點落下三排按鈕
-constexpr float spectrum_tile_h_dip = 76.f;
-constexpr float spectrum_row_h_dip = 44.f;
-constexpr float spectrum_row_label_dip = 104.f;
-constexpr float spectrum_chip_h_dip = 32.f;
-constexpr int frame_hit_base = 200;
-constexpr int close_hit = 900;
-constexpr int bands_hit_base = 300;
-constexpr int fall_hit_base = 400;
 
 struct Picker {
     HWND wnd{};
@@ -3051,40 +3058,59 @@ struct Picker {
     bool spectrum{};
     // 歌詞＋VU 表：沒有圓形錶頭（2026-11-12 使用者：方框雙錶、單錶雙指針照樣可選，圓形不在這裡顯示），卡片只列前兩種
     bool combined_vu{};
-    Gdiplus::RectF spectrum_tiles[spectrum_style_count];
-    Gdiplus::RectF frame_chips[2];
-    Gdiplus::RectF band_chips[3];
-    Gdiplus::RectF fall_chips[spectrum_fall_count];
-    float row_y[3]{};
-    std::vector<uint32_t> spectrum_thumbs[spectrum_style_count];
-    Gdiplus::RectF close_box;
-    float k{1.f}; // DPI 倍率
+    float k{1.f};
     int width{};
     int height{};
     Gdiplus::RectF card;
-    Gdiplus::RectF tiles[style_count];
-    float divider_y{};
-    Gdiplus::RectF chips[needle_preset_count];
-    float divider2_y{};
-    Gdiplus::RectF backlight_row;
+    float inner_w{};
+    // 縮圖
     int thumb_w{};
     int thumb_h{};
-    std::vector<uint32_t> thumbs[style_count];
-    std::vector<float> shadow;
-    int hover{-1};
+    Gdiplus::RectF tiles_track;
+    std::vector<Gdiplus::RectF> cells;
+    std::vector<std::wstring> tile_names;
+    std::vector<std::vector<uint32_t>> thumb_pixels;
+    std::vector<std::unique_ptr<Gdiplus::Bitmap>> thumb_bitmaps;
+    int tile_selected{};
+    int tile_hover{-1};
+    int tile_pressed{-1};
+    seg::Plate plate;
+    // VU：指針、背光
+    seg::Row needle;
+    seg::Caption needle_caption;
+    int needle_caption_index{};
+    Gdiplus::RectF needle_caption_box;
+    float hair_y{};
+    seg::Row light;
+    Gdiplus::RectF light_label_box;
+    // 頻譜：外框、頻段、峰值點落下
+    seg::Row frame_row;
+    seg::Row bands_row;
+    seg::Row fall_row;
+    Gdiplus::RectF row_label_boxes[3];
+    seg::Row* active{};
+    seg::Presenter presenter;
+    seg::FrameClock clock;
     bool tracking{};
+    std::unique_ptr<Gdiplus::FontFamily> family;
+    std::unique_ptr<Gdiplus::Font> label_font;
+    std::unique_ptr<Gdiplus::Font> tile_font;
+    std::unique_ptr<Gdiplus::Font> small_font;
+    std::vector<uint32_t> background;
+    std::vector<uint32_t> frame_pixels;
 };
-
-// 縮圖幾張：歌詞＋VU 表只有方框雙錶、單錶雙指針（display_order 的前兩個）
-int tile_count(const Picker& p)
-{
-    return p.combined_vu ? 2 : style_count;
-}
 
 std::unique_ptr<Picker>& current()
 {
     static std::unique_ptr<Picker> picker;
     return picker;
+}
+
+std::vector<seg::Row*> rows_of(Picker& p)
+{
+    if (p.spectrum)
+        return {&p.frame_row, &p.bands_row, &p.fall_row};
+    return {&p.needle, &p.light};
 }
 
 // 一種樣式的縮圖（不透明 BGRA）：底是目前錶後面的虛化背景（拉成縮圖大小），錶照展開頁的比例縮小置中
@@ -3208,66 +3234,46 @@ std::vector<uint32_t> render_spectrum_thumbnail(SpectrumStyle style, int tw, int
     return out;
 }
 
+int tile_count(const Picker& p)
+{
+    if (p.spectrum)
+        return spectrum_style_count;
+    return p.combined_vu ? 2 : style_count;
+}
+
 void build_thumbnails(Picker& p)
 {
     const auto* live = state_of(p.meter);
-    if (p.spectrum) {
-        for (int i = 0; i < spectrum_style_count; ++i)
-            p.spectrum_thumbs[i] = render_spectrum_thumbnail(static_cast<SpectrumStyle>(i), p.thumb_w, p.thumb_h, live);
-        return;
+    const auto count = tile_count(p);
+    p.thumb_pixels.assign(count, {});
+    p.thumb_bitmaps.clear();
+    for (int i = 0; i < count; ++i) {
+        p.thumb_pixels[i] = p.spectrum ? render_spectrum_thumbnail(static_cast<SpectrumStyle>(i), p.thumb_w, p.thumb_h, live)
+                                       : render_thumbnail(display_order[i], p.thumb_w, p.thumb_h, live);
+        p.thumb_bitmaps.push_back(std::make_unique<Gdiplus::Bitmap>(p.thumb_w, p.thumb_h, p.thumb_w * 4, PixelFormat32bppPARGB,
+            reinterpret_cast<BYTE*>(p.thumb_pixels[i].data())));
     }
-    for (int i = 0; i < style_count; ++i)
-        p.thumbs[i] = render_thumbnail(display_order[i], p.thumb_w, p.thumb_h, live);
 }
 
-void build_spectrum_layout(Picker& p)
+// 目前存的選擇
+void read_selection(Picker& p)
 {
-    const auto k = p.k;
-    const auto px = [k](float dip) { return std::round(dip * k); };
-    const auto sh = px(shadow_dip);
-    const auto pad = px(pad_dip);
-    p.thumb_w = static_cast<int>(px(tile_w_dip));
-    p.thumb_h = static_cast<int>(px(spectrum_tile_h_dip));
-    const auto gap = px(tile_gap_dip);
-    const auto card_w = 2 * pad + 3 * p.thumb_w + 2 * gap;
-    const auto tile_block = p.thumb_h + px(label_h_dip);
-    const auto card_h = px(title_h_dip) + 2 * tile_block + px(6) + 3 * px(spectrum_row_h_dip) + px(10);
-    p.card = {sh, sh - px(4), card_w, card_h};
-    p.width = static_cast<int>(card_w + 2 * sh);
-    p.height = static_cast<int>(card_h + 2 * sh);
-    p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
-    for (int i = 0; i < spectrum_style_count; ++i)
-        p.spectrum_tiles[i] = {p.card.X + pad + (i % 3) * (p.thumb_w + gap), p.card.Y + px(title_h_dip) + (i / 3) * tile_block,
-            static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
-    p.divider_y = p.card.Y + px(title_h_dip) + 2 * tile_block + px(4);
-    const auto chips_left = p.card.X + pad + px(spectrum_row_label_dip);
-    const auto chips_w = card_w - 2 * pad - px(spectrum_row_label_dip);
-    const auto chip_gap = px(chip_gap_dip);
-    const auto place = [&](Gdiplus::RectF* chips, int count, float y) {
-        const auto cw = std::floor((chips_w - (count - 1) * chip_gap) / count);
-        for (int i = 0; i < count; ++i)
-            chips[i] = {chips_left + i * (cw + chip_gap), y + (px(spectrum_row_h_dip) - px(spectrum_chip_h_dip)) / 2.f, cw,
-                px(spectrum_chip_h_dip)};
-    };
-    for (int row = 0; row < 3; ++row)
-        p.row_y[row] = p.divider_y + px(6) + row * px(spectrum_row_h_dip);
-    place(p.frame_chips, 2, p.row_y[0]);
-    place(p.band_chips, 3, p.row_y[1]);
-    place(p.fall_chips, spectrum_fall_count, p.row_y[2]);
-
-    std::vector<float> mask(static_cast<size_t>(p.width) * p.height, 0.f);
-    const auto hw = card_w / 2.f;
-    const auto hh = card_h / 2.f;
-    const auto cx = p.card.X + hw;
-    const auto cy = p.card.Y + hh + px(6);
-    for (int y = 0; y < p.height; ++y)
-        for (int x = 0; x < p.width; ++x)
-            mask[static_cast<size_t>(y) * p.width + x]
-                = std::clamp(0.5f - rounded_rect_sdf(x + 0.5f - cx, y + 0.5f - cy, hw, hh, px(radius_dip)), 0.f, 1.f);
-    box_blur(mask, p.width, p.height, std::max(1, static_cast<int>(px(7))));
-    for (auto& value : mask)
-        value *= 0.55f;
-    p.shadow = std::move(mask);
+    if (p.spectrum) {
+        p.tile_selected = static_cast<int>(cached_spectrum_style());
+        p.frame_row.selected = cached_spectrum_framed() ? 0 : 1;
+        p.bands_row.selected = static_cast<int>(
+            std::ranges::find(spectrum_band_options, cached_spectrum_bands()) - std::begin(spectrum_band_options));
+        p.fall_row.selected = cached_spectrum_fall();
+        return;
+    }
+    // 歌詞＋VU 表時存的若是圓形，實際畫的是方框雙錶
+    const auto shown = p.combined_vu && get_style() == Style::round ? Style::box : get_style();
+    p.tile_selected = 0;
+    for (int i = 0; i < style_count; ++i)
+        if (display_order[i] == shown)
+            p.tile_selected = i;
+    p.needle.selected = static_cast<int>(get_needle_preset());
+    p.light.selected = is_backlight_enabled() ? 1 : 0;
 }
 
 void build_layout(Picker& p)
@@ -3277,326 +3283,319 @@ void build_layout(Picker& p)
     const auto sh = px(shadow_dip);
     const auto pad = px(pad_dip);
     p.thumb_w = static_cast<int>(px(tile_w_dip));
-    p.thumb_h = static_cast<int>(px(tile_h_dip));
-    const auto gap = px(tile_gap_dip);
-    const auto card_w = 2 * pad + style_count * p.thumb_w + (style_count - 1) * gap;
-    const auto card_h = px(title_h_dip) + p.thumb_h + px(label_h_dip) + px(4) + px(section_h_dip) + px(chip_h_dip)
-        + px(14) + px(row_h_dip) + px(10);
-    p.card = {sh, sh - px(4), card_w, card_h};
-    p.width = static_cast<int>(card_w + 2 * sh);
-    p.height = static_cast<int>(card_h + 2 * sh);
-    p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
-    for (int i = 0; i < style_count; ++i)
-        // 歌詞＋VU 表只有兩張：在三張的寬度裡置中
-        p.tiles[i] = {p.card.X + pad + (p.combined_vu ? (p.thumb_w + gap) / 2.f : 0.f) + i * (p.thumb_w + gap),
-            p.card.Y + px(title_h_dip), static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
-    p.divider_y = p.tiles[0].Y + p.thumb_h + px(label_h_dip) + px(4);
-    // 指針設定：小標題＋一排四個按鈕（跟縮圖同寬）
-    const auto chips_y = p.divider_y + px(section_h_dip);
-    const auto chip_gap = px(chip_gap_dip);
-    const auto inner_w = card_w - 2 * pad;
-    const auto chip_w = std::floor((inner_w - (needle_preset_count - 1) * chip_gap) / needle_preset_count);
-    for (int i = 0; i < needle_preset_count; ++i)
-        p.chips[i] = {p.card.X + pad + i * (chip_w + chip_gap), chips_y, chip_w, px(chip_h_dip)};
-    p.divider2_y = chips_y + px(chip_h_dip) + px(10);
-    p.backlight_row = {p.card.X + px(8), p.divider2_y + px(5), card_w - px(16), px(row_h_dip) - px(6)};
+    p.thumb_h = static_cast<int>(px(p.spectrum ? spectrum_tile_h_dip : tile_h_dip));
+    const auto cell_pad = px(cell_pad_dip);
+    const auto cell_w = p.thumb_w + 2 * cell_pad;
+    const auto cell_h = cell_pad + p.thumb_h + px(tile_label_h_dip);
+    const auto gap = px(tiles_gap_dip);
+    const auto tpad = px(tiles_pad_dip);
+    p.inner_w = 3 * cell_w + 2 * gap + 2 * tpad;
+    const auto card_w = p.inner_w + 2 * pad;
+    p.card = {sh, sh - px(4), card_w, 0};
 
-    // 陰影：卡片形狀往下 6、模糊
-    std::vector<float> mask(static_cast<size_t>(p.width) * p.height, 0.f);
-    const auto hw = card_w / 2.f;
-    const auto hh = card_h / 2.f;
+    // 縮圖軌道：頻譜兩排三張；VU 一排（歌詞＋VU 表只有兩張，置中）
+    const auto count = tile_count(p);
+    const auto columns = p.spectrum ? 3 : count;
+    const auto lines = p.spectrum ? 2 : 1;
+    const auto track_w = columns * cell_w + (columns - 1) * gap + 2 * tpad;
+    const auto track_h = lines * cell_h + (lines - 1) * gap + 2 * tpad;
+    auto y = pad;
+    p.tiles_track = {p.card.X + pad + (p.inner_w - track_w) / 2.f, p.card.Y + y, track_w, track_h};
+    p.cells.clear();
+    p.tile_names.clear();
+    for (int i = 0; i < count; ++i) {
+        p.cells.push_back({p.tiles_track.X + tpad + (i % 3) * (cell_w + gap), p.tiles_track.Y + tpad + (i / 3) * (cell_h + gap),
+            cell_w, cell_h});
+        p.tile_names.emplace_back(p.spectrum ? nocturne_text::spectrum_style_names[i]
+                                             : nocturne_text::vu_style_names[static_cast<int>(display_order[i])]);
+    }
+    y += track_h + px(section_gap_dip);
+
+    read_selection(p);
+    const auto row_h = px(seg::row_h_dip);
+    const auto left = p.card.X + pad;
+    if (!p.spectrum) {
+        p.needle.labels.clear();
+        for (const auto* name : nocturne_text::vu_needle_names)
+            p.needle.labels.emplace_back(name);
+        seg::layout(p.needle, {left, p.card.Y + y, p.inner_w, row_h}, k);
+        y += row_h;
+        p.needle_caption_box = {left, p.card.Y + y, p.inner_w, px(caption_h_dip)};
+        p.needle_caption_index = p.needle.selected;
+        seg::caption_set(p.needle_caption, nocturne_text::vu_needle_details[p.needle.selected], 1, false);
+        y += px(caption_h_dip) + px(2);
+        p.hair_y = p.card.Y + y;
+        y += px(hair_gap_dip);
+
+        const auto light_h = px(light_row_h_dip);
+        const auto seg_w = px(light_seg_w_dip);
+        const auto seg_h = px(light_seg_h_dip);
+        p.light_label_box = {left + px(2), p.card.Y + y, p.inner_w - seg_w - px(2), light_h};
+        p.light.labels = {nocturne_text::vu_backlight_names[0], nocturne_text::vu_backlight_names[1]};
+        seg::layout(p.light, {left + p.inner_w - seg_w, p.card.Y + y + (light_h - seg_h) / 2.f, seg_w, seg_h}, k);
+        y += light_h;
+    } else {
+        seg::Row* rows[3] = {&p.frame_row, &p.bands_row, &p.fall_row};
+        p.frame_row.labels = {nocturne_text::spectrum_frame_names[0], nocturne_text::spectrum_frame_names[1]};
+        p.bands_row.labels.clear();
+        for (const auto bands : spectrum_band_options)
+            p.bands_row.labels.push_back(std::to_wstring(bands));
+        p.fall_row.labels.clear();
+        for (const auto* name : nocturne_text::spectrum_fall_names)
+            p.fall_row.labels.emplace_back(name);
+        const auto pitch = px(spectrum_row_pitch_dip);
+        const auto label_w = px(spectrum_label_w_dip);
+        for (int r = 0; r < 3; ++r) {
+            p.row_label_boxes[r] = {left + px(2), p.card.Y + y, label_w - px(2), pitch};
+            seg::layout(*rows[r], {left + label_w, p.card.Y + y + (pitch - row_h) / 2.f, p.inner_w - label_w, row_h}, k);
+            y += pitch;
+        }
+    }
+    p.card.Height = y + pad - px(2);
+    p.width = static_cast<int>(card_w + 2 * sh);
+    p.height = static_cast<int>(p.card.Height + 2 * sh);
+    seg::plate_place(p.plate, p.cells[std::clamp(p.tile_selected, 0, count - 1)], false);
+}
+
+// 不會動的部分先畫好：陰影（卡片形狀往下 6、模糊）、實心底、上緣光澤、細邊；字型
+void build_static(Picker& p)
+{
+    const auto k = p.k;
+    const auto px = [k](float dip) { return std::round(dip * k); };
+    const auto w = p.width;
+    const auto h = p.height;
+    std::vector<float> mask(static_cast<size_t>(w) * h, 0.f);
+    const auto hw = p.card.Width / 2.f;
+    const auto hh = p.card.Height / 2.f;
     const auto cx = p.card.X + hw;
     const auto cy = p.card.Y + hh + px(6);
-    for (int y = 0; y < p.height; ++y)
-        for (int x = 0; x < p.width; ++x)
-            mask[static_cast<size_t>(y) * p.width + x]
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            mask[static_cast<size_t>(y) * w + x]
                 = std::clamp(0.5f - rounded_rect_sdf(x + 0.5f - cx, y + 0.5f - cy, hw, hh, px(radius_dip)), 0.f, 1.f);
-    box_blur(mask, p.width, p.height, std::max(1, static_cast<int>(px(7))));
-    for (auto& value : mask)
-        value *= 0.55f;
-    p.shadow = std::move(mask);
-}
+    box_blur(mask, w, h, std::max(1, static_cast<int>(px(7))));
+    p.background.assign(static_cast<size_t>(w) * h, 0);
+    for (size_t i = 0; i < p.background.size(); ++i)
+        p.background[i] = static_cast<uint32_t>(mask[i] * 0.55f * 255.f + 0.5f) << 24;
 
-bool inside(const Gdiplus::RectF& r, float x, float y)
-{
-    return x >= r.X && x < r.X + r.Width && y >= r.Y && y < r.Y + r.Height;
-}
-
-int hit_test(const Picker& p, POINT pt)
-{
-    const auto fx = static_cast<float>(pt.x);
-    const auto fy = static_cast<float>(pt.y);
-    if (inside(p.close_box, fx, fy))
-        return close_hit;
-    if (p.spectrum) {
-        for (int i = 0; i < spectrum_style_count; ++i) {
-            const auto& t = p.spectrum_tiles[i];
-            if (inside({t.X, t.Y, t.Width, t.Height + label_h_dip * p.k}, fx, fy))
-                return i;
-        }
-        for (int i = 0; i < 2; ++i)
-            if (inside(p.frame_chips[i], fx, fy))
-                return frame_hit_base + i;
-        for (int i = 0; i < 3; ++i)
-            if (inside(p.band_chips[i], fx, fy))
-                return bands_hit_base + i;
-        for (int i = 0; i < spectrum_fall_count; ++i)
-            if (inside(p.fall_chips[i], fx, fy))
-                return fall_hit_base + i;
-        return -1;
+    Gdiplus::Bitmap canvas(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(p.background.data()));
+    Gdiplus::Graphics g(&canvas);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    Gdiplus::GraphicsPath card_path;
+    add_panel_path(card_path, p.card, radius_dip * k);
+    const Gdiplus::SolidBrush card_fill(nocturne_surface::fill_colour());
+    g.FillPath(&card_fill, &card_path);
+    {
+        Gdiplus::LinearGradientBrush sheen(Gdiplus::PointF(0, p.card.Y), Gdiplus::PointF(0, p.card.Y + 60.f * k),
+            rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
+        g.SetClip(&card_path);
+        g.FillRectangle(&sheen, p.card.X, p.card.Y, p.card.Width, 60.f * k);
+        g.ResetClip();
     }
-    for (int i = 0; i < tile_count(p); ++i) {
-        const auto& t = p.tiles[i];
-        const auto half_gap = tile_gap_dip * p.k / 2.f;
-        if (fx >= t.X - half_gap && fx < t.X + t.Width + half_gap && fy >= t.Y - 4.f * p.k
-            && fy < t.Y + t.Height + label_h_dip * p.k)
+    const Gdiplus::Pen card_border(nocturne_surface::edge_colour(), 1.f * k);
+    g.DrawPath(&card_border, &card_path);
+    // 縮圖軌道（白 5%）
+    Gdiplus::GraphicsPath track_path;
+    seg::add_rounded(track_path, p.tiles_track, tiles_radius_dip * k);
+    const Gdiplus::SolidBrush track_fill(Gdiplus::Color(13, 255, 255, 255));
+    g.FillPath(&track_fill, &track_path);
+    if (!p.spectrum) {
+        const Gdiplus::SolidBrush hair(Gdiplus::Color(20, 255, 255, 255));
+        g.FillRectangle(&hair, p.card.X + std::round(pad_dip * k), p.hair_y, p.inner_w, std::max(1.f, std::round(k)));
+    }
+
+    p.family = seg::theme_family();
+    const auto style_flags = seg::regular_style(*p.family);
+    p.label_font = std::make_unique<Gdiplus::Font>(p.family.get(), seg::label_font_dip * k, style_flags, Gdiplus::UnitPixel);
+    p.tile_font = std::make_unique<Gdiplus::Font>(p.family.get(), tile_font_dip * k, style_flags, Gdiplus::UnitPixel);
+    p.small_font = std::make_unique<Gdiplus::Font>(p.family.get(), small_font_dip * k, style_flags, Gdiplus::UnitPixel);
+}
+
+int tile_at(const Picker& p, float x, float y)
+{
+    for (int i = 0; i < static_cast<int>(p.cells.size()); ++i) {
+        const auto& c = p.cells[i];
+        if (x >= c.X && x < c.GetRight() && y >= c.Y && y < c.GetBottom())
             return i;
     }
-    for (int i = 0; i < needle_preset_count; ++i) {
-        const auto& c = p.chips[i];
-        if (fx >= c.X && fx < c.X + c.Width && fy >= c.Y && fy < c.Y + c.Height)
-            return needle_hit_base + i;
-    }
-    const auto& r = p.backlight_row;
-    if (fx >= r.X && fx < r.X + r.Width && fy >= r.Y && fy < r.Y + r.Height)
-        return backlight_hit;
     return -1;
 }
 
 void render(Picker& p)
 {
-    const auto w = p.width;
-    const auto h = p.height;
     const auto k = p.k;
-    std::vector<uint32_t> pixels(static_cast<size_t>(w) * h);
-    for (size_t i = 0; i < pixels.size(); ++i)
-        pixels[i] = static_cast<uint32_t>(p.shadow[i] * 255.f + 0.5f) << 24;
-
+    p.frame_pixels = p.background;
     {
-        Gdiplus::Bitmap canvas(w, h, w * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(pixels.data()));
+        Gdiplus::Bitmap canvas(p.width, p.height, p.width * 4, PixelFormat32bppPARGB,
+            reinterpret_cast<BYTE*>(p.frame_pixels.data()));
         Gdiplus::Graphics g(&canvas);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
         g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
         g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBilinear);
 
-        // 卡片：底與細邊跟其他浮動元件統一（nocturne_surface.h），上緣保留一點光澤
-        Gdiplus::GraphicsPath card_path;
-        add_panel_path(card_path, p.card, radius_dip * k);
-        const Gdiplus::SolidBrush card_fill(nocturne_surface::fill_colour());
-        g.FillPath(&card_fill, &card_path);
-        {
-            Gdiplus::LinearGradientBrush sheen(Gdiplus::PointF(0, p.card.Y), Gdiplus::PointF(0, p.card.Y + 60.f * k),
-                rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
-            g.SetClip(&card_path);
-            g.FillRectangle(&sheen, p.card.X, p.card.Y, p.card.Width, 60.f * k);
-            g.ResetClip();
+        // 選中那張後面的亮底（白 13%）
+        if (!p.cells.empty()) {
+            const Gdiplus::RectF plate{p.plate.x.value(), p.plate.y.value(), p.cells[0].Width, p.cells[0].Height};
+            Gdiplus::GraphicsPath path;
+            seg::add_rounded(path, plate, cell_radius_dip * k);
+            const Gdiplus::SolidBrush brush(Gdiplus::Color(33, 255, 255, 255));
+            g.FillPath(&brush, &path);
         }
-        const Gdiplus::Pen card_border(nocturne_surface::edge_colour(), 1.f * k);
-        g.DrawPath(&card_border, &card_path);
-
-        std::unique_ptr<Gdiplus::FontFamily> family = theme_family();
-        if (!family)
-            family.reset(Gdiplus::FontFamily::GenericSansSerif()->Clone());
-        const Gdiplus::Font title_font(family.get(), 13.f * k, regular_style(*family), Gdiplus::UnitPixel);
-        const Gdiplus::Font label_font(family.get(), 14.f * k, regular_style(*family), Gdiplus::UnitPixel);
-        const Gdiplus::Font label_bold(family.get(), 14.f * k, bold_style(*family), Gdiplus::UnitPixel);
-
-        // 歌詞＋VU 表只放兩張縮圖（沒有圓形錶頭），標題不再另外註明（2026-11-12 使用者要求說明精簡）
-        draw_text(g, p.spectrum ? nocturne_text::spectrum_picker_title : nocturne_text::vu_picker_title, title_font,
-            rgba(244, 240, 230, 0.55), {p.card.X + pad_dip * k, p.card.Y + title_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear,
-            k);
-
-        // 右上角關閉鈕
-        {
-            const auto& c = p.close_box;
-            if (p.hover == close_hit) {
-                const Gdiplus::SolidBrush hover_fill(rgba(255, 255, 255, 0.10));
-                g.FillEllipse(&hover_fill, c);
-            }
-            const Gdiplus::Pen cross(rgba(244, 240, 230, p.hover == close_hit ? 0.9 : 0.55), 1.6f * k);
-            const auto m = 8.5f * k;
-            g.DrawLine(&cross, c.X + m, c.Y + m, c.X + c.Width - m, c.Y + c.Height - m);
-            g.DrawLine(&cross, c.X + c.Width - m, c.Y + m, c.X + m, c.Y + c.Height - m);
-        }
-
-        const auto draw_tile = [&](const Gdiplus::RectF& t, const std::vector<uint32_t>& thumb, const wchar_t* name,
-                                   bool selected, bool hovered) {
-            Gdiplus::GraphicsPath tile_path;
-            add_panel_path(tile_path, t, 9.f * k);
-            g.SetClip(&tile_path);
-            if (!thumb.empty()) {
-                Gdiplus::Bitmap bitmap(p.thumb_w, p.thumb_h, p.thumb_w * 4, PixelFormat32bppPARGB,
-                    reinterpret_cast<BYTE*>(const_cast<uint32_t*>(thumb.data())));
-                g.DrawImage(&bitmap, t.X, t.Y, t.Width, t.Height);
-            }
-            if (!selected) {
-                const Gdiplus::SolidBrush dim(rgba(0, 0, 0, hovered ? 0.10 : 0.28));
-                g.FillRectangle(&dim, t);
+        const auto cell_pad = std::round(cell_pad_dip * k);
+        for (int i = 0; i < static_cast<int>(p.cells.size()); ++i) {
+            const auto& c = p.cells[i];
+            const Gdiplus::RectF thumb{c.X + cell_pad, c.Y + cell_pad, static_cast<float>(p.thumb_w), static_cast<float>(p.thumb_h)};
+            Gdiplus::GraphicsPath path;
+            seg::add_rounded(path, thumb, thumb_radius_dip * k);
+            g.SetClip(&path);
+            if (i < static_cast<int>(p.thumb_bitmaps.size()))
+                g.DrawImage(p.thumb_bitmaps[i].get(), thumb.X, thumb.Y, thumb.Width, thumb.Height);
+            // 沒選的淡一點（約 72%），滑過時亮一點
+            if (i != p.tile_selected) {
+                const Gdiplus::SolidBrush dim(rgba(38, 38, 38, i == p.tile_hover ? 0.12 : 0.30));
+                g.FillRectangle(&dim, thumb);
             }
             g.ResetClip();
-            if (selected) {
-                Gdiplus::GraphicsPath ring;
-                const auto o = 2.f * k;
-                add_panel_path(ring, {t.X - o, t.Y - o, t.Width + 2 * o, t.Height + 2 * o}, 9.f * k + o);
-                const Gdiplus::Pen pen(rgba(240, 190, 120, 0.95), 2.f * k);
-                g.DrawPath(&pen, &ring);
-            } else {
-                const Gdiplus::Pen pen(rgba(255, 255, 255, hovered ? 0.40 : 0.12), 1.f * k);
-                g.DrawPath(&pen, &tile_path);
-            }
-            draw_text(g, name, selected ? label_bold : label_font,
-                selected ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.58),
-                {t.X + t.Width / 2.f, t.Y + t.Height + label_h_dip * k / 2.f}, Gdiplus::StringAlignmentCenter, k);
-        };
-        const auto draw_chip = [&](const Gdiplus::RectF& c, const wchar_t* text, bool chosen, bool hovered) {
-            Gdiplus::GraphicsPath chip_path;
-            add_panel_path(chip_path, c, 10.f * k);
-            const Gdiplus::SolidBrush chip_fill(chosen ? rgba(240, 190, 120, 0.14) : rgba(255, 255, 255, hovered ? 0.07 : 0.035));
-            g.FillPath(&chip_fill, &chip_path);
-            const Gdiplus::Pen chip_pen(chosen ? rgba(240, 190, 120, 0.95) : rgba(255, 255, 255, hovered ? 0.30 : 0.10),
-                (chosen ? 1.5f : 1.f) * k);
-            g.DrawPath(&chip_pen, &chip_path);
-            draw_text(g, text, chosen ? label_bold : label_font,
-                chosen ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.65),
-                {c.X + c.Width / 2.f, c.Y + c.Height / 2.f}, Gdiplus::StringAlignmentCenter, k);
-        };
+            const auto alpha = i == p.tile_selected ? 0.97 : (i == p.tile_hover ? 0.85 : 0.6);
+            seg::draw_centered(g, p.tile_names[i], *p.tile_font, seg::ink(alpha),
+                {c.X, thumb.GetBottom(), c.Width, c.GetBottom() - thumb.GetBottom()});
+        }
 
-        if (p.spectrum) {
-            const auto current_style = static_cast<int>(cached_spectrum_style());
-            for (int i = 0; i < spectrum_style_count; ++i)
-                draw_tile(p.spectrum_tiles[i], p.spectrum_thumbs[i], nocturne_text::spectrum_style_names[i], i == current_style,
-                    p.hover == i);
-            const Gdiplus::Pen divider(rgba(255, 255, 255, 0.08), 1.f * k);
-            g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider_y, p.card.X + p.card.Width - pad_dip * k, p.divider_y);
+        for (auto* row : rows_of(p))
+            seg::draw(g, *row, *p.label_font, k);
+        if (!p.spectrum) {
+            seg::draw_caption(g, p.needle_caption, p.needle_caption_box, *p.small_font, 0.55, k);
+            seg::draw_left(g, nocturne_text::vu_backlight, *p.label_font, seg::ink(0.8), p.light_label_box);
+        } else {
             const wchar_t* titles[3]
                 = {nocturne_text::spectrum_frame_title, nocturne_text::spectrum_bands_title, nocturne_text::spectrum_fall_title};
-            for (int row = 0; row < 3; ++row)
-                draw_text(g, titles[row], title_font, rgba(244, 240, 230, 0.55),
-                    {p.card.X + pad_dip * k, p.row_y[row] + spectrum_row_h_dip * k / 2.f}, Gdiplus::StringAlignmentNear, k);
-            const auto framed = cached_spectrum_framed();
-            for (int i = 0; i < 2; ++i)
-                draw_chip(p.frame_chips[i], nocturne_text::spectrum_frame_names[i], (i == 0) == framed, p.hover == frame_hit_base + i);
-            for (int i = 0; i < 3; ++i) {
-                wchar_t text[8]{};
-                swprintf_s(text, L"%d", spectrum_band_options[i]);
-                draw_chip(p.band_chips[i], text, spectrum_band_options[i] == cached_spectrum_bands(), p.hover == bands_hit_base + i);
-            }
-            for (int i = 0; i < spectrum_fall_count; ++i)
-                draw_chip(p.fall_chips[i], nocturne_text::spectrum_fall_names[i], i == cached_spectrum_fall(),
-                    p.hover == fall_hit_base + i);
+            for (int r = 0; r < 3; ++r)
+                seg::draw_left(g, titles[r], *p.small_font, seg::ink(0.55), p.row_label_boxes[r]);
         }
-
-        if (!p.spectrum) {
-        // 選中的：歌詞＋VU 表時存的若是圓形，實際畫的是方框雙錶
-        const auto shown = p.combined_vu && get_style() == Style::round ? Style::box : get_style();
-        int selected = 0;
-        for (int i = 0; i < style_count; ++i)
-            if (display_order[i] == shown)
-                selected = i;
-        for (int i = 0; i < tile_count(p); ++i) {
-            const auto& t = p.tiles[i];
-            Gdiplus::GraphicsPath tile_path;
-            add_panel_path(tile_path, t, 9.f * k);
-            g.SetClip(&tile_path);
-            if (!p.thumbs[i].empty()) {
-                Gdiplus::Bitmap thumb(p.thumb_w, p.thumb_h, p.thumb_w * 4, PixelFormat32bppPARGB,
-                    reinterpret_cast<BYTE*>(p.thumbs[i].data()));
-                g.DrawImage(&thumb, t.X, t.Y, t.Width, t.Height);
-            }
-            // 沒選的縮圖壓暗一點，選中的那張最亮
-            if (i != selected) {
-                const Gdiplus::SolidBrush dim(rgba(0, 0, 0, i == p.hover ? 0.10 : 0.28));
-                g.FillRectangle(&dim, t);
-            }
-            g.ResetClip();
-
-            if (i == selected) {
-                Gdiplus::GraphicsPath ring;
-                const auto o = 2.f * k;
-                add_panel_path(ring, {t.X - o, t.Y - o, t.Width + 2 * o, t.Height + 2 * o}, 9.f * k + o);
-                const Gdiplus::Pen pen(rgba(240, 190, 120, 0.95), 2.f * k);
-                g.DrawPath(&pen, &ring);
-            } else {
-                const Gdiplus::Pen pen(rgba(255, 255, 255, i == p.hover ? 0.40 : 0.12), 1.f * k);
-                g.DrawPath(&pen, &tile_path);
-            }
-            draw_text(g, nocturne_text::vu_style_names[static_cast<int>(display_order[i])], i == selected ? label_bold : label_font,
-                i == selected ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, i == p.hover ? 0.85 : 0.58),
-                {t.X + t.Width / 2.f, t.Y + t.Height + label_h_dip * k / 2.f}, Gdiplus::StringAlignmentCenter, k);
-        }
-
-        const Gdiplus::Pen divider(rgba(255, 255, 255, 0.08), 1.f * k);
-        g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider_y, p.card.X + p.card.Width - pad_dip * k, p.divider_y);
-
-        // 指針設定：小標題＋四個按鈕（名稱＋一行小字說明），選中的暖色框
-        draw_text(g, nocturne_text::vu_needle_title, title_font, rgba(244, 240, 230, 0.55),
-            {p.card.X + pad_dip * k, p.divider_y + section_h_dip * k / 2.f + 1.f * k}, Gdiplus::StringAlignmentNear, k);
-        const Gdiplus::Font detail_font(family.get(), 11.f * k, regular_style(*family), Gdiplus::UnitPixel);
-        const auto chosen = static_cast<int>(get_needle_preset());
-        for (int i = 0; i < needle_preset_count; ++i) {
-            const auto& c = p.chips[i];
-            const auto hovered = p.hover == needle_hit_base + i;
-            Gdiplus::GraphicsPath chip_path;
-            add_panel_path(chip_path, c, 10.f * k);
-            const Gdiplus::SolidBrush chip_fill(
-                i == chosen ? rgba(240, 190, 120, 0.14) : rgba(255, 255, 255, hovered ? 0.07 : 0.035));
-            g.FillPath(&chip_fill, &chip_path);
-            const Gdiplus::Pen chip_pen(i == chosen ? rgba(240, 190, 120, 0.95) : rgba(255, 255, 255, hovered ? 0.30 : 0.10),
-                (i == chosen ? 1.5f : 1.f) * k);
-            g.DrawPath(&chip_pen, &chip_path);
-            draw_text(g, nocturne_text::vu_needle_names[i], i == chosen ? label_bold : label_font,
-                i == chosen ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.65),
-                {c.X + c.Width / 2.f, c.Y + 16.f * k}, Gdiplus::StringAlignmentCenter, k);
-            draw_text(g, nocturne_text::vu_needle_details[i], detail_font,
-                rgba(244, 240, 230, i == chosen ? 0.70 : 0.42), {c.X + c.Width / 2.f, c.Y + 33.f * k},
-                Gdiplus::StringAlignmentCenter, k);
-        }
-        g.DrawLine(&divider, p.card.X + pad_dip * k, p.divider2_y, p.card.X + p.card.Width - pad_dip * k, p.divider2_y);
-
-        // 暖色背光：開關＋文字，整行都可以點
-        const auto& row = p.backlight_row;
-        if (p.hover == backlight_hit) {
-            Gdiplus::GraphicsPath row_path;
-            add_panel_path(row_path, row, 8.f * k);
-            const Gdiplus::SolidBrush row_fill(rgba(255, 255, 255, 0.05));
-            g.FillPath(&row_fill, &row_path);
-        }
-        const auto on = is_backlight_enabled();
-        const auto cy = row.Y + row.Height / 2.f;
-        const Gdiplus::RectF pill{row.X + (pad_dip - 8.f) * k, cy - 9.f * k, 34.f * k, 18.f * k};
-        Gdiplus::GraphicsPath pill_path;
-        add_panel_path(pill_path, pill, 9.f * k);
-        const Gdiplus::SolidBrush pill_fill(on ? rgba(232, 170, 96, 0.95) : rgba(255, 255, 255, 0.16));
-        g.FillPath(&pill_fill, &pill_path);
-        const auto knob_r = 7.f * k;
-        const auto knob_x = on ? pill.X + pill.Width - 2.f * k - knob_r : pill.X + 2.f * k + knob_r;
-        const Gdiplus::SolidBrush knob(rgba(250, 248, 244, 0.97));
-        g.FillEllipse(&knob, knob_x - knob_r, cy - knob_r, 2 * knob_r, 2 * knob_r);
-        draw_text(g, nocturne_text::vu_backlight, label_font, rgba(244, 240, 230, 0.85),
-            {pill.X + pill.Width + 10.f * k, cy}, Gdiplus::StringAlignmentNear, k);
-        } // !p.spectrum
     }
+    p.presenter.present(p.wnd, p.frame_pixels.data(), p.width, p.height, {p.card.X, p.card.Y});
+}
 
-    BITMAPINFO info{};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = w;
-    info.bmiHeader.biHeight = -h;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    const auto screen_dc = wil::GetDC(nullptr);
-    void* bits{};
-    wil::unique_hbitmap dib(CreateDIBSection(screen_dc.get(), &info, DIB_RGB_COLORS, &bits, nullptr, 0));
-    if (!dib || !bits)
+void animate(Picker& p)
+{
+    p.clock.ensure(p.wnd);
+}
+
+void tick(Picker& p)
+{
+    const auto now = seg::Clock::now();
+    auto running = seg::plate_update(p.plate, now);
+    for (auto* row : rows_of(p))
+        running = seg::update(*row, now) || running;
+    running = seg::caption_update(p.needle_caption, now) || running;
+    running = p.presenter.update(now) || running;
+    running = running || (p.active && p.active->pressed);
+    render(p);
+    p.clock.frame_done();
+    if (p.presenter.closed()) {
+        DestroyWindow(p.wnd);
         return;
-    memcpy(bits, pixels.data(), pixels.size() * 4);
-    wil::unique_hdc memory_dc(CreateCompatibleDC(screen_dc.get()));
-    const auto old = SelectObject(memory_dc.get(), dib.get());
-    SIZE size{w, h};
-    POINT source{0, 0};
-    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-    UpdateLayeredWindow(p.wnd, screen_dc.get(), nullptr, &size, memory_dc.get(), &source, 0, &blend, ULW_ALPHA);
-    SelectObject(memory_dc.get(), old);
+    }
+    if (!running)
+        p.clock.stop();
+}
+
+void show_needle_caption(Picker& p, int index)
+{
+    if (index == p.needle_caption_index)
+        return;
+    const auto dir = index > p.needle_caption_index ? 1 : -1;
+    p.needle_caption_index = index;
+    seg::caption_set(p.needle_caption, nocturne_text::vu_needle_details[index], dir, true);
+}
+
+void select_tile(Picker& p, int index)
+{
+    if (index < 0 || index >= static_cast<int>(p.cells.size()) || index == p.tile_selected)
+        return;
+    p.tile_selected = index;
+    seg::plate_place(p.plate, p.cells[index], true);
+    if (p.spectrum)
+        set_spectrum_style(static_cast<SpectrumStyle>(index));
+    else if (display_order[index] != get_style())
+        set_style(display_order[index]);
+    animate(p);
+}
+
+// 分段列選定：存設定；會改縮圖樣子的（背光、外框、頻段）重做縮圖
+void commit_row(Picker& p, seg::Row* row, int index)
+{
+    if (row == &p.needle) {
+        set_needle_preset(static_cast<NeedlePreset>(index));
+    } else if (row == &p.light) {
+        set_backlight_enabled(index == 1);
+        build_thumbnails(p);
+    } else if (row == &p.frame_row) {
+        set_spectrum_framed(index == 0);
+        build_thumbnails(p);
+    } else if (row == &p.bands_row) {
+        set_spectrum_bands(spectrum_band_options[std::clamp(index, 0, 2)]);
+        build_thumbnails(p);
+    } else if (row == &p.fall_row) {
+        set_spectrum_fall(index);
+    }
+}
+
+void end_pointer(Picker& p, bool cancelled)
+{
+    if (p.active && p.active->pressed) {
+        auto* row = p.active;
+        if (cancelled)
+            seg::cancel_drag(*row);
+        else
+            seg::mouse_up(*row, [&p, row](int index) { commit_row(p, row, index); });
+        if (row == &p.needle)
+            show_needle_caption(p, p.needle.selected);
+    }
+    p.active = nullptr;
+    p.tile_pressed = -1;
+    animate(p);
+}
+
+void begin_close(Picker& p)
+{
+    end_pointer(p, true);
+    if (!seg::animations_enabled()) {
+        DestroyWindow(p.wnd);
+        return;
+    }
+    p.presenter.begin_close();
+    animate(p);
+}
+
+bool update_hover(Picker& p, float x, float y)
+{
+    auto changed = false;
+    const auto tile = tile_at(p, x, y);
+    if (tile != p.tile_hover) {
+        p.tile_hover = tile;
+        changed = true;
+    }
+    for (auto* row : rows_of(p)) {
+        const auto hover = seg::cell_at(*row, x, y);
+        if (hover != row->hover) {
+            row->hover = hover;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+bool over_target(Picker& p)
+{
+    if (p.tile_hover >= 0 || p.active)
+        return true;
+    for (auto* row : rows_of(p))
+        if (row->hover >= 0)
+            return true;
+    return false;
 }
 
 LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -3609,73 +3608,87 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     if (!picker || picker->wnd != wnd)
         return DefWindowProc(wnd, msg, wp, lp);
     auto& p = *picker;
+    if (msg == seg::FrameClock::message()) {
+        tick(p);
+        return 0;
+    }
+    const auto x = static_cast<float>(GET_X_LPARAM(lp));
+    const auto y = static_cast<float>(GET_Y_LPARAM(lp));
 
     switch (msg) {
     case WM_MOUSEMOVE: {
+        if (p.presenter.closing())
+            return 0;
         if (!p.tracking) {
             TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
             p.tracking = TrackMouseEvent(&track) != FALSE;
         }
-        const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
-        if (hit != p.hover) {
-            p.hover = hit;
-            SetCursor(LoadCursor(nullptr, hit >= 0 ? IDC_HAND : IDC_ARROW));
-            render(p);
+        if (p.active && p.active->pressed) {
+            auto* row = p.active;
+            seg::mouse_move(*row, x, p.k, [&p, row](int index) {
+                if (row == &p.needle)
+                    show_needle_caption(p, index);
+            });
+            animate(p);
+            return 0;
         }
+        if (update_hover(p, x, y))
+            render(p);
+        SetCursor(LoadCursor(nullptr, over_target(p) ? IDC_HAND : IDC_ARROW));
         return 0;
     }
     case WM_SETCURSOR:
-        SetCursor(LoadCursor(nullptr, p.hover >= 0 ? IDC_HAND : IDC_ARROW));
+        SetCursor(LoadCursor(nullptr, over_target(p) ? IDC_HAND : IDC_ARROW));
         return TRUE;
     case WM_MOUSELEAVE:
         p.tracking = false;
-        if (p.hover != -1) {
-            p.hover = -1;
+        if (update_hover(p, -1.f, -1.f))
             render(p);
-        }
         return 0;
-    case WM_LBUTTONUP: {
-        const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
-        if (hit == close_hit) {
-            PostMessage(wnd, WM_CLOSE, 0, 0);
+    case WM_LBUTTONDOWN: {
+        if (p.presenter.closing())
+            return 0;
+        if (const auto tile = tile_at(p, x, y); tile >= 0) {
+            p.tile_pressed = tile;
+            SetCapture(wnd);
             return 0;
         }
-        if (p.spectrum) {
-            if (hit >= 0 && hit < spectrum_style_count) {
-                set_spectrum_style(static_cast<SpectrumStyle>(hit));
-            } else if (hit >= frame_hit_base && hit < frame_hit_base + 2) {
-                set_spectrum_framed(hit == frame_hit_base);
-                build_thumbnails(p);
-            } else if (hit >= bands_hit_base && hit < bands_hit_base + 3) {
-                set_spectrum_bands(spectrum_band_options[hit - bands_hit_base]);
-                build_thumbnails(p);
-            } else if (hit >= fall_hit_base && hit < fall_hit_base + spectrum_fall_count) {
-                set_spectrum_fall(hit - fall_hit_base);
+        for (auto* row : rows_of(p)) {
+            if (seg::mouse_down(*row, x, y)) {
+                p.active = row;
+                SetCapture(wnd);
+                animate(p);
+                break;
             }
-            if (hit >= 0)
-                render(p);
-            return 0;
-        }
-        if (hit >= 0 && hit < tile_count(p)) {
-            if (display_order[hit] != get_style())
-                set_style(display_order[hit]);
-            render(p);
-        } else if (hit >= needle_hit_base && hit < needle_hit_base + needle_preset_count) {
-            set_needle_preset(static_cast<NeedlePreset>(hit - needle_hit_base));
-            render(p);
-        } else if (hit == backlight_hit) {
-            set_backlight_enabled(!is_backlight_enabled());
-            build_thumbnails(p);
-            render(p);
         }
         return 0;
     }
+    case WM_LBUTTONUP: {
+        const auto pressed_tile = p.tile_pressed;
+        const auto had_row = p.active != nullptr;
+        if (pressed_tile >= 0 && tile_at(p, x, y) == pressed_tile)
+            select_tile(p, pressed_tile);
+        if (pressed_tile >= 0 || had_row) {
+            end_pointer(p, false);
+            if (GetCapture() == wnd)
+                ReleaseCapture();
+        }
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        // 拖到一半被搶走捕捉：亮底回到原本的選擇
+        if (p.active || p.tile_pressed >= 0)
+            end_pointer(p, true);
+        return 0;
     case WM_KEYDOWN:
         if (wp == VK_ESCAPE)
             PostMessage(wnd, WM_CLOSE, 0, 0);
         return 0;
     case WM_CLOSE:
-        DestroyWindow(wnd);
+        begin_close(p);
+        return 0;
+    case WM_DESTROY:
+        p.clock.stop();
         return 0;
     case WM_NCDESTROY:
         picker.reset();
@@ -3706,6 +3719,7 @@ void open(HWND meter, POINT at)
     if (!class_registered)
         return;
 
+    seg::refresh_settings();
     auto p = std::make_unique<Picker>();
     p->meter = meter;
     p->k = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
@@ -3713,11 +3727,9 @@ void open(HWND meter, POINT at)
         p->spectrum = state->spectrum;
         p->combined_vu = state->combined && !state->spectrum;
     }
-    if (p->spectrum)
-        build_spectrum_layout(*p);
-    else
-        build_layout(*p);
+    build_layout(*p);
     build_thumbnails(*p);
+    build_static(*p);
 
     const auto sh = static_cast<int>(std::round(shadow_dip * p->k));
     auto x = at.x - sh;
@@ -3737,14 +3749,17 @@ void open(HWND meter, POINT at)
         current().reset();
         return;
     }
-    current()->wnd = wnd;
+    auto& picker = *current();
+    picker.wnd = wnd;
     // 自動關閉（點外面、切走程式、失去啟用；2026-11-12 使用者遇到卡片沒拿到焦點時點外面關不掉，所以有定時檢查）：
     // VU 表／頻譜藏起來（換模式、收合）也關
     popup_dismiss::attach(wnd, [meter] { return IsWindow(meter) && IsWindowVisible(meter); });
-    render(*current());
+    picker.presenter.begin_open();
+    render(picker);
     ShowWindow(wnd, SW_SHOW);
     SetForegroundWindow(wnd);
     SetFocus(wnd);
+    animate(picker);
 }
 
 } // namespace picker
