@@ -3,6 +3,7 @@
 
 #include "menu_items.h"
 #include "next_track_toast.h"
+#include "nocturne_segment.h"
 #include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "now_playing_cover_zoom.h"
@@ -39,6 +40,8 @@ std::string next_title;
 std::string next_artist;
 bool next_valid{};
 bool next_update_scheduled{};
+// 挑選卡拖曳中的暫時預覽（1～3；0＝沒有預覽，照設定）：封面下那一排先換成經過的段，放開才存
+std::atomic<uint32_t> preview_style{0};
 
 std::string format_handle(const metadb_handle_ptr& handle, const char* script)
 {
@@ -168,16 +171,17 @@ void present_layered(HWND wnd, const POINT* origin, int width, int height, const
     SelectObject(memory_dc.get(), old);
 }
 
-// ---- 挑選卡（外觀跟 VU 表／頻譜的樣式卡一致：nocturne_surface 的實心卡片、暖色框標示選中的那一列）----
+// ---- 挑選卡（2026-11-14 改成分段切換，共用 nocturne_segment.h：使用者在預覽頁選 D＋等級 2 動畫＋按住拖曳＋開關淡入淡出）----
+// 一條三段（下一首／等級＋格式／播放統計）＋下面一行實際會出現的字；點或拖都可以，拖曳經過時封面下那一排先換成那段
 namespace picker {
 
+namespace seg = nocturne_segment;
+
 constexpr float shadow_dip = 18.f;
-constexpr float pad_dip = 16.f;
-constexpr float title_h_dip = 36.f;
-constexpr float row_h_dip = 60.f;
-constexpr float row_gap_dip = 8.f;
+constexpr float pad_dip = 10.f;
 constexpr float card_w_dip = 420.f;
-constexpr int close_hit = 900;
+constexpr float caption_h_dip = 42.f;
+constexpr float caption_gap_dip = 4.f;
 
 struct Picker {
     HWND wnd{};
@@ -187,54 +191,26 @@ struct Picker {
     int height{};
     int shadow{};
     Gdiplus::RectF card;
-    Gdiplus::RectF rows[style_count];
-    Gdiplus::RectF close_box;
+    Gdiplus::RectF caption_box;
+    seg::Row row;
+    seg::Caption caption;
+    int caption_index{};
     std::wstring previews[style_count];
-    int hover{-1};
+    seg::Presenter presenter;
+    seg::FrameClock clock;
     bool tracking{};
+    // 開卡時建好、每格重複用：字型、卡片底板（陰影＋實心底，不會動的部分）
+    std::unique_ptr<Gdiplus::FontFamily> family;
+    std::unique_ptr<Gdiplus::Font> label_font;
+    std::unique_ptr<Gdiplus::Font> caption_font;
+    std::vector<uint32_t> background;
+    std::vector<uint32_t> frame;
 };
 
 std::unique_ptr<Picker>& current()
 {
     static std::unique_ptr<Picker> picker;
     return picker;
-}
-
-Gdiplus::Color rgba(int r, int g, int b, double a)
-{
-    return Gdiplus::Color(static_cast<BYTE>(std::clamp(a, 0.0, 1.0) * 255.0 + 0.5), static_cast<BYTE>(r),
-        static_cast<BYTE>(g), static_cast<BYTE>(b));
-}
-
-// 主題字型（同 VU 表的樣式卡）；GDI+ 字型表沒暖機完時用系統的無襯線字
-std::unique_ptr<Gdiplus::FontFamily> theme_family()
-{
-    if (next_track_toast::gdiplus_fonts_ready()) {
-        const auto log_font = fonts::get_log_font_with_fallback(fonts::labels_font_id);
-        auto family = std::make_unique<Gdiplus::FontFamily>(log_font.lfFaceName);
-        if (family->GetLastStatus() == Gdiplus::Ok)
-            return family;
-    }
-    return std::unique_ptr<Gdiplus::FontFamily>(Gdiplus::FontFamily::GenericSansSerif()->Clone());
-}
-
-Gdiplus::FontStyle style_of(const Gdiplus::FontFamily& family, bool bold)
-{
-    if (bold && family.IsStyleAvailable(Gdiplus::FontStyleBold))
-        return Gdiplus::FontStyleBold;
-    return family.IsStyleAvailable(Gdiplus::FontStyleRegular) ? Gdiplus::FontStyleRegular : Gdiplus::FontStyleBold;
-}
-
-void draw_text(Gdiplus::Graphics& g, const wchar_t* text, const Gdiplus::Font& font, const Gdiplus::Color& colour,
-    const Gdiplus::RectF& box, Gdiplus::StringAlignment align = Gdiplus::StringAlignmentNear)
-{
-    Gdiplus::StringFormat format;
-    format.SetAlignment(align);
-    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-    const Gdiplus::SolidBrush brush(colour);
-    g.DrawString(text, -1, &font, box, &format, &brush);
 }
 
 std::wstring wide(const std::string& text)
@@ -252,7 +228,7 @@ std::wstring format_now_playing(const char* script)
     return wide(out.c_str());
 }
 
-// 每一列的預覽：用目前這首實際會顯示的字
+// 每一段的說明：用目前這首實際會顯示的字
 void build_previews(Picker& p)
 {
     {
@@ -278,89 +254,121 @@ void build_layout(Picker& p)
     p.shadow = static_cast<int>(px(shadow_dip));
     const auto pad = px(pad_dip);
     const auto card_w = px(card_w_dip);
-    const auto card_h = px(title_h_dip) + style_count * px(row_h_dip) + (style_count - 1) * px(row_gap_dip) + pad;
+    const auto row_h = px(seg::row_h_dip);
+    const auto card_h = 2 * pad + row_h + px(caption_h_dip);
     const auto sh = static_cast<float>(p.shadow);
     p.card = {sh, sh - px(4), card_w, card_h};
     p.width = static_cast<int>(card_w + 2 * sh);
     p.height = static_cast<int>(card_h + 2 * sh);
-    p.close_box = {p.card.X + card_w - pad - px(26), p.card.Y + px(5), px(26), px(26)};
-    for (uint32_t i = 0; i < style_count; ++i)
-        p.rows[i] = {p.card.X + pad, p.card.Y + px(title_h_dip) + i * (px(row_h_dip) + px(row_gap_dip)), card_w - 2 * pad,
-            px(row_h_dip)};
+
+    p.row.labels.clear();
+    for (const auto* name : nocturne_text::cover_line_style_names)
+        p.row.labels.emplace_back(name);
+    p.row.selected = static_cast<int>(clamp_style(style.get())) - 1;
+    seg::layout(p.row, {p.card.X + pad, p.card.Y + pad, card_w - 2 * pad, row_h}, k);
+    p.caption_box = {p.card.X + pad, p.card.Y + pad + row_h + px(caption_gap_dip), card_w - 2 * pad,
+        px(caption_h_dip) - px(caption_gap_dip)};
+    p.caption_index = p.row.selected;
+    seg::caption_set(p.caption, p.previews[p.caption_index], 1, false);
 }
 
-bool inside(const Gdiplus::RectF& r, float x, float y)
+// 不會動的部分先畫好：字型、陰影＋實心底
+void build_static(Picker& p)
 {
-    return x >= r.X && x < r.X + r.Width && y >= r.Y && y < r.Y + r.Height;
-}
+    const auto k = p.k;
+    p.family = seg::theme_family();
+    const auto style_flags = seg::regular_style(*p.family);
+    p.label_font = std::make_unique<Gdiplus::Font>(p.family.get(), seg::label_font_dip * k, style_flags, Gdiplus::UnitPixel);
+    p.caption_font = std::make_unique<Gdiplus::Font>(p.family.get(), seg::caption_font_dip * k, style_flags, Gdiplus::UnitPixel);
 
-int hit_test(const Picker& p, POINT pt)
-{
-    const auto fx = static_cast<float>(pt.x);
-    const auto fy = static_cast<float>(pt.y);
-    if (inside(p.close_box, fx, fy))
-        return close_hit;
-    for (uint32_t i = 0; i < style_count; ++i)
-        if (inside(p.rows[i], fx, fy))
-            return static_cast<int>(i);
-    return -1;
+    p.background.assign(static_cast<size_t>(p.width) * p.height, 0);
+    Gdiplus::Bitmap canvas(p.width, p.height, p.width * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(p.background.data()));
+    Gdiplus::Graphics g(&canvas);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    nocturne_surface::paint_panel(g, p.card, nocturne_surface::card_radius_dip * k, p.shadow);
 }
 
 void render(Picker& p)
 {
     const auto k = p.k;
-    const auto selected = static_cast<int>(clamp_style(style.get())) - 1;
-    present_layered(p.wnd, nullptr, p.width, p.height, [&](Gdiplus::Graphics& g) {
+    p.frame = p.background;
+    {
+        Gdiplus::Bitmap canvas(p.width, p.height, p.width * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(p.frame.data()));
+        Gdiplus::Graphics g(&canvas);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
         g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
         g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        seg::draw(g, p.row, *p.label_font, k);
+        seg::draw_caption(g, p.caption, p.caption_box, *p.caption_font, 0.7, k);
+    }
+    p.presenter.present(p.wnd, p.frame.data(), p.width, p.height, {p.card.X, p.card.Y});
+}
 
-        nocturne_surface::paint_panel(g, p.card, nocturne_surface::card_radius_dip * k, p.shadow);
+// 拖曳中的暫時預覽：封面下那一排先換成經過的段（0＝不預覽，照設定）
+void set_preview(uint32_t value)
+{
+    if (preview_style.exchange(value) != value)
+        main_menu::refresh_layout_fields();
+}
 
-        const auto family = theme_family();
-        const Gdiplus::Font title_font(family.get(), 13.f * k, style_of(*family, false), Gdiplus::UnitPixel);
-        const Gdiplus::Font name_font(family.get(), 15.f * k, style_of(*family, false), Gdiplus::UnitPixel);
-        const Gdiplus::Font name_bold(family.get(), 15.f * k, style_of(*family, true), Gdiplus::UnitPixel);
-        const Gdiplus::Font preview_font(family.get(), 13.f * k, style_of(*family, false), Gdiplus::UnitPixel);
+void show_caption(Picker& p, int index, bool animate)
+{
+    if (index == p.caption_index)
+        return;
+    const auto dir = index > p.caption_index ? 1 : -1;
+    p.caption_index = index;
+    seg::caption_set(p.caption, p.previews[index], dir, animate);
+}
 
-        draw_text(g, nocturne_text::cover_line_picker_title, title_font, rgba(244, 240, 230, 0.55),
-            {p.card.X + pad_dip * k, p.card.Y, p.card.Width - 2 * pad_dip * k, title_h_dip * k});
+void animate(Picker& p)
+{
+    p.clock.ensure(p.wnd);
+}
 
-        // 右上角關閉鈕
-        {
-            const auto& c = p.close_box;
-            if (p.hover == close_hit) {
-                const Gdiplus::SolidBrush hover_fill(rgba(255, 255, 255, 0.10));
-                g.FillEllipse(&hover_fill, c);
-            }
-            const Gdiplus::Pen cross(rgba(244, 240, 230, p.hover == close_hit ? 0.9 : 0.55), 1.6f * k);
-            const auto m = 8.5f * k;
-            g.DrawLine(&cross, c.X + m, c.Y + m, c.X + c.Width - m, c.Y + c.Height - m);
-            g.DrawLine(&cross, c.X + c.Width - m, c.Y + m, c.X + m, c.Y + c.Height - m);
-        }
+// 時脈每一格（螢幕更新率）：更新動畫、畫一次；拖曳中也一直跑，滑鼠移動只改狀態、在這裡畫
+void tick(Picker& p)
+{
+    const auto now = seg::Clock::now();
+    auto running = seg::update(p.row, now);
+    running = seg::caption_update(p.caption, now) || running;
+    running = p.presenter.update(now) || running;
+    running = running || p.row.pressed;
+    render(p);
+    p.clock.frame_done();
+    if (p.presenter.closed()) {
+        DestroyWindow(p.wnd);
+        return;
+    }
+    if (!running)
+        p.clock.stop();
+}
 
-        // 三列：名稱＋預覽（目前這首會顯示的字），選中的暖色框（同 VU 表樣式卡的指針按鈕）
-        for (uint32_t i = 0; i < style_count; ++i) {
-            const auto& r = p.rows[i];
-            const auto chosen = static_cast<int>(i) == selected;
-            const auto hovered = p.hover == static_cast<int>(i);
-            Gdiplus::GraphicsPath path;
-            nocturne_surface::add_rounded(path, r, 10.f * k);
-            const Gdiplus::SolidBrush fill(chosen ? rgba(240, 190, 120, 0.14) : rgba(255, 255, 255, hovered ? 0.07 : 0.035));
-            g.FillPath(&fill, &path);
-            const Gdiplus::Pen pen(
-                chosen ? rgba(240, 190, 120, 0.95) : rgba(255, 255, 255, hovered ? 0.30 : 0.10), (chosen ? 1.5f : 1.f) * k);
-            g.DrawPath(&pen, &path);
-
-            const auto inner_x = r.X + 14.f * k;
-            const auto inner_w = r.Width - 28.f * k;
-            draw_text(g, nocturne_text::cover_line_style_names[i], chosen ? name_bold : name_font,
-                chosen ? rgba(244, 240, 230, 0.96) : rgba(244, 240, 230, hovered ? 0.85 : 0.65),
-                {inner_x, r.Y + 6.f * k, inner_w, 24.f * k});
-            draw_text(g, p.previews[i].c_str(), preview_font, rgba(244, 240, 230, chosen ? 0.70 : 0.45),
-                {inner_x, r.Y + 30.f * k, inner_w, 22.f * k});
-        }
+// 放開或點擊選定：存設定（存的值一樣就不動），拖曳預覽收掉
+void finish_pointer(Picker& p)
+{
+    seg::mouse_up(p.row, [](int index) {
+        const auto value = static_cast<uint32_t>(index) + 1;
+        if (clamp_style(style.get()) != value)
+            style = value;
     });
+    set_preview(0);
+    show_caption(p, p.row.selected, true);
+    animate(p);
+}
+
+void begin_close(Picker& p)
+{
+    if (p.row.pressed) {
+        seg::cancel_drag(p.row);
+        set_preview(0);
+    }
+    if (!seg::animations_enabled()) {
+        DestroyWindow(p.wnd);
+        return;
+    }
+    p.presenter.begin_close();
+    animate(p);
 }
 
 LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -373,52 +381,80 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     if (!picker || picker->wnd != wnd)
         return DefWindowProc(wnd, msg, wp, lp);
     auto& p = *picker;
+    if (msg == seg::FrameClock::message()) {
+        tick(p);
+        return 0;
+    }
+    const auto x = static_cast<float>(GET_X_LPARAM(lp));
+    const auto y = static_cast<float>(GET_Y_LPARAM(lp));
 
     switch (msg) {
     case WM_MOUSEMOVE: {
+        if (p.presenter.closing())
+            return 0;
         if (!p.tracking) {
             TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, wnd, 0};
             p.tracking = TrackMouseEvent(&track) != FALSE;
         }
-        const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
-        if (hit != p.hover) {
-            p.hover = hit;
-            SetCursor(LoadCursor(nullptr, hit >= 0 ? IDC_HAND : IDC_ARROW));
+        if (p.row.pressed) {
+            seg::mouse_move(p.row, x, p.k, [&p](int index) {
+                show_caption(p, index, true);
+                set_preview(static_cast<uint32_t>(index) + 1);
+            });
+            animate(p);
+            return 0;
+        }
+        const auto hover = seg::cell_at(p.row, x, y);
+        if (hover != p.row.hover) {
+            p.row.hover = hover;
             render(p);
         }
+        SetCursor(LoadCursor(nullptr, hover >= 0 ? IDC_HAND : IDC_ARROW));
         return 0;
     }
     case WM_SETCURSOR:
-        SetCursor(LoadCursor(nullptr, p.hover >= 0 ? IDC_HAND : IDC_ARROW));
+        SetCursor(LoadCursor(nullptr, p.row.hover >= 0 || p.row.pressed ? IDC_HAND : IDC_ARROW));
         return TRUE;
     case WM_MOUSELEAVE:
         p.tracking = false;
-        if (p.hover != -1) {
-            p.hover = -1;
+        if (p.row.hover != -1) {
+            p.row.hover = -1;
             render(p);
         }
         return 0;
-    case WM_LBUTTONUP: {
-        const auto hit = hit_test(p, {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
-        if (hit == close_hit) {
-            PostMessage(wnd, WM_CLOSE, 0, 0);
-            return 0;
-        }
-        // 點一下就換；卡片留著方便比較，點外面才關（同 VU 表樣式卡）
-        if (hit >= 0 && hit < static_cast<int>(style_count)) {
-            const auto value = static_cast<uint32_t>(hit) + 1;
-            if (clamp_style(style.get()) != value)
-                style = value;
-            render(p);
+    case WM_LBUTTONDOWN:
+        if (!p.presenter.closing() && seg::mouse_down(p.row, x, y)) {
+            SetCapture(wnd);
+            animate(p);
         }
         return 0;
-    }
+    case WM_LBUTTONUP:
+        if (p.row.pressed) {
+            finish_pointer(p);
+            if (GetCapture() == wnd)
+                ReleaseCapture();
+        }
+        return 0;
+    case WM_CAPTURECHANGED:
+        // 拖到一半被搶走捕捉：亮底回到原本的選擇
+        if (p.row.pressed) {
+            seg::cancel_drag(p.row);
+            set_preview(0);
+            show_caption(p, p.row.selected, true);
+            animate(p);
+        }
+        return 0;
     case WM_KEYDOWN:
         if (wp == VK_ESCAPE)
             PostMessage(wnd, WM_CLOSE, 0, 0);
         return 0;
     case WM_CLOSE:
-        DestroyWindow(wnd);
+        begin_close(p);
+        return 0;
+    case WM_DESTROY:
+        p.clock.stop();
+        if (p.row.pressed)
+            set_preview(0);
         return 0;
     case WM_NCDESTROY:
         picker.reset();
@@ -449,11 +485,13 @@ void open(HWND hotspot, POINT at)
     if (!class_registered)
         return;
 
+    seg::refresh_settings();
     auto p = std::make_unique<Picker>();
     p->hotspot = hotspot;
     p->k = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
-    build_layout(*p);
     build_previews(*p);
+    build_layout(*p);
+    build_static(*p);
 
     const auto sh = p->shadow;
     auto x = at.x - sh;
@@ -473,19 +511,31 @@ void open(HWND hotspot, POINT at)
         current().reset();
         return;
     }
-    current()->wnd = wnd;
+    auto& picker = *current();
+    picker.wnd = wnd;
     popup_dismiss::attach(wnd, [hotspot] { return IsWindow(hotspot) && IsWindowVisible(hotspot); });
-    render(*current());
+    picker.presenter.begin_open();
+    render(picker);
     ShowWindow(wnd, SW_SHOW);
     SetForegroundWindow(wnd);
     SetFocus(wnd);
+    animate(picker);
 }
 
-// 樣式換了：卡片開著就重畫（選中的那列）
+// 樣式從別處換了（設定檔、另一個視窗）：卡片開著就把亮底滑過去
 void refresh()
 {
-    if (auto& picker = current(); picker && picker->wnd)
-        render(*picker);
+    auto& picker = current();
+    if (!picker || !picker->wnd || picker->row.pressed)
+        return;
+    auto& p = *picker;
+    const auto target = static_cast<int>(clamp_style(style.get())) - 1;
+    if (target != p.row.selected) {
+        seg::select(p.row, target, true);
+        show_caption(p, target, true);
+        animate(p);
+    }
+    render(p);
 }
 
 } // namespace picker
@@ -638,8 +688,9 @@ LRESULT CALLBACK hotspot_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CONTEXTMENU:
         return 0;
     case WM_RBUTTONUP: {
-        POINT at{};
-        GetCursorPos(&at);
+        // 用這一下右鍵的座標（實際點擊時跟游標位置一樣；測試送訊息時卡片才會開在 fb2k 視窗裡）
+        POINT at{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        ClientToScreen(wnd, &at);
         picker::open(wnd, at);
         return 0;
     }
@@ -673,6 +724,8 @@ void on_style_changed()
 
 uint32_t style_for_fields()
 {
+    if (const auto preview = preview_style.load())
+        return preview;
     return clamp_style(style.get());
 }
 

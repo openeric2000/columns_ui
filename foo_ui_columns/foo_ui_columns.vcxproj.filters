@@ -256,6 +256,9 @@
     <ClCompile Include="cover_line.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="nocturne_segment.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="migrate.cpp">
       <Filter>Config migration</Filter>
     </ClCompile>
@@ -813,6 +816,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="cover_line.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="nocturne_segment.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="menu_button.h">

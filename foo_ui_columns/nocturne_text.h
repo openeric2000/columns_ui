@@ -183,7 +183,6 @@ inline constexpr wchar_t expanded_info_names[2][16] = {L"Detailed", L"Compact"};
 inline constexpr wchar_t expanded_info_note[]
     = L"Detailed: title, artist, album and format. Compact: a larger cover and one line below it (right-click it to choose).";
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
-inline constexpr wchar_t cover_line_picker_title[] = L"Below the cover";
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"Up next", L"Quality + format", L"Play stats"};
 inline constexpr wchar_t cover_line_no_next[] = L"Nothing up next right now: shows quality + format";
 inline constexpr char cover_line_format_script[]
@@ -401,7 +400,6 @@ inline constexpr wchar_t expanded_info_label[] = L"封面下方資訊";
 inline constexpr wchar_t expanded_info_names[2][16] = {L"詳細", L"精簡"};
 inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專輯、格式四行。精簡：封面放大，下面一排（在那排按右鍵選要顯示什麼）。";
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
-inline constexpr wchar_t cover_line_picker_title[] = L"封面下方顯示";
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"下一首", L"等級＋格式", L"播放統計"};
 inline constexpr wchar_t cover_line_no_next[] = L"目前沒有下一首，會顯示等級＋格式";
 // 卡片上的預覽文字（跟 main.xml 那三排的寫法一致）
