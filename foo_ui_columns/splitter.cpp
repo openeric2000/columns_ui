@@ -8,7 +8,8 @@ pfc::ptr_list_t<FlatSplitterPanel> FlatSplitterPanel::g_instances;
 class HorizontalSplitterPanel : public FlatSplitterPanel {
     uie::container_window_v3_config get_window_config() override
     {
-        return {L"{72FACC90-BB7E-4733-8449-D7537232AD26}", true, CS_DBLCLKS};
+        // 自編版：第二個參數（透明背景）改 false，背景改由 FlatSplitterPanel::on_message 處理（深色模式自己畫縫隙）
+        return {L"{72FACC90-BB7E-4733-8449-D7537232AD26}", false, CS_DBLCLKS};
     }
     void get_name(pfc::string_base& p_out) const override { p_out = "Row"; }
     const GUID& get_extension_guid() const override
@@ -23,7 +24,8 @@ class HorizontalSplitterPanel : public FlatSplitterPanel {
 class VerticalSplitterPanel : public FlatSplitterPanel {
     uie::container_window_v3_config get_window_config() override
     {
-        return {L"{77653A44-66D1-49e0-9A7A-1C71898C0441}", true, CS_DBLCLKS};
+        // 自編版：同上，透明背景改 false
+        return {L"{77653A44-66D1-49e0-9A7A-1C71898C0441}", false, CS_DBLCLKS};
     }
     void get_name(pfc::string_base& p_out) const override { p_out = "Column"; }
     const GUID& get_extension_guid() const override

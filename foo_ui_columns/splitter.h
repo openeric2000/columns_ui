@@ -220,6 +220,8 @@ private:
     bool test_divider_pt(const POINT& pt, size_t p_out);
 
     int get_panel_divider_size(size_t index) const;
+    // 自編版新增（2026-11-14）：深色模式自己畫背景。整塊填面板底色，左右並排的面板之間在縫隙正中間畫 1 px 細線
+    void paint_dark_divider_background(HDC dc) const;
 
     void on_size_changed(unsigned width, unsigned height);
     void on_size_changed();

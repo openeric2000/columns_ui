@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "splitter.h"
+#include "dark_mode.h"
 #include "menu_items.h"
 #include "now_playing_progress.h"
 #include "output_chip.h"
@@ -1035,6 +1036,42 @@ int FlatSplitterPanel::get_panel_divider_size(size_t index) const
         return 0;
 
     return settings::custom_splitter_divider_width;
+}
+
+void FlatSplitterPanel::paint_dark_divider_background(HDC dc) const
+{
+    RECT client_rect{};
+    GetClientRect(m_wnd, &client_rect);
+
+    // 底色跟播放清單、資料夾樹一樣（Win10 是 32、Win11 是 25），縫隙跟兩旁連在一起。
+    // 原本分隔器是透明的，縫隙露出主視窗的版面底色（51 灰），側欄右緣、標頭下緣、側欄頂排下緣看起來是三條灰線
+    const auto background = dark::get_dark_colour(dark::ColourID::TreeViewBackground);
+    const wil::unique_hbrush background_brush(CreateSolidBrush(background));
+    FillRect(dc, &client_rect, background_brush.get());
+
+    // 上下堆疊的縫隙只填底色（標頭與清單本來就有色差）；左右並排的縫隙兩邊同色，中間留一條比底色亮 12 的細線當邊界
+    if (get_orientation() != horizontal)
+        return;
+
+    const auto lighten = [](BYTE value) { return static_cast<BYTE>(std::min(value + 12, 255)); };
+    const wil::unique_hbrush line_brush(CreateSolidBrush(
+        RGB(lighten(GetRValue(background)), lighten(GetGValue(background)), lighten(GetBValue(background)))));
+
+    std::optional<LONG> previous_right;
+    for (const auto& panel : m_panels) {
+        if (!panel->m_wnd || !IsWindowVisible(panel->m_wnd))
+            continue;
+
+        RECT panel_rect{};
+        GetRelativeRect(panel->m_wnd, m_wnd, &panel_rect);
+
+        if (previous_right && panel_rect.left > *previous_right) {
+            const LONG x = *previous_right + (panel_rect.left - *previous_right) / 2;
+            const RECT line_rect{x, client_rect.top, x + 1, client_rect.bottom};
+            FillRect(dc, &line_rect, line_brush.get());
+        }
+        previous_right = panel_rect.right;
+    }
 }
 
 bool FlatSplitterPanel::set_config_item(

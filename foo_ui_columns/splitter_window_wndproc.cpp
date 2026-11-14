@@ -69,7 +69,26 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (!(lpwp->flags & SWP_NOSIZE)) {
             on_size_changed(lpwp->cx, lpwp->cy);
         }
+        // 自編版新增（2026-11-14）：視窗設定關掉透明背景後，container_window_v3 不再幫忙重畫，照它原本的條件自己重畫
+        if (!(lpwp->flags & SWP_NOSIZE) || !(lpwp->flags & SWP_NOMOVE) || (lpwp->flags & SWP_FRAMECHANGED))
+            RedrawWindow(wnd, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE);
     } break;
+    // 自編版新增（2026-11-14）：深色模式自己畫背景（paint_dark_divider_background），淺色模式照原本向上層借背景。
+    // 子面板借背景時也會送這兩個訊息過來（DC 已位移到子面板的位置）
+    case WM_ERASEBKGND:
+        if (colours::is_dark_mode_active()) {
+            paint_dark_divider_background(reinterpret_cast<HDC>(wp));
+            return TRUE;
+        }
+        return uie::win32::paint_background_using_parent(wnd, reinterpret_cast<HDC>(wp), false);
+    case WM_PRINTCLIENT:
+        if (!(lp & PRF_ERASEBKGND))
+            break;
+        if (colours::is_dark_mode_active()) {
+            paint_dark_divider_background(reinterpret_cast<HDC>(wp));
+            return TRUE;
+        }
+        return uie::win32::paint_background_using_parent(wnd, reinterpret_cast<HDC>(wp), true);
     case WM_GETMINMAXINFO: {
         auto lpmmi = (LPMINMAXINFO)lp;
 
