@@ -1,6 +1,8 @@
 #include "pch.h"
 
 #include "now_playing_mode_picker.h"
+
+#include "nocturne_segment.h"
 #include "next_track_toast.h"
 #include "popup_dismiss.h"
 #include "nocturne_surface.h"
@@ -53,6 +55,9 @@ constexpr ULONGLONG reopen_guard_ms = 400;
 
 // 自動關閉的檢查計時器在 popup_dismiss 裡
 constexpr UINT_PTR appear_timer_id = 2;
+// 關卡時淡出（2026-11-14 跟其他右鍵卡一致，100 ms）；選了模式那條路不淡出（切換時的交叉淡化會截展開頁，卡片不能還在）
+constexpr UINT_PTR fade_timer_id = 3;
+constexpr ULONGLONG fade_ms = 100;
 
 // 縮圖裡歌詞色條的長短（同預覽頁）
 constexpr float lyric_widths[] = {0.78f, 0.62f, 0.9f, 0.7f, 0.84f, 0.58f, 0.74f};
@@ -80,11 +85,6 @@ Gdiplus::FontStyle regular_style(const Gdiplus::FontFamily& family)
     if (family.IsStyleAvailable(Gdiplus::FontStyleBold))
         return Gdiplus::FontStyleBold;
     return Gdiplus::FontStyleItalic;
-}
-
-Gdiplus::FontStyle bold_style(const Gdiplus::FontFamily& family)
-{
-    return family.IsStyleAvailable(Gdiplus::FontStyleBold) ? Gdiplus::FontStyleBold : regular_style(family);
 }
 
 void add_rounded(Gdiplus::GraphicsPath& path, const Gdiplus::RectF& rect, float radius)
@@ -304,6 +304,9 @@ struct Picker {
     POINT origin{}; // 停好時視窗左上角（螢幕座標）
     ULONGLONG appear_start{};
     BYTE alpha{};
+    bool closing{};
+    ULONGLONG fade_start{};
+    BYTE fade_from{};
 };
 
 std::unique_ptr<Picker>& current_picker()
@@ -611,7 +614,6 @@ void render(Picker& p)
 
         const auto family = theme_family();
         const Gdiplus::Font label_font(family.get(), label_font_dip * p.k, regular_style(*family), Gdiplus::UnitPixel);
-        const Gdiplus::Font label_bold(family.get(), label_font_dip * p.k, bold_style(*family), Gdiplus::UnitPixel);
         const Gdiplus::Font note_font(family.get(), note_font_dip * p.k, regular_style(*family), Gdiplus::UnitPixel);
 
         std::unique_ptr<Gdiplus::Bitmap> cover;
@@ -630,9 +632,11 @@ void render(Picker& p)
             const auto selected = item.mode == p.current;
             const auto hovered = item.available && static_cast<int>(i) == p.hover;
 
-            if (hovered) {
-                const Gdiplus::SolidBrush hover_fill(rgba(255, 255, 255, 0.07));
-                fill_rounded(g, hover_fill, tile, tile_radius);
+            // 2026-11-14 分段切換樣式（同 VU 表／頻譜卡）：目前的模式整格鋪亮底（白 13%），滑過或鍵盤焦點鋪淡底（白 6%），沒有紅框
+            const auto focused = p.keyboard && static_cast<int>(i) == p.focus;
+            if (selected || hovered || focused) {
+                const Gdiplus::SolidBrush plate(rgba(255, 255, 255, selected ? 0.13 : 0.06));
+                fill_rounded(g, plate, tile, tile_radius);
             }
 
             const Gdiplus::RectF thumb{tile.X + tile_pad, tile.Y + tile_pad, thumb_w, thumb_h};
@@ -645,33 +649,22 @@ void render(Picker& p)
             if (!item.available) {
                 const Gdiplus::SolidBrush veil(rgba(16, 17, 21, 0.66));
                 g.FillRectangle(&veil, thumb);
+            } else if (!selected) {
+                // 沒選的淡一點（約 72%），滑過時亮一點
+                const Gdiplus::SolidBrush dim(rgba(glass_tint_r, glass_tint_g, glass_tint_b, hovered || focused ? 0.12 : 0.28));
+                g.FillRectangle(&dim, thumb);
             }
             g.ResetClip();
             if (!item.available)
                 draw_text(g, nocturne_text::mode_picker_unavailable, note_font, rgba(244, 240, 230, 0.72), thumb);
 
-            if (selected) {
-                const auto o = 1.f * p.k;
-                const Gdiplus::Pen ring(rgba(255, 92, 82, 1.0), 2.f * p.k);
-                stroke_rounded(g, ring, {thumb.X - o, thumb.Y - o, thumb.Width + 2 * o, thumb.Height + 2 * o}, thumb_radius + o);
-            } else {
-                const Gdiplus::Pen edge(rgba(255, 255, 255, 0.10), 1.f);
-                stroke_rounded(g, edge, {thumb.X + 0.5f, thumb.Y + 0.5f, thumb.Width - 1.f, thumb.Height - 1.f}, thumb_radius);
-            }
 
             const Gdiplus::RectF label_box{tile.X, thumb.Y + thumb.Height + px(p, label_gap_dip), tile.Width, px(p, label_h_dip)};
             const auto label_colour = !item.available ? rgba(255, 255, 255, 0.32)
                 : selected                            ? rgba(255, 255, 255, 0.98)
-                : hovered                             ? rgba(255, 255, 255, 0.92)
-                                                      : rgba(255, 255, 255, 0.72);
-            draw_text(g, item.name, selected ? label_bold : label_font, label_colour, label_box);
-
-            // 鍵盤移動時的焦點框
-            if (p.keyboard && static_cast<int>(i) == p.focus) {
-                const auto o = 1.f * p.k;
-                const Gdiplus::Pen focus_pen(rgba(255, 255, 255, 0.75), 2.f * p.k);
-                stroke_rounded(g, focus_pen, {tile.X + o, tile.Y + o, tile.Width - 2 * o, tile.Height - 2 * o}, tile_radius - o);
-            }
+                : hovered || focused                  ? rgba(255, 255, 255, 0.9)
+                                                      : rgba(255, 255, 255, 0.6);
+            draw_text(g, item.name, label_font, label_colour, label_box);
         }
     }
 
@@ -741,6 +734,35 @@ void update_appear(Picker& p)
         KillTimer(p.wnd, appear_timer_id);
 }
 
+// 淡出：只改整張的透明度，不重畫
+void begin_fade(Picker& p)
+{
+    if (p.closing)
+        return;
+    if (!nocturne_segment::animations_enabled()) {
+        DestroyWindow(p.wnd);
+        return;
+    }
+    p.closing = true;
+    p.fade_start = GetTickCount64();
+    p.fade_from = p.alpha;
+    KillTimer(p.wnd, appear_timer_id);
+    SetTimer(p.wnd, fade_timer_id, 15, nullptr);
+}
+
+void update_fade(Picker& p)
+{
+    const auto elapsed = static_cast<float>(GetTickCount64() - p.fade_start);
+    const auto t = std::clamp(elapsed / (fade_ms * nocturne_segment::slow_factor()), 0.f, 1.f);
+    if (t >= 1.f) {
+        DestroyWindow(p.wnd);
+        return;
+    }
+    p.alpha = static_cast<BYTE>(std::lround(p.fade_from * (1.f - t)));
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, p.alpha, AC_SRC_ALPHA};
+    UpdateLayeredWindow(p.wnd, nullptr, nullptr, nullptr, nullptr, nullptr, 0, &blend, ULW_ALPHA);
+}
+
 LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     // 點外面、切走程式、失去啟用、展開頁收合時關（見 popup_dismiss.h）
@@ -751,6 +773,9 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     if (!picker || picker->wnd != wnd)
         return DefWindowProc(wnd, msg, wp, lp);
     auto& p = *picker;
+
+    if (p.closing && (msg == WM_MOUSEMOVE || msg == WM_LBUTTONUP || msg == WM_KEYDOWN))
+        return 0;
 
     switch (msg) {
     case WM_MOUSEMOVE: {
@@ -785,7 +810,7 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_KEYDOWN:
         switch (wp) {
         case VK_ESCAPE:
-            DestroyWindow(wnd);
+            begin_fade(p);
             return 0;
         case VK_LEFT:
             move_focus(p, -1, 0);
@@ -819,12 +844,15 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         if (wp == appear_timer_id)
             update_appear(p);
+        else if (wp == fade_timer_id)
+            update_fade(p);
         return 0;
     case WM_CLOSE:
-        DestroyWindow(wnd);
+        begin_fade(p);
         return 0;
     case WM_NCDESTROY:
         KillTimer(wnd, appear_timer_id);
+        KillTimer(wnd, fade_timer_id);
         picker.reset();
         return DefWindowProc(wnd, msg, wp, lp);
     }
@@ -864,6 +892,7 @@ bool open(std::vector<Item> items, main_menu::NowPlayingMode current,
     if (!class_registered)
         return false;
 
+    nocturne_segment::refresh_settings();
     auto p = std::make_unique<Picker>();
     p->items = std::move(items);
     p->current = current;
