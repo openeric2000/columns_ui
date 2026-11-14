@@ -28,6 +28,9 @@ inline constexpr float close_ms = 100.f;
 inline constexpr float open_scale_from = 0.97f;
 inline constexpr float caption_shift_dip = 10.f;
 inline constexpr float drag_threshold_dip = 4.f;
+// 拖過兩端時亮底最多再往外跑多少（越拉越緊，放開彈回；2026-11-15 使用者要「超出一點點、手感 Q 一點」，
+// 原本四分之一阻力不設上限會跑出軌道一大截）
+inline constexpr float overshoot_max_dip = 8.f;
 inline constexpr float track_pad_dip = 3.f;
 inline constexpr float cell_gap_dip = 2.f;
 inline constexpr float cell_h_dip = 32.f;

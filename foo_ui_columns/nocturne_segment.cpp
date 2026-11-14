@@ -304,9 +304,17 @@ void mouse_move(Row& row, float x, float k, const std::function<void(int)>& on_p
         const auto left = row.pill.value();
         row.grab = row.press_x >= left && row.press_x < left + first.Width ? row.press_x - left : first.Width / 2.f;
     }
-    // 亮底只在第一段到最後一段之間移動（2026-11-15 使用者：拖到邊界還會往外跑一截、超出軌道不好看；
-    // 原本拉出兩端照四分之一的阻力繼續走、放開再彈回）
-    const auto left = std::clamp(x - row.grab, first.X, row.cells.back().X);
+    // 拖過兩端：多拉 d，亮底只往外跑 cap·d／(d＋cap)，越拉越緊、最多 cap（overshoot_max_dip），放開彈回。
+    // 剛拉出去時幾乎跟手（d＝cap 時跑一半），保留一點彈性但不會跑出軌道一大截（2026-11-15 使用者要求）
+    const auto min_x = first.X;
+    const auto max_x = row.cells.back().X;
+    const auto cap = overshoot_max_dip * k;
+    const auto damp = [cap](float d) { return cap * d / (d + cap); };
+    auto left = x - row.grab;
+    if (left < min_x)
+        left = min_x - damp(min_x - left);
+    else if (left > max_x)
+        left = max_x + damp(left - max_x);
     row.pill.set(left);
 
     const auto centre = left + first.Width / 2.f;
