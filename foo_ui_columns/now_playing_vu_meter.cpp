@@ -3703,7 +3703,7 @@ void close()
         DestroyWindow(picker->wnd);
 }
 
-// 在滑鼠位置開卡片（卡片左上角對齊滑鼠，超出螢幕工作區就往內挪）
+// 在滑鼠位置開卡片（位置規則見 nocturne_segment::place_card）
 void open(HWND meter, POINT at)
 {
     close();
@@ -3731,15 +3731,9 @@ void open(HWND meter, POINT at)
     build_thumbnails(*p);
     build_static(*p);
 
-    const auto sh = static_cast<int>(std::round(shadow_dip * p->k));
-    auto x = at.x - sh;
-    auto y = at.y - sh;
-    MONITORINFO monitor{sizeof(monitor)};
-    if (GetMonitorInfo(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &monitor)) {
-        const auto& work = monitor.rcWork;
-        x = std::clamp(x, work.left - sh, std::max(work.left - sh, work.right + sh - p->width));
-        y = std::clamp(y, work.top - sh, std::max(work.top - sh, work.bottom + sh - p->height));
-    }
+    // 卡片本體左上角對齊滑鼠；下面放不下就往上翻，並限制在 fb2k 視窗內
+    // （2026-11-14 使用者：錶在畫面下方，往下開會超出視窗蓋到工作列）
+    const auto [x, y] = seg::place_card(meter, at, at.y, p->card);
 
     const auto owner = GetAncestor(meter, GA_ROOT);
     current() = std::move(p);

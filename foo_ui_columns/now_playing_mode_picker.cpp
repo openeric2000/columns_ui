@@ -914,16 +914,8 @@ bool open(std::vector<Item> items, main_menu::NowPlayingMode current,
         GetCursorPos(&anchor);
         owner = core_api::get_main_window();
     }
-    auto x = anchor.x - static_cast<LONG>(p->card.X);
-    auto y = anchor.y - static_cast<LONG>(p->card.Y);
-    MONITORINFO monitor{sizeof(monitor)};
-    if (GetMonitorInfo(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)) {
-        const auto& work = monitor.rcWork;
-        const auto margin = static_cast<LONG>(p->card.X);
-        x = std::clamp(x, work.left - margin, std::max(work.left - margin, work.right + margin - p->width));
-        y = std::clamp(y, work.top - margin, std::max(work.top - margin, work.bottom + margin - p->height));
-    }
-    p->origin = {x, y};
+    // 跟其他右鍵卡同一套位置規則：限制在 fb2k 視窗內，下面放不下就往上翻（2026-11-14）
+    p->origin = nocturne_segment::place_card(owner, anchor, anchor.y, p->card);
 
     build_backdrop(*p);
 

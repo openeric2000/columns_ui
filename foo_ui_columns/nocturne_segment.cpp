@@ -33,6 +33,37 @@ float ms_since(Clock::time_point start, Clock::time_point now)
 
 } // namespace
 
+POINT place_card(HWND owner, POINT prefer, LONG flip_bottom, const Gdiplus::RectF& card)
+{
+    const auto card_w = static_cast<LONG>(std::lround(card.Width));
+    const auto card_h = static_cast<LONG>(std::lround(card.Height));
+
+    // 範圍：螢幕工作區，再跟 fb2k 主視窗的內容區取交集
+    RECT bounds{};
+    MONITORINFO monitor{sizeof(monitor)};
+    const bool has_monitor = GetMonitorInfo(MonitorFromPoint(prefer, MONITOR_DEFAULTTONEAREST), &monitor) != 0;
+    if (has_monitor)
+        bounds = monitor.rcWork;
+    const auto root = owner ? GetAncestor(owner, GA_ROOT) : nullptr;
+    RECT client{};
+    if (root && GetClientRect(root, &client)) {
+        MapWindowPoints(root, HWND_DESKTOP, reinterpret_cast<LPPOINT>(&client), 2);
+        RECT both{};
+        if (!has_monitor)
+            bounds = client;
+        else if (IntersectRect(&both, &bounds, &client))
+            bounds = both;
+    }
+
+    auto x = prefer.x;
+    auto y = prefer.y;
+    if (y + card_h > bounds.bottom)
+        y = flip_bottom - card_h;
+    x = std::clamp(x, bounds.left, std::max(bounds.left, bounds.right - card_w));
+    y = std::clamp(y, bounds.top, std::max(bounds.top, bounds.bottom - card_h));
+    return {x - static_cast<LONG>(std::lround(card.X)), y - static_cast<LONG>(std::lround(card.Y))};
+}
+
 void refresh_settings()
 {
     BOOL enabled = TRUE;

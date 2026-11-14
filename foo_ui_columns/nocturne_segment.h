@@ -37,6 +37,12 @@ inline constexpr float pill_radius_dip = 7.f;
 inline constexpr float label_font_dip = 14.5f;
 inline constexpr float caption_font_dip = 15.f;
 
+// 卡片要放在哪（2026-11-14 使用者要求：卡片不可超出 fb2k 視窗）
+// 範圍＝owner 所在主視窗的內容區與螢幕工作區的交集；card＝卡片本體在卡片視窗裡的位置大小（陰影留白不算）。
+// prefer＝卡片本體左上角想放的螢幕座標；本體下緣超出範圍就改成本體下緣貼著 flip_bottom（往上翻），最後再夾進範圍。
+// 回傳卡片視窗（含陰影留白）該放的左上角。
+POINT place_card(HWND owner, POINT prefer, LONG flip_bottom, const Gdiplus::RectF& card);
+
 // 開卡時讀一次：系統動畫設定、開發版的放慢倍數
 void refresh_settings();
 bool animations_enabled();

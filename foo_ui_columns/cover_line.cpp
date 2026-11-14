@@ -469,7 +469,7 @@ void close()
         DestroyWindow(picker->wnd);
 }
 
-// 在滑鼠位置開卡片（卡片左上角對齊滑鼠，超出螢幕工作區就往內挪）
+// 開卡片：貼在封面下一排的正上方（位置規則見 nocturne_segment::place_card）
 void open(HWND hotspot, POINT at)
 {
     close();
@@ -493,15 +493,16 @@ void open(HWND hotspot, POINT at)
     build_layout(*p);
     build_static(*p);
 
-    const auto sh = p->shadow;
-    auto x = at.x - sh;
-    auto y = at.y - sh;
-    MONITORINFO monitor{sizeof(monitor)};
-    if (GetMonitorInfo(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &monitor)) {
-        const auto& work = monitor.rcWork;
-        x = std::clamp(x, work.left - sh, std::max(work.left - sh, work.right + sh - p->width));
-        y = std::clamp(y, work.top - sh, std::max(work.top - sh, work.bottom + sh - p->height));
+    // 位置（2026-11-14 使用者要求）：貼在封面下一排的正上方、左右對齊那一排的中間，
+    // 不再蓋住那一排（拖滑塊時的即時預覽才看得到），也不會壓到下面的進度條；範圍限制在 fb2k 視窗內
+    POINT prefer = at;
+    RECT line{};
+    if (GetWindowRect(hotspot, &line)) {
+        const auto gap = static_cast<LONG>(std::lround(8.f * p->k));
+        prefer = {(line.left + line.right) / 2 - static_cast<LONG>(std::lround(p->card.Width / 2.f)),
+            line.top - gap - static_cast<LONG>(std::lround(p->card.Height))};
     }
+    const auto [x, y] = seg::place_card(hotspot, prefer, at.y, p->card);
 
     const auto owner = GetAncestor(hotspot, GA_ROOT);
     current() = std::move(p);
