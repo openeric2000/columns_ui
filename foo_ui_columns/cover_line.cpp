@@ -172,7 +172,8 @@ void present_layered(HWND wnd, const POINT* origin, int width, int height, const
 }
 
 // ---- 挑選卡（2026-11-14 改成分段切換，共用 nocturne_segment.h：使用者在預覽頁選 D＋等級 2 動畫＋按住拖曳＋開關淡入淡出）----
-// 一條三段（下一首／等級＋格式／播放統計）＋下面一行實際會出現的字；點或拖都可以，拖曳經過時封面下那一排先換成那段
+// 一條三段（下一首／等級＋格式／播放統計）；點或拖都可以，拖曳經過時封面下那一排先換成那段。
+// 2026-11-14 卡片改貼在那一排上方後，使用者說軌道下面那行「實際會出現的字」跟下面那排重複 → 拿掉，只留軌道
 namespace picker {
 
 namespace seg = nocturne_segment;
@@ -180,8 +181,6 @@ namespace seg = nocturne_segment;
 constexpr float shadow_dip = 18.f;
 constexpr float pad_dip = 10.f;
 constexpr float card_w_dip = 420.f;
-constexpr float caption_h_dip = 42.f;
-constexpr float caption_gap_dip = 4.f;
 
 struct Picker {
     HWND wnd{};
@@ -191,18 +190,13 @@ struct Picker {
     int height{};
     int shadow{};
     Gdiplus::RectF card;
-    Gdiplus::RectF caption_box;
     seg::Row row;
-    seg::Caption caption;
-    int caption_index{};
-    std::wstring previews[style_count];
     seg::Presenter presenter;
     seg::FrameClock clock;
     bool tracking{};
     // 開卡時建好、每格重複用：字型、卡片底板（陰影＋實心底，不會動的部分）
     std::unique_ptr<Gdiplus::FontFamily> family;
     std::unique_ptr<Gdiplus::Font> label_font;
-    std::unique_ptr<Gdiplus::Font> caption_font;
     std::vector<uint32_t> background;
     std::vector<uint32_t> frame;
 };
@@ -213,40 +207,6 @@ std::unique_ptr<Picker>& current()
     return picker;
 }
 
-std::wstring wide(const std::string& text)
-{
-    return pfc::stringcvt::string_wide_from_utf8(text.c_str()).get_ptr();
-}
-
-std::wstring format_now_playing(const char* script)
-{
-    titleformat_object::ptr object;
-    titleformat_compiler::get()->compile_safe(object, script);
-    pfc::string8 out;
-    if (!play_control::get()->playback_format_title(nullptr, out, object, nullptr, play_control::display_level_all))
-        return {};
-    return wide(out.c_str());
-}
-
-// 每一段的說明：用目前這首實際會顯示的字
-void build_previews(Picker& p)
-{
-    {
-        std::scoped_lock lock(next_mutex);
-        if (next_valid) {
-            std::wstring text = nocturne_text::cover_line_style_names[0];
-            text += L"\x3000" + wide(next_title);
-            if (!next_artist.empty())
-                text += L"\x3000" + wide(next_artist);
-            p.previews[0] = text;
-        } else {
-            p.previews[0] = nocturne_text::cover_line_no_next;
-        }
-    }
-    p.previews[1] = format_now_playing(nocturne_text::cover_line_format_script);
-    p.previews[2] = format_now_playing(nocturne_text::cover_line_stats_script);
-}
-
 void build_layout(Picker& p)
 {
     const auto k = p.k;
@@ -255,7 +215,7 @@ void build_layout(Picker& p)
     const auto pad = px(pad_dip);
     const auto card_w = px(card_w_dip);
     const auto row_h = px(seg::row_h_dip);
-    const auto card_h = 2 * pad + row_h + px(caption_h_dip);
+    const auto card_h = 2 * pad + row_h;
     const auto sh = static_cast<float>(p.shadow);
     p.card = {sh, sh - px(4), card_w, card_h};
     p.width = static_cast<int>(card_w + 2 * sh);
@@ -266,10 +226,6 @@ void build_layout(Picker& p)
         p.row.labels.emplace_back(name);
     p.row.selected = static_cast<int>(clamp_style(style.get())) - 1;
     seg::layout(p.row, {p.card.X + pad, p.card.Y + pad, card_w - 2 * pad, row_h}, k);
-    p.caption_box = {p.card.X + pad, p.card.Y + pad + row_h + px(caption_gap_dip), card_w - 2 * pad,
-        px(caption_h_dip) - px(caption_gap_dip)};
-    p.caption_index = p.row.selected;
-    seg::caption_set(p.caption, p.previews[p.caption_index], 1, false);
 }
 
 // 不會動的部分先畫好：字型、陰影＋實心底
@@ -279,7 +235,6 @@ void build_static(Picker& p)
     p.family = seg::theme_family();
     const auto style_flags = seg::regular_style(*p.family);
     p.label_font = std::make_unique<Gdiplus::Font>(p.family.get(), seg::label_font_dip * k, style_flags, Gdiplus::UnitPixel);
-    p.caption_font = std::make_unique<Gdiplus::Font>(p.family.get(), seg::caption_font_dip * k, style_flags, Gdiplus::UnitPixel);
 
     p.background.assign(static_cast<size_t>(p.width) * p.height, 0);
     Gdiplus::Bitmap canvas(p.width, p.height, p.width * 4, PixelFormat32bppPARGB, reinterpret_cast<BYTE*>(p.background.data()));
@@ -300,7 +255,6 @@ void render(Picker& p)
         g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
         g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
         seg::draw(g, p.row, *p.label_font, k);
-        seg::draw_caption(g, p.caption, p.caption_box, *p.caption_font, 0.7, k);
     }
     p.presenter.present(p.wnd, p.frame.data(), p.width, p.height, {p.card.X, p.card.Y});
 }
@@ -310,15 +264,6 @@ void set_preview(uint32_t value)
 {
     if (preview_style.exchange(value) != value)
         main_menu::refresh_layout_fields();
-}
-
-void show_caption(Picker& p, int index, bool animate)
-{
-    if (index == p.caption_index)
-        return;
-    const auto dir = index > p.caption_index ? 1 : -1;
-    p.caption_index = index;
-    seg::caption_set(p.caption, p.previews[index], dir, animate);
 }
 
 void animate(Picker& p)
@@ -331,7 +276,6 @@ void tick(Picker& p)
 {
     const auto now = seg::Clock::now();
     auto running = seg::update(p.row, now);
-    running = seg::caption_update(p.caption, now) || running;
     running = p.presenter.update(now) || running;
     running = running || p.row.pressed;
     render(p);
@@ -353,7 +297,6 @@ void finish_pointer(Picker& p)
             style = value;
     });
     set_preview(0);
-    show_caption(p, p.row.selected, true);
     animate(p);
 }
 
@@ -397,10 +340,7 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
             p.tracking = TrackMouseEvent(&track) != FALSE;
         }
         if (p.row.pressed) {
-            seg::mouse_move(p.row, x, p.k, [&p](int index) {
-                show_caption(p, index, true);
-                set_preview(static_cast<uint32_t>(index) + 1);
-            });
+            seg::mouse_move(p.row, x, p.k, [](int index) { set_preview(static_cast<uint32_t>(index) + 1); });
             animate(p);
             return 0;
         }
@@ -440,7 +380,6 @@ LRESULT CALLBACK window_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         if (p.row.pressed) {
             seg::cancel_drag(p.row);
             set_preview(0);
-            show_caption(p, p.row.selected, true);
             animate(p);
         }
         return 0;
@@ -489,7 +428,6 @@ void open(HWND hotspot, POINT at)
     auto p = std::make_unique<Picker>();
     p->hotspot = hotspot;
     p->k = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
-    build_previews(*p);
     build_layout(*p);
     build_static(*p);
 
@@ -533,7 +471,6 @@ void refresh()
     const auto target = static_cast<int>(clamp_style(style.get())) - 1;
     if (target != p.row.selected) {
         seg::select(p.row, target, true);
-        show_caption(p, target, true);
         animate(p);
     }
     render(p);
