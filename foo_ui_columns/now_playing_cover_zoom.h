@@ -17,10 +17,12 @@
 
 namespace cui::cover_zoom {
 
-// 自編版新增（2026-11-14）：展開頁封面下方資訊「詳細／精簡」（設定頁「展開頁」分頁，預設詳細，使用者指定）。
+// 自編版新增（2026-11-14）：展開頁封面下方資訊「詳細／精簡」（設定頁「展開頁」分頁）。
+// 預設：11/14 使用者指定詳細，2026-11-15 使用者改成精簡。只影響沒存過這個設定的環境（存過的照舊）。
 // 詳細＝歌名、藝人・年份、專輯、規格列四行；精簡＝封面放大、下面只留一排（下一首／等級＋格式／播放統計，右鍵挑選，見 cover_line.h）。
-// main.xml 讀 %cui_expanded_compact%（精簡時為 1）換左欄；這裡的封面位置改照標記的 compact-cover／compact-gap／compact-info
-inline constexpr bool compact_info_default = false;
+// main.xml 讀 %cui_expanded_compact%（精簡時為 1）換左欄；這裡的封面位置改照標記的 compact-cover／compact-gap／compact-info。
+// 舊版 main.xml 沒有 disc-compact 與 compact-* 標記時，選精簡也不會有任何變化（版面照詳細、位置照 cover／gap／info 算）
+inline constexpr bool compact_info_default = true;
 extern fbh::ConfigBool compact_info;
 
 // 在 parent（分割面板視窗）底下建立按鈕視窗（先不顯示）；失敗傳回 nullptr
