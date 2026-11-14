@@ -453,6 +453,7 @@
     <ClCompile Include="system_tray.cpp" />
     <ClCompile Include="output_device.cpp" />
     <ClCompile Include="playlist_item_helpers.cpp" />
+    <ClCompile Include="orphan_playback.cpp" />
     <ClCompile Include="rebar_band.cpp" />
     <ClCompile Include="replaygain_mode.cpp" />
     <ClCompile Include="splitter_utils.cpp" />

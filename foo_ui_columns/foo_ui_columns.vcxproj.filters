@@ -250,6 +250,9 @@
     <ClCompile Include="playlist_item_helpers.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="orphan_playback.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="migrate.cpp">
       <Filter>Config migration</Filter>
     </ClCompile>
