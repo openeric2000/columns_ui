@@ -177,6 +177,21 @@ inline constexpr wchar_t mode_note[]
     = L"Top-left button: click for the next one, right-click for a menu. Only the ticked ones show up.";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"Show";
+// 封面下方資訊：詳細／精簡（2026-11-14）
+inline constexpr wchar_t expanded_info_label[] = L"Below the cover";
+inline constexpr wchar_t expanded_info_names[2][16] = {L"Detailed", L"Compact"};
+inline constexpr wchar_t expanded_info_note[]
+    = L"Detailed: title, artist, album and format. Compact: a larger cover and one line below it (right-click it to choose).";
+// 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
+inline constexpr wchar_t cover_line_picker_title[] = L"Below the cover";
+inline constexpr wchar_t cover_line_style_names[3][24] = {L"Up next", L"Quality + format", L"Play stats"};
+inline constexpr wchar_t cover_line_no_next[] = L"Nothing up next right now: shows quality + format";
+inline constexpr char cover_line_format_script[]
+    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%samplerate%,95999,$ifgreater(%__bitspersample%,23,"
+      "Hi-Res Lossless,Lossless),Lossless),Lossy)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
+      "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
+      "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
+inline constexpr char cover_line_stats_script[] = "Played $if2(%play_count%,1) times[ · last $left(%last_played%,10)]";
 inline constexpr wchar_t modes_separator[] = L", ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
@@ -381,6 +396,21 @@ inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
 inline constexpr wchar_t mode_note[] = L"左上角按鈕：左鍵換下一種、右鍵跳出選單；只有勾選的會出現。";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"展開頁要有";
+// 封面下方資訊：詳細／精簡（2026-11-14）
+inline constexpr wchar_t expanded_info_label[] = L"封面下方資訊";
+inline constexpr wchar_t expanded_info_names[2][16] = {L"詳細", L"精簡"};
+inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專輯、格式四行。精簡：封面放大，下面一排（在那排按右鍵選要顯示什麼）。";
+// 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
+inline constexpr wchar_t cover_line_picker_title[] = L"封面下方顯示";
+inline constexpr wchar_t cover_line_style_names[3][24] = {L"下一首", L"等級＋格式", L"播放統計"};
+inline constexpr wchar_t cover_line_no_next[] = L"目前沒有下一首，會顯示等級＋格式";
+// 卡片上的預覽文字（跟 main.xml 那三排的寫法一致）
+inline constexpr char cover_line_format_script[]
+    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%samplerate%,95999,$ifgreater(%__bitspersample%,23,"
+      "Hi-Res 無損,無損),無損),有損)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
+      "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
+      "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
+inline constexpr char cover_line_stats_script[] = "第 $if2(%play_count%,1) 次播放[　上次 $left(%last_played%,10)]";
 inline constexpr wchar_t modes_separator[] = L"、";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";

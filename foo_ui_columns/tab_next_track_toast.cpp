@@ -786,7 +786,8 @@ private:
 // ---- 展開頁（2026-11-11）----
 // 使用者說設定放滿了就開新分頁、維持鬆弛度。三個小標題：
 // - 背景：封面虛化背景＋亮度上限（原本在「介面」分頁，邏輯在 expanded_cover_bg.cpp）；沒勾時亮度上限整個藏起來
-// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）
+// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）；
+//   封面下方資訊詳細／精簡（2026-11-14，邏輯在 now_playing_cover_zoom.cpp 的 compact_info）
 // - 歌詞：歌詞防誤拖（邏輯在 now_playing_cover_zoom.cpp 的 lyrics_lock）
 // 都是改了馬上生效
 class TabNocturneExpanded : public NocturneTab {
@@ -805,6 +806,7 @@ public:
         expanded_cover_bg::cap_percent.reset();
         main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
         main_menu::on_now_playing_modes_changed();
+        cover_zoom::compact_info.reset();
         lyrics_lock::set_enabled(lyrics_lock::enabled_default);
     }
 
@@ -933,6 +935,14 @@ private:
         update_modes_text(wnd);
         SetWindowSubclass(GetDlgItem(wnd, IDC_MODES), s_modes_combo_proc, 1, 0);
 
+        // 封面下方資訊：詳細／精簡（2026-11-14）
+        SetDlgItemText(wnd, IDC_EXPANDED_INFO_LABEL, nocturne_text::expanded_info_label);
+        SetDlgItemText(wnd, IDC_EXPANDED_INFO_NOTE, nocturne_text::expanded_info_note);
+        const auto info_combo = GetDlgItem(wnd, IDC_EXPANDED_INFO);
+        for (const auto& name : nocturne_text::expanded_info_names)
+            ComboBox_AddString(info_combo, name);
+        ComboBox_SetCurSel(info_combo, cover_zoom::compact_info.get() ? 1 : 0);
+
         // 歌詞
         SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::expanded_section_lyrics);
         SetDlgItemText(wnd, IDC_LYRICS_LOCK, nocturne_text::lyrics_lock);
@@ -954,6 +964,10 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
+        } else if (id == IDC_EXPANDED_INFO && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                cover_zoom::compact_info = selection == 1;
         } else if (id == IDC_LYRICS_LOCK && code == BN_CLICKED) {
             lyrics_lock::set_enabled(IsDlgButtonChecked(wnd, IDC_LYRICS_LOCK) == BST_CHECKED);
         }

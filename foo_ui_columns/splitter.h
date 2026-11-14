@@ -294,6 +294,8 @@ private:
     HWND m_lyrics_lock_wnd{};
     // 自編版新增（2026-11-11）：展開頁 VU 表模式的自繪 VU 表（now_playing_vu_meter）
     HWND m_vu_meter_wnd{};
+    // 自編版新增（2026-11-14）：精簡時封面下那一排的右鍵熱區（看不見，見 cover_line.h）
+    HWND m_cover_line_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
     int m_now_playing_slide_from{};

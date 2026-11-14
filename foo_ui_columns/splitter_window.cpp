@@ -7,6 +7,7 @@
 #include "volume_chip.h"
 #include "now_playing_cover_zoom.h"
 #include "now_playing_vu_meter.h"
+#include "cover_line.h"
 
 namespace cui::panels::splitter {
 
@@ -386,6 +387,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
         m_lyrics_lock_wnd = lyrics_lock::create(get_wnd());
     if (now_playing_bar && now_playing_bar->m_wnd && !m_vu_meter_wnd)
         m_vu_meter_wnd = vu_meter::create(get_wnd());
+    if (now_playing_bar && now_playing_bar->m_wnd && !m_cover_line_wnd)
+        m_cover_line_wnd = cover_line::create(get_wnd());
 
     HDWP dwp = BeginDeferWindowPos(gsl::narrow<int>(m_panels.size()) + 5);
     if (dwp) {
@@ -427,6 +430,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             dwp = lyrics_lock::defer_layout(dwp, m_lyrics_lock_wnd, now_playing_bar_rect);
         if (m_vu_meter_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
             dwp = vu_meter::defer_layout(dwp, m_vu_meter_wnd, now_playing_bar_rect);
+        if (m_cover_line_wnd && dwp && now_playing_bar_rect.right > now_playing_bar_rect.left)
+            dwp = cover_line::defer_layout(dwp, m_cover_line_wnd, now_playing_bar_rect);
 
         EndDeferWindowPos(dwp);
     }
@@ -470,6 +475,10 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             m_vu_meter_wnd = vu_meter::create(get_wnd());
         if (m_vu_meter_wnd)
             vu_meter::layout(m_vu_meter_wnd, now_playing_bar_rect);
+        if (!m_cover_line_wnd)
+            m_cover_line_wnd = cover_line::create(get_wnd());
+        if (m_cover_line_wnd)
+            cover_line::layout(m_cover_line_wnd, now_playing_bar_rect);
     } else {
         if (m_now_playing_progress_wnd)
             DestroyWindow(std::exchange(m_now_playing_progress_wnd, nullptr));
@@ -483,6 +492,8 @@ void FlatSplitterPanel::on_size_changed(unsigned width, unsigned height)
             DestroyWindow(std::exchange(m_lyrics_lock_wnd, nullptr));
         if (m_vu_meter_wnd)
             DestroyWindow(std::exchange(m_vu_meter_wnd, nullptr));
+        if (m_cover_line_wnd)
+            DestroyWindow(std::exchange(m_cover_line_wnd, nullptr));
     }
 
     layout_now_playing_side();
@@ -528,6 +539,8 @@ void FlatSplitterPanel::s_refresh_now_playing()
             lyrics_lock::layout(splitter->m_lyrics_lock_wnd, splitter->m_now_playing_bar_rect);
         if (splitter->m_vu_meter_wnd)
             vu_meter::layout(splitter->m_vu_meter_wnd, splitter->m_now_playing_bar_rect);
+        if (splitter->m_cover_line_wnd)
+            cover_line::layout(splitter->m_cover_line_wnd, splitter->m_now_playing_bar_rect);
     }
 }
 
@@ -1793,6 +1806,9 @@ void FlatSplitterPanel::finish_now_playing_slide()
         lyrics_lock::layout(m_lyrics_lock_wnd, m_now_playing_bar_rect);
     if (m_vu_meter_wnd)
         vu_meter::layout(m_vu_meter_wnd, m_now_playing_bar_rect);
+    // 精簡時封面下那一排的右鍵熱區也是這時才出現
+    if (m_cover_line_wnd)
+        cover_line::layout(m_cover_line_wnd, m_now_playing_bar_rect);
 
     on_now_playing_animation_finished();
 }

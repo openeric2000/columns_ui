@@ -880,9 +880,12 @@ BEGIN
     LTEXT           "Show",IDC_MODES_LABEL,7,114,90,8
     COMBOBOX        IDC_MODES,100,112,160,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "",IDC_MODE_NOTE,7,132,313,20
-    LTEXT           "Lyrics",IDC_TITLE3,7,162,313,17
-    CONTROL         "Lock the lyrics against dragging",IDC_LYRICS_LOCK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,188,313,10
-    LTEXT           "",IDC_LYRICS_LOCK_NOTE,7,204,313,20
+    LTEXT           "Below the cover",IDC_EXPANDED_INFO_LABEL,7,156,90,8
+    COMBOBOX        IDC_EXPANDED_INFO,100,154,90,60,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "",IDC_EXPANDED_INFO_NOTE,7,174,313,20
+    LTEXT           "Lyrics",IDC_TITLE3,7,200,313,17
+    CONTROL         "Lock the lyrics against dragging",IDC_LYRICS_LOCK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,226,313,10
+    LTEXT           "",IDC_LYRICS_LOCK_NOTE,7,242,313,20
 END
 
 // 「資料夾」分頁：資料夾樹（2026-11-12 從「介面」搬過來）、目前選取資料夾兩段

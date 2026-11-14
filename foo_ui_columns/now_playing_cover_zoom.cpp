@@ -144,6 +144,12 @@ struct CoverGeometry {
     bool has_solo{};
     Length solo_cover;
     Length solo_info;
+    // compact-cover／compact-gap／compact-info（2026-11-14，可省略）：封面下方資訊選「精簡」（只留規格列）時的
+    // 封面邊長、封面到規格列、規格列的排版高度。三個都寫了才算數，沒寫時精簡也照上面的 cover／gap／info
+    bool has_compact{};
+    Length compact_cover;
+    Length compact_gap;
+    Length compact_info;
 };
 
 std::wstring layout_file_path()
@@ -187,7 +193,7 @@ CoverGeometry parse_geometry(const std::string& text)
 
     CoverGeometry geometry;
     bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{},
-        has_solo_cover{}, has_solo_info{};
+        has_solo_cover{}, has_solo_info{}, has_compact_cover{}, has_compact_gap{}, has_compact_info{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -242,6 +248,15 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "solo-info") {
             geometry.solo_info = *value;
             has_solo_info = true;
+        } else if (key == "compact-cover") {
+            geometry.compact_cover = *value;
+            has_compact_cover = true;
+        } else if (key == "compact-gap") {
+            geometry.compact_gap = *value;
+            has_compact_gap = true;
+        } else if (key == "compact-info") {
+            geometry.compact_info = *value;
+            has_compact_info = true;
         }
     }
 
@@ -249,7 +264,22 @@ CoverGeometry parse_geometry(const std::string& text)
     geometry.has_lyrics = has_lyrics_left && has_lyrics_right;
     geometry.has_vu_column = has_vu_left && has_vu_right;
     geometry.has_solo = has_solo_cover && has_solo_info && geometry.solo_cover.value > 0;
+    geometry.has_compact = has_compact_cover && has_compact_gap && has_compact_info && geometry.compact_cover.value > 0;
     return geometry;
+}
+
+// 歌詞模式左欄現在用哪一組：封面下方資訊選精簡、而且標記有精簡值時用 compact-*，否則用 cover／gap／info
+struct CoverColumn {
+    Length cover;
+    Length gap;
+    Length info;
+};
+
+CoverColumn active_cover_column(const CoverGeometry& geometry)
+{
+    if (geometry.has_compact && compact_info.get())
+        return {geometry.compact_cover, geometry.compact_gap, geometry.compact_info};
+    return {geometry.cover, geometry.gap, geometry.info};
 }
 
 struct GeometryProbe {
@@ -624,6 +654,16 @@ LRESULT CALLBACK Button::s_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
 } // namespace
 
+// 改了：ESLyric 重算 %cui_expanded_compact%（main.xml 換左欄），放大鈕、歌詞防誤拖蓋層、VU 表照新的封面位置重排。
+// 排到主執行緒再做（設定值載入時也可能呼叫這個回呼，那時服務還沒就緒）
+fbh::ConfigBool compact_info(GUID{0xaa4b780a, 0x471d, 0x4b68, {0xbd, 0x02, 0x13, 0x6d, 0xb3, 0x59, 0xb9, 0xe7}},
+    compact_info_default, [](bool, bool, std::optional<uint32_t>) {
+        fb2k::inMainThread([] {
+            main_menu::refresh_layout_fields();
+            panels::splitter::FlatSplitterPanel::s_refresh_now_playing();
+        });
+    });
+
 std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
 {
     const auto& geometry = layout_geometry();
@@ -634,10 +674,11 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
         return resolve_length(length, stage_width, stage_height);
     };
 
-    // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）
-    const auto cover = resolve(geometry.cover);
+    // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）；精簡時是封面＋規格列那組
+    const auto column = active_cover_column(geometry);
+    const auto cover = resolve(column.cover);
     const auto cover_left = resolve(geometry.left);
-    const auto group_height = cover + resolve(geometry.gap) + resolve(geometry.info);
+    const auto group_height = cover + resolve(column.gap) + resolve(column.info);
     const auto cover_top = (stage_height - group_height) / 2;
 
     // 跑出展開頁（視窗太小）就當作沒有
@@ -674,8 +715,8 @@ std::optional<int> info_top_in_stage(int stage_width, int stage_height)
     const auto cover = cover_rect_in_stage(stage_width, stage_height);
     if (!cover)
         return {};
-    const auto& geometry = layout_geometry();
-    const auto gap = resolve_length(geometry.gap, stage_width, stage_height);
+    const auto column = active_cover_column(layout_geometry());
+    const auto gap = resolve_length(column.gap, stage_width, stage_height);
     return static_cast<int>(cover->bottom) + gap;
 }
 
@@ -684,11 +725,11 @@ std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
     const auto cover = cover_rect_in_stage(stage_width, stage_height);
     if (!cover)
         return {};
-    const auto& geometry = layout_geometry();
+    const auto column = active_cover_column(layout_geometry());
     const auto resolve = [stage_width, stage_height](const Length& length) {
         return resolve_length(length, stage_width, stage_height);
     };
-    return static_cast<int>(cover->bottom) + resolve(geometry.gap) + resolve(geometry.info);
+    return static_cast<int>(cover->bottom) + resolve(column.gap) + resolve(column.info);
 }
 
 std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
