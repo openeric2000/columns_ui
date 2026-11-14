@@ -735,6 +735,58 @@ public:
 
 play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play_callback;
 
+namespace {
+
+// 西元日期換成連續的日數（Howard Hinnant 的 days_from_civil），只拿來算兩個日期差幾天
+long long days_from_civil(int year, int month, int day)
+{
+    year -= month <= 2 ? 1 : 0;
+    const long long era = (year >= 0 ? year : year - 399) / 400;
+    const long long year_of_era = year - era * 400;
+    const long long day_of_year = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    const long long day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return era * 146097 + day_of_era;
+}
+
+// %cui_last_played_ago% 用（2026-11-14）：把 foo_playcount 的 %last_played%（YYYY-MM-DD HH:MM:SS）換成相對寫法。
+// ESLyric 的標題格式拿不到目前日期，所以在這裡算；沒播過（N/A）或讀不懂時回傳空值，佈局用 [ ] 整行藏起來。
+// 只在被要值的當下算，跨過午夜時要等那首歌的資訊重算（換歌、播放次數更新）才會從「今天」變「昨天」
+std::optional<std::string> format_last_played_ago(metadb_handle* handle)
+{
+    static titleformat_object::ptr script;
+    static std::once_flag compiled;
+    std::call_once(compiled, [] { titleformat_compiler::get()->compile_safe(script, "%last_played%"); });
+
+    pfc::string8 text;
+    handle->format_title(nullptr, text, script, nullptr);
+
+    int year{}, month{}, day{}, hour{}, minute{};
+    if (sscanf_s(text.c_str(), "%d-%d-%d %d:%d", &year, &month, &day, &hour, &minute) != 5)
+        return {};
+    if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0
+        || minute > 59)
+        return {};
+
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    const auto days_ago = days_from_civil(now.wYear, now.wMonth, now.wDay) - days_from_civil(year, month, day);
+
+    if (days_ago == 0)
+        return fmt::format(nocturne_text::last_played_today, hour, minute);
+    if (days_ago == 1)
+        return fmt::format(nocturne_text::last_played_yesterday, hour, minute);
+    if (days_ago >= 2 && days_ago <= 6)
+        return fmt::format(nocturne_text::last_played_days_ago, days_ago);
+    if (days_ago > 0 && year == now.wYear)
+        return fmt::format(nocturne_text::last_played_month_day, nocturne_text::last_played_month_names[month - 1], day);
+    // 更早的年份寫完整日期；比今天還晚（時鐘被調過）也照實寫出日期與時分
+    if (days_ago > 0)
+        return fmt::format("{:04}-{:02}-{:02}", year, month, day);
+    return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute);
+}
+
+} // namespace
+
 // 自編版新增：標題格式欄位 %cui_now_playing_expanded%，播放頁展開時為 1、收合時不存在，給 ESLyric 佈局切換 ⌃／⌄
 // 以及 %cui_now_playing_style%（展開頁樣式 1～3）
 // 以及 %cui_paused_position_ms%／%cui_paused_length_ms%（暫停時的位置與曲長，毫秒；沒在暫停時不存在）
@@ -742,18 +794,29 @@ play_callback_static_factory_t<NowPlayingFilePlayCallback> now_playing_file_play
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 15; }
+    t_uint32 get_field_count() override { return 16; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
-            "cui_cover_line", "cui_next_title", "cui_next_artist"};
+            "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // %cui_last_played_ago%：資訊卡「最後播放」的相對寫法（今天 23:36、昨天 21:10、3 天前、11 月 2 日；2026-11-14）
+        if (index == 15) {
+            if (!handle)
+                return false;
+            const auto text = format_last_played_ago(handle);
+            if (!text)
+                return false;
+            out->write(titleformat_inputtypes::meta, text->c_str());
+            return true;
+        }
+
         // %cui_cover_line%：精簡時封面下那一排顯示什麼（1 下一首、2 等級＋格式、3 播放統計；右鍵挑選卡選，見 cover_line.h）
         if (index == 12) {
             out->write(titleformat_inputtypes::meta, pfc::format_uint(cover_line::style_for_fields()));

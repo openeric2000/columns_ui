@@ -191,6 +191,13 @@ inline constexpr char cover_line_format_script[]
       "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "Played $if2(%play_count%,1) times[ · last $left(%last_played%,10)]";
+// 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+inline constexpr char last_played_today[] = "Today {:02}:{:02}";
+inline constexpr char last_played_yesterday[] = "Yesterday {:02}:{:02}";
+inline constexpr char last_played_days_ago[] = "{} days ago";
+inline constexpr char last_played_month_day[] = "{} {}";
+inline constexpr char last_played_month_names[12][8]
+    = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 inline constexpr wchar_t modes_separator[] = L", ";
 inline constexpr wchar_t modes_all[] = L"All";
 inline constexpr wchar_t modes_except[] = L"All except ";
@@ -409,6 +416,13 @@ inline constexpr char cover_line_format_script[]
       "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "第 $if2(%play_count%,1) 次播放[　上次 $left(%last_played%,10)]";
+// 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+inline constexpr char last_played_today[] = "今天 {:02}:{:02}";
+inline constexpr char last_played_yesterday[] = "昨天 {:02}:{:02}";
+inline constexpr char last_played_days_ago[] = "{} 天前";
+inline constexpr char last_played_month_day[] = "{} {} 日";
+inline constexpr char last_played_month_names[12][8]
+    = {"1 月", "2 月", "3 月", "4 月", "5 月", "6 月", "7 月", "8 月", "9 月", "10 月", "11 月", "12 月"};
 inline constexpr wchar_t modes_separator[] = L"、";
 inline constexpr wchar_t modes_all[] = L"全部";
 inline constexpr wchar_t modes_except[] = L"除了 ";
