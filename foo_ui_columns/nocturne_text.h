@@ -186,8 +186,8 @@ inline constexpr wchar_t expanded_info_note[]
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"Up next", L"Quality + format", L"Play stats"};
 inline constexpr wchar_t cover_line_no_next[] = L"Nothing up next right now: shows quality + format";
 inline constexpr char cover_line_format_script[]
-    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%samplerate%,95999,$ifgreater(%__bitspersample%,23,"
-      "Hi-Res Lossless,Lossless),Lossless),Lossy)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
+    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%__bitspersample%,16,Hi-Res,"
+      "$ifgreater(%samplerate%,48000,Hi-Res,CD)),Lossy)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
       "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "Played $if2(%play_count%,1) times[ · last $left(%last_played%,10)]";
@@ -409,10 +409,10 @@ inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"下一首", L"等級＋格式", L"播放統計"};
 inline constexpr wchar_t cover_line_no_next[] = L"目前沒有下一首，會顯示等級＋格式";
-// 卡片上的預覽文字（跟 main.xml 那三排的寫法一致）
+// 卡片上的預覽文字（跟 main.xml 那三排的寫法一致）。等級（2026-11-15 改）：DSD／有損／16 bit 以下且 48 kHz 以下＝CD／其他無損＝Hi-Res
 inline constexpr char cover_line_format_script[]
-    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%samplerate%,95999,$ifgreater(%__bitspersample%,23,"
-      "Hi-Res 無損,無損),無損),有損)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
+    = "$if($strstr($upper(%codec%),DSD),DSD,$if(%__bitspersample%,$ifgreater(%__bitspersample%,16,Hi-Res,"
+      "$ifgreater(%samplerate%,48000,Hi-Res,CD)),有損)) · [%__bitspersample% bit / ]$ifgreater($mod(%samplerate%,1000),0,"
       "$insert($div(%samplerate%,100),'.',$sub($len($div(%samplerate%,100)),1)),$div(%samplerate%,1000)) kHz %codec% · "
       "$if($strstr($upper(%codec%),DSD),$info(bitrate),%bitrate%) kbps";
 inline constexpr char cover_line_stats_script[] = "第 $if2(%play_count%,1) 次播放[　上次 $left(%last_played%,10)]";

@@ -150,6 +150,11 @@ struct CoverGeometry {
     Length compact_cover;
     Length compact_gap;
     Length compact_info;
+    // compact-vu-left／compact-vu-right（2026-11-15，可省略）：精簡時封面變大，VU 欄改用這組（兩個都寫了才算數）；
+    // 單獨 VU 表／頻譜與歌詞＋VU 表／頻譜都照這欄置中，切換模式時錶不會左右跳
+    bool has_compact_vu{};
+    Length compact_vu_left;
+    Length compact_vu_right;
 };
 
 std::wstring layout_file_path()
@@ -193,7 +198,8 @@ CoverGeometry parse_geometry(const std::string& text)
 
     CoverGeometry geometry;
     bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{},
-        has_solo_cover{}, has_solo_info{}, has_compact_cover{}, has_compact_gap{}, has_compact_info{};
+        has_solo_cover{}, has_solo_info{}, has_compact_cover{}, has_compact_gap{}, has_compact_info{},
+        has_compact_vu_left{}, has_compact_vu_right{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -257,6 +263,12 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "compact-info") {
             geometry.compact_info = *value;
             has_compact_info = true;
+        } else if (key == "compact-vu-left") {
+            geometry.compact_vu_left = *value;
+            has_compact_vu_left = true;
+        } else if (key == "compact-vu-right") {
+            geometry.compact_vu_right = *value;
+            has_compact_vu_right = true;
         }
     }
 
@@ -265,6 +277,7 @@ CoverGeometry parse_geometry(const std::string& text)
     geometry.has_vu_column = has_vu_left && has_vu_right;
     geometry.has_solo = has_solo_cover && has_solo_info && geometry.solo_cover.value > 0;
     geometry.has_compact = has_compact_cover && has_compact_gap && has_compact_info && geometry.compact_cover.value > 0;
+    geometry.has_compact_vu = has_compact_vu_left && has_compact_vu_right;
     return geometry;
 }
 
@@ -780,8 +793,10 @@ std::optional<RECT> vu_column_in_stage(int stage_width, int stage_height)
     const auto resolve = [stage_width, stage_height](const Length& length) {
         return resolve_length(length, stage_width, stage_height);
     };
-    const auto left = resolve(geometry.vu_left);
-    const auto right = stage_width - resolve(geometry.vu_right);
+    // 精簡時封面比較大，有寫 compact-vu-left／compact-vu-right 就改用那組（2026-11-15）
+    const bool compact = geometry.has_compact && geometry.has_compact_vu && compact_info.get();
+    const auto left = resolve(compact ? geometry.compact_vu_left : geometry.vu_left);
+    const auto right = stage_width - resolve(compact ? geometry.compact_vu_right : geometry.vu_right);
     if (left < 0 || right - left < dip(40))
         return {};
     return RECT{left, 0, right, stage_height};
