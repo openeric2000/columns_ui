@@ -732,6 +732,21 @@ std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
     return static_cast<int>(cover->bottom) + resolve(column.gap) + resolve(column.info);
 }
 
+std::optional<std::pair<int, int>> meter_band_in_stage(int stage_width, int stage_height)
+{
+    const auto top = info_top_in_stage(stage_width, stage_height);
+    const auto bottom = info_bottom_in_stage(stage_width, stage_height);
+    if (!top || !bottom)
+        return {};
+    const auto& geometry = layout_geometry();
+    if (!(geometry.has_compact && compact_info.get()))
+        return std::make_pair(*top, *bottom);
+    const auto detail_height = resolve_length(geometry.info, stage_width, stage_height);
+    if (detail_height <= *bottom - *top)
+        return std::make_pair(*top, *bottom);
+    return std::make_pair(*bottom - detail_height, *bottom);
+}
+
 std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
 {
     const auto& geometry = layout_geometry();

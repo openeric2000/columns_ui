@@ -653,12 +653,11 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
         }
         return rect;
     };
-    const auto info_top = cover_zoom::info_top_in_stage(stage_width, stage_height);
-    const auto info_bottom = cover_zoom::info_bottom_in_stage(stage_width, stage_height);
-    if (info_top && info_bottom) {
+    // 錶框對齊左邊封面下那組資訊；封面下方資訊選「精簡」時維持詳細時的大小、下緣對齊精簡那一行（見 meter_band_in_stage）
+    if (const auto band = cover_zoom::meter_band_in_stage(stage_width, stage_height)) {
         const auto dpi = static_cast<float>(uih::scale_dpi_value(1000)) / 1000.f;
-        const auto box_top = static_cast<float>(*info_top);
-        const auto box_bottom = *info_bottom + combined_info_overhang_dip * dpi;
+        const auto box_top = static_cast<float>(band->first);
+        const auto box_bottom = band->second + combined_info_overhang_dip * dpi;
         const auto box_h = box_bottom - box_top;
         const auto full_w = static_cast<float>(plan->rect.right - plan->rect.left);
         const auto full_h = static_cast<float>(plan->rect.bottom - plan->rect.top);

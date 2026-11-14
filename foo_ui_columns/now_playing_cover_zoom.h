@@ -64,6 +64,9 @@ int lyrics_split_y(int stage_height);
 std::optional<int> info_bottom_in_stage(int stage_width, int stage_height);
 // 同上那組資訊的上緣（＝封面下緣＋gap，歌名那一行的頂端）
 std::optional<int> info_top_in_stage(int stage_width, int stage_height);
+// 歌詞＋VU 表／頻譜時錶框要對齊的那一段（上緣、下緣，展開頁座標、實際像素；2026-11-14）：
+// 詳細時＝上面那組資訊；精簡時那組只剩一行，錶會被壓成一條，所以改成「詳細時的資訊高度」、下緣對齊精簡那一行的下緣
+std::optional<std::pair<int, int>> meter_band_in_stage(int stage_width, int stage_height);
 
 } // namespace cui::cover_zoom
 
