@@ -3297,15 +3297,18 @@ void build_layout(Picker& p)
     const auto count = tile_count(p);
     const auto columns = p.spectrum ? 3 : count;
     const auto lines = p.spectrum ? 2 : 1;
-    const auto track_w = columns * cell_w + (columns - 1) * gap + 2 * tpad;
+    // 2026-11-14 使用者同意：縮圖軌道一律跟下面的分段軌道同寬（兩張時原本比較窄、左右對不齊），
+    // 張數少的時候每張平均分一格、在格子裡置中；三張時位置跟原本一樣
+    const auto track_w = p.inner_w;
     const auto track_h = lines * cell_h + (lines - 1) * gap + 2 * tpad;
+    const auto slot_w = (track_w - 2 * tpad - (columns - 1) * gap) / columns;
     auto y = pad;
-    p.tiles_track = {p.card.X + pad + (p.inner_w - track_w) / 2.f, p.card.Y + y, track_w, track_h};
+    p.tiles_track = {p.card.X + pad, p.card.Y + y, track_w, track_h};
     p.cells.clear();
     p.tile_names.clear();
     for (int i = 0; i < count; ++i) {
-        p.cells.push_back({p.tiles_track.X + tpad + (i % 3) * (cell_w + gap), p.tiles_track.Y + tpad + (i / 3) * (cell_h + gap),
-            cell_w, cell_h});
+        p.cells.push_back({p.tiles_track.X + tpad + (i % columns) * (slot_w + gap) + (slot_w - cell_w) / 2.f,
+            p.tiles_track.Y + tpad + (i / columns) * (cell_h + gap), cell_w, cell_h});
         p.tile_names.emplace_back(p.spectrum ? nocturne_text::spectrum_style_names[i]
                                              : nocturne_text::vu_style_names[static_cast<int>(display_order[i])]);
     }
