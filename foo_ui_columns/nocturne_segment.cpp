@@ -304,13 +304,9 @@ void mouse_move(Row& row, float x, float k, const std::function<void(int)>& on_p
         const auto left = row.pill.value();
         row.grab = row.press_x >= left && row.press_x < left + first.Width ? row.press_x - left : first.Width / 2.f;
     }
-    const auto min_x = first.X;
-    const auto max_x = row.cells.back().X;
-    auto left = x - row.grab;
-    if (left < min_x)
-        left = min_x - (min_x - left) / 4.f;
-    else if (left > max_x)
-        left = max_x + (left - max_x) / 4.f;
+    // 亮底只在第一段到最後一段之間移動（2026-11-15 使用者：拖到邊界還會往外跑一截、超出軌道不好看；
+    // 原本拉出兩端照四分之一的阻力繼續走、放開再彈回）
+    const auto left = std::clamp(x - row.grab, first.X, row.cells.back().X);
     row.pill.set(left);
 
     const auto centre = left + first.Width / 2.f;
