@@ -220,7 +220,7 @@ void MenuButton::paint(HDC dc) const
         DrawText(dc, collapse_text, -1, &button_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
 
-    // 資料夾樹可以捲動時，底部一條 1 px 細線（顏色規則同側欄右緣：底色亮 12；2026-11-14）
+    // 底部一條常駐的 1 px 細線（顏色規則同側欄右緣：底色亮 12；2026-11-14 使用者從「樹可以捲動才畫」改成常駐）
     if (should_draw_divider()) {
         const auto lighten = [](BYTE value) { return static_cast<BYTE>(std::min(value + 12, 255)); };
         const wil::unique_hbrush line_brush(CreateSolidBrush(RGB(lighten(GetRValue(background_colour)),
@@ -230,8 +230,7 @@ void MenuButton::paint(HDC dc) const
     }
 }
 
-// 要不要畫底部細線：深色模式、版面裡有 Album list、它緊接在這個頂排下面、而且樹的垂直方向可以捲動。
-// 直接讀樹的捲動範圍（不靠通知帶來的值），開機第一次畫、漏了通知時都還是對的
+// 要不要畫底部細線：深色模式、版面裡有 Album list、它緊接在這個頂排下面（不再看樹能不能捲動，常駐）
 bool MenuButton::should_draw_divider() const
 {
     if (!colours::is_dark_mode_active())
@@ -249,20 +248,8 @@ bool MenuButton::should_draw_divider() const
     GetWindowRect(get_wnd(), &self_rect);
     GetWindowRect(album_list_wnd, &album_list_rect);
     const auto gap = album_list_rect.top - self_rect.bottom;
-    if (gap < 0 || gap > uih::scale_dpi_value(divider_adjacent_dip) || album_list_rect.right <= self_rect.left
-        || album_list_rect.left >= self_rect.right)
-        return false;
-
-    const auto tree_wnd = FindWindowEx(album_list_wnd, nullptr, WC_TREEVIEW, nullptr);
-    if (!tree_wnd)
-        return false;
-    SCROLLINFO info{};
-    info.cbSize = sizeof(info);
-    info.fMask = SIF_RANGE | SIF_PAGE;
-    if (!GetScrollInfo(tree_wnd, SB_VERT, &info))
-        return false;
-    const auto total = static_cast<int64_t>(info.nMax) - info.nMin + 1;
-    return info.nPage != 0 && total > static_cast<int64_t>(info.nPage);
+    return gap >= 0 && gap <= uih::scale_dpi_value(divider_adjacent_dip) && album_list_rect.right > self_rect.left
+        && album_list_rect.left < self_rect.right;
 }
 
 void MenuButton::show_menu()
