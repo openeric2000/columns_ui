@@ -815,6 +815,9 @@
     <ClInclude Include="cover_line.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="menu_button.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="migrate.h">
       <Filter>Config migration</Filter>
     </ClInclude>
