@@ -1994,6 +1994,30 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
         return client.x >= lo && client.x < hi && client.y >= lo && client.y < hi;
     };
 
+    // ESLyric 的右鍵選單是 Windows 原生選單：選單開著時點選單外面，選單關掉但那一下點擊不會被吃掉，會照樣送到
+    // 滑鼠底下的視窗。點的是播放列的話就會順便收放展開頁（播放列空白處都綁了「切換播放頁」）。
+    // ESLyric 處理右鍵時才跳選單、選單關掉才回來，所以交給它處理完以後，佇列裡還沒處理的左鍵就是拿來關選單的那一下：
+    // 按下（與已經在佇列的放開）直接丟掉，還沒來的放開等它來時再丟，這一下只關選單（2026-11-15）
+    static bool s_swallow_lbutton_up{};
+    const auto forward_menu_message = [&] {
+        const auto result = DefSubclassProc(wnd, msg, wp, lp);
+        if (!IsWindow(wnd))
+            return result;
+
+        bool removed_down{};
+        bool removed_up{};
+        MSG pending{};
+        while (PeekMessage(&pending, wnd, WM_LBUTTONDOWN, WM_LBUTTONDBLCLK, PM_REMOVE | PM_NOYIELD)) {
+            if (pending.message == WM_LBUTTONUP)
+                removed_up = true;
+            else
+                removed_down = true;
+        }
+        if (removed_down && !removed_up)
+            s_swallow_lbutton_up = true;
+        return result;
+    };
+
     switch (msg) {
     case WM_RBUTTONDOWN:
     case WM_RBUTTONDBLCLK:
@@ -2006,7 +2030,7 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
             main_menu::show_now_playing_mode_picker();
             return 0;
         }
-        break;
+        return forward_menu_message();
     case WM_CONTEXTMENU:
         if (lp != -1) {
             POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
@@ -2014,8 +2038,19 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
             if (on_mode_button(point))
                 return 0;
         }
+        return forward_menu_message();
+    case WM_LBUTTONDOWN:
+        // 新的一下按下：上一次關選單那一下的放開沒送到這裡（例如在別的視窗放開），不再等它
+        s_swallow_lbutton_up = false;
+        break;
+    case WM_LBUTTONUP:
+        if (s_swallow_lbutton_up) {
+            s_swallow_lbutton_up = false;
+            return 0;
+        }
         break;
     case WM_LBUTTONDBLCLK:
+        s_swallow_lbutton_up = false;
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它，改當成一般的按下。
         // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，
         // 吞掉就變成每隔一下沒反應（2026-11-02 錄影：74 下點擊只有 43 次切換）。代價是誤雙擊會開了又關
