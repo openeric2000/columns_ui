@@ -60,9 +60,12 @@ public:
     HWND initialise(user_interface::HookProc_t hook, bool is_hidden = false);
 
     // 結束「先不顯示」的狀態，讓視窗的畫面出現。
-    // 網頁回報「好了」、逾時、第二次啟動轉送時都走這裡；沒在延後的時候什麼都不做，可以放心重複呼叫。
+    // 網頁回報「好了」、逾時都走這裡（「叫出視窗」不提早結束，見 user_interface_impl.cpp 的 activate）；
+    // 沒在延後的時候什麼都不做，可以放心重複呼叫。
     // fade＝true 時柔和淡入（只有網頁回報好了那條路用；其餘直接出現）
     void end_startup_hold(const char* reason = "other", bool fade = false);
+    // 視窗還隱形著、在等網頁回報「好了」（等完會淡入；最多等到逾時）
+    bool is_startup_hold_active() const { return m_startup_hold_active; }
     void finish_startup_fade();
     void shutdown();
     void on_query_capability();
