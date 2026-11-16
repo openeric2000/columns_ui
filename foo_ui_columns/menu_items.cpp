@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include <mutex>
+#include <thread>
 
 #include "menu_items.h"
 #include "layout.h"
@@ -816,6 +817,82 @@ std::optional<std::string> format_last_played_ago(metadb_handle* handle)
     return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute);
 }
 
+// %cui_play_rank% 用（2026-11-17，待做清單 v1.5 第 11 個）：這首的播放次數在整個媒體庫排第幾。
+// 媒體庫幾萬首、每首都要算一次 %play_count%，所以在背景執行緒算，結果（每首的次數，由多到少）記起來重複用；
+// 還沒算過或超過 10 分鐘，下次有人要值時在背景重算。算好之前欄位不存在（那一排暫時空白，算好 ESLyric 下次重算就出現）。
+// 這首自己用當下的次數去比，剛播滿一分鐘、次數加一時名次跟著變
+namespace play_rank {
+
+std::mutex mutex;
+std::vector<uint32_t> counts_desc;
+ULONGLONG computed_at{};
+bool computing{};
+constexpr ULONGLONG refresh_ms = 10 * 60 * 1000;
+
+uint32_t count_of(metadb_handle* handle)
+{
+    static titleformat_object::ptr script;
+    static std::once_flag compiled;
+    std::call_once(compiled, [] { titleformat_compiler::get()->compile_safe(script, "%play_count%"); });
+    pfc::string8 text;
+    handle->format_title(nullptr, text, script, nullptr);
+    return static_cast<uint32_t>(std::strtoul(text.c_str(), nullptr, 10));
+}
+
+// 主執行緒：媒體庫清單只能在主執行緒拿；逐首算次數交給背景執行緒
+void start_refresh()
+{
+    auto items = std::make_shared<metadb_handle_list>();
+    library_manager::get()->get_all_items(*items);
+    std::thread([items] {
+        std::vector<uint32_t> counts;
+        counts.reserve(items->get_count());
+        for (size_t index = 0; index < items->get_count(); ++index) {
+            // 關 fb2k 時不要再碰媒體庫
+            if (index % 1000 == 0 && core_api::is_shutting_down())
+                return;
+            counts.push_back(count_of(items->get_item(index).get_ptr()));
+        }
+        std::sort(counts.begin(), counts.end(), std::greater<>());
+        std::scoped_lock lock(mutex);
+        counts_desc = std::move(counts);
+        computed_at = GetTickCount64();
+        computing = false;
+    }).detach();
+}
+
+std::optional<std::string> text_for(metadb_handle* handle)
+{
+    const auto own = count_of(handle);
+    std::optional<std::string> result;
+    auto refresh = false;
+    {
+        std::scoped_lock lock(mutex);
+        if (!computing && (computed_at == 0 || GetTickCount64() - computed_at > refresh_ms)) {
+            computing = true;
+            refresh = true;
+        }
+        if (own > 0 && !counts_desc.empty()) {
+            // 由多到少排好的次數裡，比這首多的有幾首＝名次減一（同次數的並列）
+            const auto above = std::lower_bound(counts_desc.begin(), counts_desc.end(), own, std::greater<>())
+                - counts_desc.begin();
+            // 一律寫百分比（2026-11-17 使用者：「曲庫中排名前 n%」比較好）。1% 以上取整數（無條件進位）；
+            // 1% 以內寫一位小數，最少 0.1%，免得常聽的幾十首全都是「前 1%」
+            const auto rank = above + 1;
+            const auto total = static_cast<double>(counts_desc.size());
+            const auto percent = static_cast<double>(rank) * 100.0 / total;
+            const auto text = percent >= 1.0 ? fmt::format("{}", static_cast<int>(std::ceil(percent - 1e-9)))
+                                             : fmt::format("{:.1f}", std::max(0.1, std::ceil(percent * 10.0 - 1e-9) / 10.0));
+            result = fmt::format(nocturne_text::play_rank_percent, text);
+        }
+    }
+    if (refresh)
+        fb2k::inMainThread([] { start_refresh(); });
+    return result;
+}
+
+} // namespace play_rank
+
 } // namespace
 
 // 自編版新增：標題格式欄位 %cui_now_playing_expanded%，播放頁展開時為 1、收合時不存在，給 ESLyric 佈局切換 ⌃／⌄
@@ -825,13 +902,14 @@ std::optional<std::string> format_last_played_ago(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 17; }
+    t_uint32 get_field_count() override { return 18; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
-            "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak"};
+            "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak",
+            "cui_play_rank"};
         out = names[index];
     }
 
@@ -853,6 +931,17 @@ public:
             return true;
         }
 
+        // %cui_play_rank%：這首的播放次數在媒體庫的排名百分比（「前 5%」「前 0.1%」，main.xml 前面放「曲庫中排名」；
+        // 沒播過、還沒算好時不存在；2026-11-17）
+        if (index == 17) {
+            if (!handle)
+                return false;
+            const auto text = play_rank::text_for(handle);
+            if (!text)
+                return false;
+            out->write(titleformat_inputtypes::meta, text->c_str());
+            return true;
+        }
         // %cui_last_played_ago%：資訊卡「最後播放」的相對寫法（今天 23:36、昨天 21:10、3 天前、11 月 2 日；2026-11-14）
         if (index == 15) {
             if (!handle)

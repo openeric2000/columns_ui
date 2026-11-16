@@ -183,7 +183,11 @@ inline constexpr wchar_t expanded_info_names[2][16] = {L"Detailed", L"Compact"};
 inline constexpr wchar_t expanded_info_note[]
     = L"Detailed: title, artist, album and format. Compact: a larger cover and one line below it (right-click it to choose).";
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
-inline constexpr wchar_t cover_line_style_names[3][24] = {L"Up next", L"Quality + format", L"Play stats"};
+// 2026-11-17 加第 4、5 種：這首累計聽了多久、在曲庫的常聽排名（待做清單 v1.5 第 11 個）
+inline constexpr wchar_t cover_line_style_names[5][24]
+    = {L"Up next", L"Quality + format", L"Play stats", L"Time listened", L"Library rank"};
+// %cui_play_rank%（2026-11-17）：這首在曲庫常聽排名的百分比，只回傳值（main.xml 前面放標籤）
+inline constexpr char play_rank_percent[] = "Top {}%";
 // 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
 // 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
 inline constexpr char last_played_now[] = "Now";
@@ -404,7 +408,10 @@ inline constexpr wchar_t expanded_info_label[] = L"封面下方資訊";
 inline constexpr wchar_t expanded_info_names[2][16] = {L"詳細", L"精簡"};
 inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專輯、格式四行。精簡：封面放大，下面一排（在那排按右鍵選要顯示什麼）。";
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
-inline constexpr wchar_t cover_line_style_names[3][24] = {L"下一首", L"等級＋格式", L"播放統計"};
+// 2026-11-17 加第 4、5 種：這首累計聽了多久、在曲庫的常聽排名（待做清單 v1.5 第 11 個）
+inline constexpr wchar_t cover_line_style_names[5][24] = {L"下一首", L"等級＋格式", L"播放統計", L"聽了多久", L"常聽排名"};
+// %cui_play_rank%（2026-11-17）：這首在曲庫常聽排名的百分比，只回傳值（main.xml 前面放「曲庫中排名」標籤）
+inline constexpr char play_rank_percent[] = "前 {}%";
 // 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
 // 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
 inline constexpr char last_played_now[] = "現在";

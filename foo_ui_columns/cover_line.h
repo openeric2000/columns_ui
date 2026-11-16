@@ -11,8 +11,9 @@
 
 namespace cui::cover_line {
 
-enum class Style : uint32_t { next = 1, format = 2, stats = 3 };
-inline constexpr uint32_t style_count = 3;
+// 2026-11-17 加 listened（這首累計聽了多久）、rank（在曲庫的常聽排名，%cui_play_rank%）
+enum class Style : uint32_t { next = 1, format = 2, stats = 3, listened = 4, rank = 5 };
+inline constexpr uint32_t style_count = 5;
 // 預設只影響沒存過這個設定的環境（存過的照舊）
 inline constexpr uint32_t style_default = static_cast<uint32_t>(Style::format);
 

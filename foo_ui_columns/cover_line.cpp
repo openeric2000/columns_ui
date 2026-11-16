@@ -40,7 +40,7 @@ std::string next_title;
 std::string next_artist;
 bool next_valid{};
 bool next_update_scheduled{};
-// 挑選卡拖曳中的暫時預覽（1～3；0＝沒有預覽，照設定）：封面下那一排先換成經過的段，放開才存
+// 挑選卡拖曳中的暫時預覽（1～5；0＝沒有預覽，照設定）：封面下那一排先換成經過的段，放開才存
 std::atomic<uint32_t> preview_style{0};
 
 std::string format_handle(const metadb_handle_ptr& handle, const char* script)
@@ -172,7 +172,7 @@ void present_layered(HWND wnd, const POINT* origin, int width, int height, const
 }
 
 // ---- 挑選卡（2026-11-14 改成分段切換，共用 nocturne_segment.h：使用者在預覽頁選 D＋等級 2 動畫＋按住拖曳＋開關淡入淡出）----
-// 一條三段（下一首／等級＋格式／播放統計）；點或拖都可以，拖曳經過時封面下那一排先換成那段。
+// 一條五段（下一首／等級＋格式／播放統計／聽了多久／常聽排名，後兩段 2026-11-17 加）；點或拖都可以，拖曳經過時封面下那一排先換成那段。
 // 2026-11-14 卡片改貼在那一排上方後，使用者說軌道下面那行「實際會出現的字」跟下面那排重複 → 拿掉，只留軌道
 namespace picker {
 
@@ -180,7 +180,8 @@ namespace seg = nocturne_segment;
 
 constexpr float shadow_dip = 18.f;
 constexpr float pad_dip = 10.f;
-constexpr float card_w_dip = 420.f;
+// 2026-11-17 三段變五段：每段寬度維持跟原本差不多（約 130 DIP），「等級＋格式」放得下
+constexpr float card_w_dip = 680.f;
 
 struct Picker {
     HWND wnd{};
