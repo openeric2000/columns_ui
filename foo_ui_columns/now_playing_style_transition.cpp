@@ -183,15 +183,15 @@ std::optional<Layer> make_layer(Graphics& g, Gdiplus::Bitmap& bitmap, const RECT
     return layer;
 }
 
-// from → to、照 cubic-bezier(0.4, 0, 0.2, 1) 走 duration_ms 的動畫：DirectComposition 只吃分段三次多項式，
+// from → to、照 cubic-bezier(0.4, 0, 0.2, 1) 走 length_ms 的動畫：DirectComposition 只吃分段三次多項式，
 // 所以把曲線切 12 段，每段用兩端的值與斜率做 Hermite 內插（跟真曲線差不到 0.1%）
-wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to)
+wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to, double length_ms = duration_ms)
 {
     wil::com_ptr<IDCompositionAnimation> animation;
     if (FAILED(g.dcomp->CreateAnimation(animation.put())))
         return {};
 
-    const double total = duration_ms / 1000.0;
+    const double total = length_ms / 1000.0;
     const auto value = [&](double x) { return from + (to - from) * eased(x); };
     const auto slope = [&](double x) {
         constexpr double h = 1e-4;
@@ -231,6 +231,46 @@ void animate(Graphics& g, Layer& layer, float scale_from, float scale_to, float 
         layer.effect->SetOpacity(opacity.get());
 }
 
+// 毫秒時鐘（GetTickCount64 只有約 16 ms 精度，算動畫走到哪不夠準）
+double now_ms()
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// 一層目前這段動畫的起點、終點與時間：連點倒回去時要知道它現在走到哪（DWM 那邊的值讀不回來，照同一條曲線自己算）
+struct Track {
+    float opacity_from{1.f};
+    float opacity_to{1.f};
+    float scale_from{1.f};
+    float scale_to{1.f};
+    double start{};
+    double length{};
+
+    double progress(double now) const { return length > 0 ? eased((now - start) / length) : 1.0; }
+    float opacity(double now) const
+    {
+        return static_cast<float>(opacity_from + (opacity_to - opacity_from) * progress(now));
+    }
+    float scale(double now) const { return static_cast<float>(scale_from + (scale_to - scale_from) * progress(now)); }
+    double end() const { return start + length; }
+};
+
+// 照 track 設定一層的動畫（縮放沒變就直接設定值）
+void animate(Graphics& g, Layer& layer, const Track& track)
+{
+    if (track.scale_from != track.scale_to) {
+        if (const auto scale = make_animation(g, track.scale_from, track.scale_to, track.length)) {
+            layer.scale->SetScaleX(scale.get());
+            layer.scale->SetScaleY(scale.get());
+        }
+    } else {
+        layer.scale->SetScaleX(track.scale_to);
+        layer.scale->SetScaleY(track.scale_to);
+    }
+    if (const auto opacity = make_animation(g, track.opacity_from, track.opacity_to, track.length))
+        layer.effect->SetOpacity(opacity.get());
+}
+
 struct Transition {
     HWND wnd{};
     // 蓋層視窗在螢幕上的位置（封面方塊加外圍一圈）、封面在蓋層裡的位置
@@ -256,6 +296,14 @@ struct Transition {
     bool track{};
     bool waiting_track{};
     ULONGLONG shown_at{};
+    // 封面方塊連點倒回去（2026-11-16）：兩層各自目前的動畫、現在要往哪一面（true＝切換後那面）、
+    // 切換後那面的取樣（倒回去再點回來時用來確認底下畫好了）、拿掉蓋層前底下要長得像哪一面
+    Track old_track;
+    Track new_track;
+    bool target_new{true};
+    Signature new_signature;
+    std::optional<Signature> confirm_signature;
+    ULONGLONG confirm_deadline{};
 };
 
 std::unique_ptr<Transition> g_transition;
@@ -553,16 +601,101 @@ void start_second_half(Transition& transition)
                 transition.new_layer->scale->SetScaleY(new_start_scale);
                 transition.root->AddVisual(transition.new_layer->visual.get(), TRUE,
                     transition.old_layer ? transition.old_layer->visual.get() : nullptr);
-                animate(*g, *transition.new_layer, new_start_scale, 1.f, 0.f, 1.f);
+                transition.new_track = Track{0.f, 1.f, new_start_scale, 1.f, now_ms(), duration_ms};
+                animate(*g, *transition.new_layer, transition.new_track);
+                transition.new_signature = transition.last_signature;
             }
         }
         g->dcomp->Commit();
     }
     transition.last_capture.reset();
 
+    if (!transition.whole_stage) {
+        // 封面方塊：兩層各自的動畫都跑完才拿掉蓋層（舊的一面可能是連點倒回去後重新開始的）
+        const auto end = std::max(transition.old_track.end(), transition.new_layer ? transition.new_track.end() : 0.0);
+        transition.finish_at = GetTickCount64() + static_cast<ULONGLONG>(std::max(0.0, end - now_ms())) + finish_margin_ms;
+        return;
+    }
+
     // 舊的一面在切換時就開始動；兩段都跑完才拿掉蓋層
     const auto end = std::max(transition.applied_at, transition.ready_at) + static_cast<ULONGLONG>(duration_ms);
     transition.finish_at = std::max(end, transition.applied_at + static_cast<ULONGLONG>(duration_ms)) + finish_margin_ms;
+}
+
+// 拿掉蓋層之前，底下真的畫面是不是已經是要停的那一面（連點倒回去時 ESLyric 要重畫，還沒畫好就拿掉會閃一下舊的）
+bool underneath_ready(Transition& transition, ULONGLONG now)
+{
+    if (!transition.confirm_signature)
+        return true;
+    if (now >= transition.confirm_deadline) {
+        ANIM_LOG_LINE(fmt::format("confirm timed out t={:.1f}", ANIM_LOG_NOW()));
+        return true;
+    }
+    const auto shot = capture(transition.screen);
+    if (!shot)
+        return true;
+    return difference(signature_of(*shot, transition.cover), *transition.confirm_signature) < changed_threshold;
+}
+
+// 封面方塊動畫還沒跑完又點了一次：從兩層現在的透明度與縮放倒回去（to_new＝往切換後那一面）。
+// 蓋層最底下有一層不透明的底，底下的 ESLyric 在蓋層拿掉前看不到，所以可以先切換再慢慢動
+bool retarget(Transition& transition, bool to_new)
+{
+    auto* g = graphics();
+    if (!g || !transition.old_layer)
+        return false;
+
+    const auto now = now_ms();
+    const auto tick = GetTickCount64();
+    // 剩下的距離越短走越快，最少 min_reverse_ms
+    static constexpr double min_reverse_ms = 120;
+    const auto length_for = [](float from, float to) {
+        return std::max(min_reverse_ms, duration_ms * std::abs(static_cast<double>(to) - from));
+    };
+
+    const auto old_opacity = transition.old_track.opacity(now);
+    const auto old_scale = transition.old_track.scale(now);
+    const auto old_to_opacity = to_new ? 0.f : 1.f;
+    const auto old_to_scale = to_new ? old_end_scale : 1.f;
+    transition.old_track
+        = Track{old_opacity, old_to_opacity, old_scale, old_to_scale, now, length_for(old_opacity, old_to_opacity)};
+    animate(*g, *transition.old_layer, transition.old_track);
+    auto end = transition.old_track.end();
+
+    if (transition.new_layer) {
+        const auto new_opacity = transition.new_track.opacity(now);
+        const auto new_scale = transition.new_track.scale(now);
+        const auto new_to_opacity = to_new ? 1.f : 0.f;
+        const auto new_to_scale = to_new ? 1.f : new_start_scale;
+        transition.new_track
+            = Track{new_opacity, new_to_opacity, new_scale, new_to_scale, now, length_for(new_opacity, new_to_opacity)};
+        animate(*g, *transition.new_layer, transition.new_track);
+        end = std::max(end, transition.new_track.end());
+    }
+    g->dcomp->Commit();
+
+    transition.target_new = to_new;
+    transition.last_capture.reset();
+    transition.finish_at = tick + static_cast<ULONGLONG>(std::max(0.0, end - now)) + finish_margin_ms;
+    transition.confirm_deadline = transition.finish_at + settle_limit_ms;
+
+    if (!to_new) {
+        // 倒回原本那一面：圖已經有了，不用再等 ESLyric；拿掉蓋層前確認底下畫回原本的樣子
+        transition.ready = true;
+        transition.confirm_signature = transition.before_signature;
+    } else if (transition.new_layer) {
+        transition.ready = true;
+        transition.confirm_signature = transition.new_signature;
+    } else {
+        // 切換後那面還沒截到（第一次切換時 ESLyric 還沒畫好就倒回去了）：照第一次的流程重新等它畫好
+        transition.ready = false;
+        transition.applied_at = tick;
+        transition.last_signature.clear();
+        transition.confirm_signature.reset();
+    }
+    ANIM_LOG_LINE(fmt::format("retarget to {} t={:.1f} old opacity {:.2f} new layer {}", to_new ? "new" : "old",
+        ANIM_LOG_NOW(), old_opacity, transition.new_layer ? "yes" : "no"));
+    return true;
 }
 
 void on_timer()
@@ -592,7 +725,7 @@ void on_timer()
         return;
     }
 
-    if (now >= transition.finish_at)
+    if (now >= transition.finish_at && underneath_ready(transition, now))
         finish();
 }
 
@@ -708,7 +841,8 @@ void start(std::unique_ptr<Transition> transition, HWND owner, std::function<voi
 
     // 封面方塊：舊的一面一切換就開始縮小淡出（DWM 照螢幕更新跑，主執行緒忙也不停）
     if (!g_transition->whole_stage && g_transition->old_layer) {
-        animate(*g, *g_transition->old_layer, 1.f, old_end_scale, 1.f, 0.f);
+        g_transition->old_track = Track{1.f, 0.f, 1.f, old_end_scale, now_ms(), duration_ms};
+        animate(*g, *g_transition->old_layer, g_transition->old_track);
         g->dcomp->Commit();
     }
     SetTimer(g_transition->wnd, poll_timer_id, poll_interval_ms, nullptr);
@@ -718,7 +852,18 @@ void start(std::unique_ptr<Transition> transition, HWND owner, std::function<voi
 
 void run(std::function<void()> apply)
 {
-    // 上一次的動畫還沒跑完又切換：結束它，這次直接切換、不做動畫
+    // 封面⇄資訊卡的動畫還沒跑完又點了一次（2026-11-16 使用者：原本會直接跳過去、沒有動畫）：
+    // 底下照樣切換，蓋層從兩層目前的樣子倒回去（或再轉回來）
+    if (g_transition && !g_transition->whole_stage && !g_transition->track) {
+        const auto to_new = !g_transition->target_new;
+        apply();
+        if (retarget(*g_transition, to_new))
+            return;
+        finish();
+        return;
+    }
+
+    // 上一次的動畫（換顯示內容、換歌）還沒跑完又切換：結束它，這次直接切換、不做動畫
     if (g_transition) {
         finish();
         apply();
