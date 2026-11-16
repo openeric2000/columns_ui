@@ -200,8 +200,8 @@ LRESULT cui::MainWindow::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         m_fallback_menu.reset();
         break;
     case MSG_STARTUP_HOLD_TIMEOUT:
-        // 開機優化 B：等網頁回報「好了」等太久，監看執行緒已經把視窗顯示出來，這裡只做收尾
-        end_startup_hold("timeout");
+        // 開機優化 B：等網頁回報「好了」等太久，不等了，照樣淡入（網頁已經先回報的話這裡什麼都不做）
+        end_startup_hold("timeout", true);
         return 0;
     case MSG_STARTUP_FADE_DONE:
         finish_startup_fade();

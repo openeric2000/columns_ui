@@ -117,7 +117,7 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the album header is ready";
 inline constexpr wchar_t startup_hold_note[]
-    = L"Waits 3 seconds at most. Takes effect the next time foobar2000 starts.";
+    = L"Waits 5 seconds at most. Takes effect the next time foobar2000 starts.";
 inline constexpr wchar_t font_tab_note[]
     = L"Change each part separately, or all at once with the first row. Changes apply at once.";
 inline constexpr wchar_t font_row_all[] = L"All parts";
@@ -340,7 +340,7 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等專輯標頭載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]
-    = L"最多等 3 秒；下次啟動才生效。";
+    = L"最多等 5 秒；下次啟動才生效。";
 inline constexpr wchar_t font_tab_note[]
     = L"逐列換字型，或用第一列一次全換；改了馬上生效。";
 inline constexpr wchar_t font_row_all[] = L"全部區塊";
