@@ -693,10 +693,13 @@ std::mutex now_playing_file_mutex;
 metadb_handle_ptr now_playing_file;
 // 這首是什麼時候開始播的（GetTickCount64），%cui_last_played_ago% 判斷「現在」用
 std::atomic<ULONGLONG> now_playing_file_since{};
-// %cui_repeat_streak% 用（2026-11-17，待做清單 v1.5 第 12 個）：上一首開始播的檔案、同一首連續開始播了幾次。
-// 停止不清掉（停了再按播放同一首也算連續）；重開 fb2k 從頭算
-metadb_handle_ptr last_started_file;
+// %cui_repeat_streak% 用（2026-11-17，待做清單 v1.5 第 12 個）：同一首連續「算了幾次播放」。
+// 跟播放次數同一個標準（使用者 11/17 選）：播滿一分鐘才算一次（比一分鐘短的歌播到倒數一秒），
+// 只聽幾秒就切掉的不算、也不會打斷連續。停止不清掉；重開 fb2k 從頭算
+metadb_handle_ptr last_counted_file;
 uint32_t repeat_streak{};
+bool counted_this_play{};
+double count_after_seconds{60.0};
 
 void set_now_playing_file(const metadb_handle_ptr& track)
 {
@@ -707,8 +710,9 @@ void set_now_playing_file(const metadb_handle_ptr& track)
         now_playing_file = track;
         now_playing_file_since = GetTickCount64();
         if (track.is_valid()) {
-            repeat_streak = track == last_started_file ? repeat_streak + 1 : 1;
-            last_started_file = track;
+            counted_this_play = false;
+            const auto length = track->get_length();
+            count_after_seconds = length > 0 && length < 60.0 ? std::max(1.0, length - 1.0) : 60.0;
         }
     }
     // 舊的與新的那幾列都要重算（▶ 要換位置）
@@ -719,10 +723,21 @@ class NowPlayingFilePlayCallback : public play_callback_static {
 public:
     unsigned get_flags() override
     {
-        return flag_on_playback_new_track | flag_on_playback_pause | flag_on_playback_stop;
+        return flag_on_playback_new_track | flag_on_playback_pause | flag_on_playback_stop | flag_on_playback_time;
     }
 
     void on_playback_new_track(metadb_handle_ptr track) override { set_now_playing_file(track); }
+
+    // 每秒一次：播到算一次播放的位置時，更新連續次數（%cui_repeat_streak%）
+    void on_playback_time(double time) override
+    {
+        std::scoped_lock lock(now_playing_file_mutex);
+        if (counted_this_play || !now_playing_file.is_valid() || time < count_after_seconds)
+            return;
+        counted_this_play = true;
+        repeat_streak = now_playing_file == last_counted_file ? repeat_streak + 1 : 1;
+        last_counted_file = now_playing_file;
+    }
 
     // 暫停時符號從 ▶ 變 ❚❚，這幾列也要重算
     void on_playback_pause(bool state) override
@@ -742,7 +757,6 @@ public:
     void on_playback_edited(metadb_handle_ptr track) override {}
     void on_playback_dynamic_info(const file_info& info) override {}
     void on_playback_dynamic_info_track(const file_info& info) override {}
-    void on_playback_time(double time) override {}
     void on_volume_change(float new_value) override {}
 };
 
@@ -941,14 +955,15 @@ public:
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
-        // %cui_repeat_streak%：正在播的這首是這次開 fb2k 以來連續第幾次開始播（2 以上才存在；2026-11-17）
+        // %cui_repeat_streak%：正在播的這首這次開 fb2k 以來連續播了幾次（播滿一分鐘才算，2 以上才存在；2026-11-17）
         if (index == 16) {
             if (!handle)
                 return false;
+            // 正在播的這首、而且最後算數的也是它：這次播滿一分鐘前顯示到上一次為止的連續次數，播滿後跟著加一
             uint32_t streak{};
             {
                 std::scoped_lock lock(now_playing_file_mutex);
-                if (handle == now_playing_file.get_ptr())
+                if (handle == now_playing_file.get_ptr() && handle == last_counted_file.get_ptr())
                     streak = repeat_streak;
             }
             if (streak < 2)
