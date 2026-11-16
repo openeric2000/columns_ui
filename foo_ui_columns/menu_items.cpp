@@ -689,6 +689,8 @@ play_callback_static_factory_t<PausedPositionPlayCallback> paused_position_play_
 // 標題格式可能在別的執行緒算，所以用 mutex 保護
 std::mutex now_playing_file_mutex;
 metadb_handle_ptr now_playing_file;
+// 這首是什麼時候開始播的（GetTickCount64），%cui_last_played_ago% 判斷「現在」用
+std::atomic<ULONGLONG> now_playing_file_since{};
 
 void set_now_playing_file(const metadb_handle_ptr& track)
 {
@@ -697,6 +699,7 @@ void set_now_playing_file(const metadb_handle_ptr& track)
         std::scoped_lock lock(now_playing_file_mutex);
         previous = now_playing_file;
         now_playing_file = track;
+        now_playing_file_since = GetTickCount64();
     }
     // 舊的與新的那幾列都要重算（▶ 要換位置）
     panels::playlist_view::PlaylistView::s_on_now_playing_file_change(previous, track);
@@ -760,16 +763,36 @@ std::optional<std::string> format_last_played_ago(metadb_handle* handle)
     pfc::string8 text;
     handle->format_title(nullptr, text, script, nullptr);
 
-    int year{}, month{}, day{}, hour{}, minute{};
-    if (sscanf_s(text.c_str(), "%d-%d-%d %d:%d", &year, &month, &day, &hour, &minute) != 5)
+    int year{}, month{}, day{}, hour{}, minute{}, second{};
+    if (sscanf_s(text.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) < 5)
         return {};
     if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0
-        || minute > 59)
+        || minute > 59 || second < 0 || second > 59)
         return {};
 
     SYSTEMTIME now{};
     GetLocalTime(&now);
     const auto days_ago = days_from_civil(now.wYear, now.wMonth, now.wDay) - days_from_civil(year, month, day);
+    const auto seconds_ago = days_ago * 86400 + (now.wHour * 3600 + now.wMinute * 60 + now.wSecond)
+        - (hour * 3600 + minute * 60 + second);
+
+    // 2026-11-16（使用者：正在播的歌寫「今天 11:59」很怪）：
+    // - 正在播的這首、而且是這次播放裡記下的（播滿一分鐘記播放次數時寫入）→「現在」
+    // - 其餘一小時內 →「剛剛」／「N 分鐘前」。這個值只在歌的資訊重算時才更新，不會每分鐘自己跳；
+    //   重播剛聽過的歌時最多顯示舊的一分鐘，播滿一分鐘就變成「現在」
+    if (seconds_ago >= -2 && seconds_ago < 3600) {
+        bool playing_this{};
+        {
+            std::scoped_lock lock(now_playing_file_mutex);
+            playing_this = handle == now_playing_file.get_ptr();
+        }
+        const auto played_for = static_cast<long long>((GetTickCount64() - now_playing_file_since.load()) / 1000);
+        if (playing_this && seconds_ago <= played_for + 2)
+            return std::string{nocturne_text::last_played_now};
+        if (seconds_ago < 60)
+            return std::string{nocturne_text::last_played_just_now};
+        return fmt::format(nocturne_text::last_played_minutes_ago, seconds_ago / 60);
+    }
 
     if (days_ago == 0)
         return fmt::format(nocturne_text::last_played_today, hour, minute);

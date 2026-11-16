@@ -185,6 +185,10 @@ inline constexpr wchar_t expanded_info_note[]
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"Up next", L"Quality + format", L"Play stats"};
 // 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+// 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
+inline constexpr char last_played_now[] = "Now";
+inline constexpr char last_played_just_now[] = "Just now";
+inline constexpr char last_played_minutes_ago[] = "{} min ago";
 inline constexpr char last_played_today[] = "Today {:02}:{:02}";
 inline constexpr char last_played_yesterday[] = "Yesterday {:02}:{:02}";
 inline constexpr char last_played_days_ago[] = "{} days ago";
@@ -402,6 +406,10 @@ inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專
 // 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
 inline constexpr wchar_t cover_line_style_names[3][24] = {L"下一首", L"等級＋格式", L"播放統計"};
 // 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+// 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
+inline constexpr char last_played_now[] = "現在";
+inline constexpr char last_played_just_now[] = "剛剛";
+inline constexpr char last_played_minutes_ago[] = "{} 分鐘前";
 inline constexpr char last_played_today[] = "今天 {:02}:{:02}";
 inline constexpr char last_played_yesterday[] = "昨天 {:02}:{:02}";
 inline constexpr char last_played_days_ago[] = "{} 天前";
