@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "menu_items.h"
+#include "nocturne_build_info.h"
 #include "layout.h"
 #include "ng_playlist/ng_playlist.h"
 #include "main_window.h"
@@ -854,6 +855,31 @@ void start_refresh()
             counts.push_back(count_of(items->get_item(index).get_ptr()));
         }
         std::sort(counts.begin(), counts.end(), std::greater<>());
+#ifdef NOCTURNE_BUILD_DEV
+        // 診斷（只在開發版）：播放次數分布寫到 profile\nocturne_rank_diag.txt，拿來訂顏色等級的次數門檻
+        if (!counts.empty()) {
+            std::string text = fmt::format("total {}  played {}\r\n", counts.size(),
+                std::count_if(counts.begin(), counts.end(), [](uint32_t c) { return c > 0; }));
+            for (const double p : {0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 30.0, 50.0}) {
+                const auto at = std::min(counts.size() - 1, static_cast<size_t>(counts.size() * p / 100.0));
+                text += fmt::format("top {:>5.1f}%  count >= {}\r\n", p, counts[at]);
+            }
+            for (const uint32_t c : {1u, 2u, 3u, 5u, 10u, 20u, 30u, 50u, 100u}) {
+                const auto n = std::count_if(counts.begin(), counts.end(), [c](uint32_t v) { return v >= c; });
+                text += fmt::format("count >= {:>3}  {} songs = top {:.2f}%\r\n", c, n, n * 100.0 / counts.size());
+            }
+            const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+            const auto path = std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
+                + L"\\nocturne_rank_diag.txt";
+            const auto file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file != INVALID_HANDLE_VALUE) {
+                DWORD written{};
+                WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+                CloseHandle(file);
+            }
+        }
+#endif
         std::scoped_lock lock(mutex);
         counts_desc = std::move(counts);
         computed_at = GetTickCount64();
