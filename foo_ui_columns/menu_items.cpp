@@ -691,6 +691,10 @@ std::mutex now_playing_file_mutex;
 metadb_handle_ptr now_playing_file;
 // 這首是什麼時候開始播的（GetTickCount64），%cui_last_played_ago% 判斷「現在」用
 std::atomic<ULONGLONG> now_playing_file_since{};
+// %cui_repeat_streak% 用（2026-11-17，待做清單 v1.5 第 12 個）：上一首開始播的檔案、同一首連續開始播了幾次。
+// 停止不清掉（停了再按播放同一首也算連續）；重開 fb2k 從頭算
+metadb_handle_ptr last_started_file;
+uint32_t repeat_streak{};
 
 void set_now_playing_file(const metadb_handle_ptr& track)
 {
@@ -700,6 +704,10 @@ void set_now_playing_file(const metadb_handle_ptr& track)
         previous = now_playing_file;
         now_playing_file = track;
         now_playing_file_since = GetTickCount64();
+        if (track.is_valid()) {
+            repeat_streak = track == last_started_file ? repeat_streak + 1 : 1;
+            last_started_file = track;
+        }
     }
     // 舊的與新的那幾列都要重算（▶ 要換位置）
     panels::playlist_view::PlaylistView::s_on_now_playing_file_change(previous, track);
@@ -817,18 +825,34 @@ std::optional<std::string> format_last_played_ago(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 16; }
+    t_uint32 get_field_count() override { return 17; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
-            "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago"};
+            "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // %cui_repeat_streak%：正在播的這首是這次開 fb2k 以來連續第幾次開始播（2 以上才存在；2026-11-17）
+        if (index == 16) {
+            if (!handle)
+                return false;
+            uint32_t streak{};
+            {
+                std::scoped_lock lock(now_playing_file_mutex);
+                if (handle == now_playing_file.get_ptr())
+                    streak = repeat_streak;
+            }
+            if (streak < 2)
+                return false;
+            out->write(titleformat_inputtypes::meta, pfc::format_uint(streak));
+            return true;
+        }
+
         // %cui_last_played_ago%：資訊卡「最後播放」的相對寫法（今天 23:36、昨天 21:10、3 天前、11 月 2 日；2026-11-14）
         if (index == 15) {
             if (!handle)
