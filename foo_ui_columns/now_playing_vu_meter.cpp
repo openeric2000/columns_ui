@@ -4198,18 +4198,6 @@ void draw_into_slide(HWND wnd, const RECT& bar_rect, HBITMAP stage, const RECT& 
     const auto stage_h = static_cast<int>(info.bmHeight);
     if (stage_w <= 0 || stage_h <= 0)
         return;
-    std::vector<uint32_t> pixels(static_cast<size_t>(stage_w) * stage_h);
-    BITMAPINFO header{};
-    header.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    header.bmiHeader.biWidth = stage_w;
-    header.bmiHeader.biHeight = -stage_h;
-    header.bmiHeader.biPlanes = 1;
-    header.bmiHeader.biBitCount = 32;
-    header.bmiHeader.biCompression = BI_RGB;
-    const auto screen_dc = wil::GetDC(nullptr);
-    if (!GetDIBits(screen_dc.get(), stage, 0, stage_h, pixels.data(), &header, DIB_RGB_COLORS))
-        return;
-
     const auto moved = !EqualRect(&state->window_rect, &target) || is_restyled(*state, *content, style);
     adopt_target(*state, *content, style, target, moved);
     SetWindowPos(wnd, HWND_TOP, target.left, target.top, state->width, state->height, SWP_NOACTIVATE);
@@ -4218,15 +4206,47 @@ void draw_into_slide(HWND wnd, const RECT& bar_rect, HBITMAP stage, const RECT& 
     MapWindowPoints(GetParent(wnd), HWND_DESKTOP, reinterpret_cast<POINT*>(&screen), 2);
     const auto ox = static_cast<int>(screen.left - stage_screen.left);
     const auto oy = static_cast<int>(screen.top - stage_screen.top);
-    fill_backdrop(*state, pixels, stage_w, stage_h, ox, oy);
+
+    // 只讀錶周圍那一塊（2026-11-17）：fill_backdrop 最遠只取到錶外 10 像素（band_far），多留一點邊，結果跟讀整張一樣。
+    // 以前用 GetDIBits 把整張展開頁截圖（219 是 2947×1048、約 12 MB）讀成陣列，這一格要 22～24 ms，展開要等它畫完才開始滑
+    constexpr int margin = 16;
+    const auto sx = std::clamp(ox - margin, 0, stage_w);
+    const auto sy = std::clamp(oy - margin, 0, stage_h);
+    const auto sub_w = std::clamp(ox + state->width + margin, 0, stage_w) - sx;
+    const auto sub_h = std::clamp(oy + state->height + margin, 0, stage_h) - sy;
+    if (sub_w <= 0 || sub_h <= 0)
+        return;
+    BITMAPINFO header{};
+    header.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    header.bmiHeader.biWidth = sub_w;
+    header.bmiHeader.biHeight = -sub_h;
+    header.bmiHeader.biPlanes = 1;
+    header.bmiHeader.biBitCount = 32;
+    header.bmiHeader.biCompression = BI_RGB;
+    const auto screen_dc = wil::GetDC(nullptr);
+    void* sub_bits{};
+    const wil::unique_hbitmap sub_bitmap(
+        CreateDIBSection(screen_dc.get(), &header, DIB_RGB_COLORS, &sub_bits, nullptr, 0));
+    if (!sub_bitmap || !sub_bits)
+        return;
+    const wil::unique_hdc stage_dc(CreateCompatibleDC(screen_dc.get()));
+    const auto _select_stage = wil::SelectObject(stage_dc.get(), stage);
+    {
+        const wil::unique_hdc sub_dc(CreateCompatibleDC(screen_dc.get()));
+        const auto _select_sub = wil::SelectObject(sub_dc.get(), sub_bitmap.get());
+        BitBlt(sub_dc.get(), 0, 0, sub_w, sub_h, stage_dc.get(), sx, sy, SRCCOPY);
+        GdiFlush();
+    }
+    const auto* sub_pixels = static_cast<const uint32_t*>(sub_bits);
+    const std::vector<uint32_t> pixels(sub_pixels, sub_pixels + static_cast<size_t>(sub_w) * sub_h);
+
+    fill_backdrop(*state, pixels, sub_w, sub_h, ox - sx, oy - sy);
     if (!ensure_dib(*state))
         return;
     state->full_redraw = true;
     redraw(*state, state->dib_bits, true);
 
     // 畫好的那一格是預乘透明度的（跟分層視窗用的同一張），照樣疊上去
-    const wil::unique_hdc stage_dc(CreateCompatibleDC(screen_dc.get()));
-    const auto _select_stage = wil::SelectObject(stage_dc.get(), stage);
     const BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
     GdiAlphaBlend(stage_dc.get(), ox, oy, state->width, state->height, state->memory_dc.get(), 0, 0, state->width,
         state->height, blend);
