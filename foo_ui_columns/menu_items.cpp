@@ -916,14 +916,21 @@ std::optional<std::string> text_for(metadb_handle* handle)
             // 由多到少排好的次數裡，比這首多的有幾首＝名次減一（同次數的並列）
             const auto above = std::lower_bound(counts_desc.begin(), counts_desc.end(), own, std::greater<>())
                 - counts_desc.begin();
-            // 一律寫百分比（2026-11-17 使用者：「曲庫中排名前 n%」比較好）。1% 以上取整數（無條件進位）；
-            // 1% 以內寫一位小數，最少 0.1%，免得常聽的幾十首全都是「前 1%」
+            // 一律寫百分比（2026-11-17 使用者：「前 n%」比較好）。1% 以上取整數（無條件進位）；
+            // 1% 以內寫一位小數，最少 0.1%，免得常聽的幾十首全都是「前 1%」。
+            // 母數只算播過的歌（2026-11-17 使用者：曲庫六萬多首只播過兩成，拿整個曲庫當母數，播過一次就是前 21%）；
+            // 排在後半（超過 50%）的不顯示，免得出現「前 70%」這種讀起來彆扭的數字
             const auto rank = above + 1;
-            const auto total = static_cast<double>(counts_desc.size());
-            const auto percent = static_cast<double>(rank) * 100.0 / total;
-            const auto text = percent >= 1.0 ? fmt::format("{}", static_cast<int>(std::ceil(percent - 1e-9)))
-                                             : fmt::format("{:.1f}", std::max(0.1, std::ceil(percent * 10.0 - 1e-9) / 10.0));
-            result = fmt::format(nocturne_text::play_rank_percent, text);
+            // 由多到少排好，第一個 0 之前的都是播過的
+            const auto played = std::lower_bound(counts_desc.begin(), counts_desc.end(), 0u, std::greater<>())
+                - counts_desc.begin();
+            const auto percent = static_cast<double>(rank) * 100.0 / static_cast<double>(played);
+            if (percent <= 50.0) {
+                const auto text = percent >= 1.0
+                    ? fmt::format("{}", static_cast<int>(std::ceil(percent - 1e-9)))
+                    : fmt::format("{:.1f}", std::max(0.1, std::ceil(percent * 10.0 - 1e-9) / 10.0));
+                result = fmt::format(nocturne_text::play_rank_percent, text);
+            }
         }
     }
     if (refresh)
@@ -972,8 +979,8 @@ public:
             return true;
         }
 
-        // %cui_play_rank%：這首的播放次數在媒體庫的排名百分比（「前 5%」「前 0.1%」，main.xml 前面放「曲庫中排名」；
-        // 沒播過、還沒算好時不存在；2026-11-17）
+        // %cui_play_rank%：這首的播放次數在播過的歌裡的排名百分比（「前 5%」「前 0.1%」，main.xml 前面放「常聽排名」；
+        // 沒播過、排在後半、還沒算好時不存在；2026-11-17）
         if (index == 17) {
             if (!handle)
                 return false;
