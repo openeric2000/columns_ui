@@ -926,9 +926,10 @@ std::optional<std::string> text_for(metadb_handle* handle)
                 - counts_desc.begin();
             const auto percent = static_cast<double>(rank) * 100.0 / static_cast<double>(played);
             if (percent <= 50.0) {
-                const auto text = percent >= 1.0
-                    ? fmt::format("{}", static_cast<int>(std::ceil(percent - 1e-9)))
-                    : fmt::format("{:.1f}", std::max(0.1, std::ceil(percent * 10.0 - 1e-9) / 10.0));
+                // 先進位到一位小數再決定寫法：0.95～0.99% 進位後是 1.0，要寫「前 1%」不寫「前 1.0%」
+                const auto tenth = std::max(0.1, std::ceil(percent * 10.0 - 1e-9) / 10.0);
+                const auto text = tenth >= 1.0 ? fmt::format("{}", static_cast<int>(std::ceil(percent - 1e-9)))
+                                               : fmt::format("{:.1f}", tenth);
                 result = fmt::format(nocturne_text::play_rank_percent, text);
             }
         }
