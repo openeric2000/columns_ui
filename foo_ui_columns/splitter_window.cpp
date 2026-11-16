@@ -130,7 +130,7 @@ constexpr wchar_t now_playing_snapshot_class_name[] = L"columns_ui_now_playing_s
 
 struct NowPlayingSnapshot {
     wil::unique_hbitmap stage;
-    // 偏移上方要顯示的主內容截圖；收合時沒有（上方露出真的主內容）
+    // 偏移上方要顯示的主內容截圖。2026-11-17 起展開、收合都有；截不到時（退路）是空的，視窗改成跟著往下移、上方露出真的主內容
     wil::unique_hbitmap main;
     // 展開頁在螢幕上的位置、展開頁截圖目前往下偏移多少
     RECT stage_rect{};
@@ -1771,6 +1771,9 @@ bool FlatSplitterPanel::start_now_playing_slide()
         m_now_playing_slide_from = stage_height;
     } else {
         // 收合：截展開頁蓋在原位，底下一次收合、主內容畫好（都被截圖蓋著，看不到），截圖往下滑到播放列後面
+        // 2026-11-17：再截一張收合好的主內容，跟展開一樣「視窗固定蓋整頁、每格自己重畫」。
+        // 以前視窗又移又縮，偶爾一格播放列正上方露出一條主內容（使用者：收合時進度條上方閃一下）；
+        // 有了主內容截圖，收合到一半改展開也不用再重截（以前那裡停 36～42 ms）
         snapshot->stage = capture_now_playing_area(owner, stage_rect);
         const auto t_capture_stage = lap();
         if (!snapshot->stage)
@@ -1787,8 +1790,12 @@ bool FlatSplitterPanel::start_now_playing_slide()
         const auto t_size = lap();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         const auto t_redraw = lap();
-        slide_diag("prep collapse  capture_stage=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f", t_capture_stage,
-            t_create, t_flush, t_size, t_redraw);
+        // PrintWindow 畫的是主視窗本身，蓋在上面的截圖視窗（另一個頂層視窗）不會進來：截到的就是收合好的主內容。
+        // 截不到就退回舊做法（視窗跟著往下移）
+        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->main = capture_now_playing_area(owner, stage_rect);
+        const auto t_capture_main = lap();
+        slide_diag("prep collapse  capture_stage=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_main=%.1f",
+            t_capture_stage, t_create, t_flush, t_size, t_redraw, t_capture_main);
         m_now_playing_slide_from = 0;
     }
 
@@ -1831,12 +1838,14 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
     const auto previous_offset = snapshot->offset;
 
     if (snapshot->main) {
-        // 展開：視窗不動，從新的偏移往下整片重畫（展開頁截圖整片往上移了）
+        // 視窗固定蓋住整個展開頁不動，從新舊偏移比較上面那個往下整片重畫：偏移上方畫主內容截圖、下方畫移過的展開頁截圖。
+        // 展開、收合都走這裡（收合 2026-11-17 起，見 start_now_playing_slide）
         const RECT dirty{0, std::min(offset, snapshot->offset), wil::rect_width(rect), wil::rect_height(rect)};
         snapshot->offset = offset;
         InvalidateRect(m_now_playing_snapshot_wnd, &dirty, FALSE);
     } else {
-        // 收合：視窗下緣固定在播放列上緣，往下移多少、高度就少多少，看起來像整頁滑回播放列後面；內容不用重畫
+        // 截不到主內容時的退路（舊做法）：視窗下緣固定在播放列上緣，往下移多少、高度就少多少；內容不用重畫。
+        // 又移又縮的視窗偶爾會先套用新大小、晚一格才移位置，那一格播放列正上方露出一條主內容（2026-11-17 錄影）
         snapshot->offset = offset;
         SetWindowPos(m_now_playing_snapshot_wnd, nullptr, rect.left, rect.top + offset, wil::rect_width(rect),
             wil::rect_height(rect) - offset, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
@@ -1898,11 +1907,12 @@ void FlatSplitterPanel::finish_now_playing_slide()
     // - 展開到一半又收合（固定蓋住整個展開頁的模式，snapshot->main 存在）：真視窗還是展開的，換成收合
     // 都是在截圖蓋著的時候做，再 DwmFlush 等新畫面合成出來才拿掉截圖，不會閃
     const auto now_playing_bar = get_now_playing_bar_panel();
-    const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
     RECT region_box{};
     const auto real_collapsed = now_playing_bar && now_playing_bar->m_wnd
         && GetWindowRgnBox(now_playing_bar->m_wnd, &region_box) != ERROR;
-    const auto needs_sync = m_now_playing_slide_expanding ? real_collapsed : (snapshot && snapshot->main);
+    // 底下真視窗的狀態跟這段的目標不同才要換。2026-11-17 起收合一開始就有主內容截圖、真視窗也已經收合，
+    // 不能再用「有主內容截圖」判斷要不要收合（會白做一次重排＋重畫，約 30 ms）
+    const auto needs_sync = m_now_playing_slide_expanding ? real_collapsed : !real_collapsed;
     const auto finish_t0 = slide_diag_ms();
 
     if (needs_sync) {
