@@ -1,4 +1,5 @@
 #include "pch.h"
+#include <cstdarg>
 #include "splitter.h"
 #include "dark_mode.h"
 #include "menu_items.h"
@@ -8,6 +9,7 @@
 #include "now_playing_cover_zoom.h"
 #include "now_playing_vu_meter.h"
 #include "cover_line.h"
+#include "nocturne_build_info.h"
 
 namespace cui::panels::splitter {
 
@@ -47,6 +49,74 @@ double cubic_bezier(double x1, double y1, double x2, double y2, double x)
 
     return sample(y1, y2, t);
 }
+
+// 展開頁滑動的診斷紀錄（2026-11-17，只在開發版編進去；個人版、朋友版、公開版整段不存在）：
+// 每段的準備工作、每一格的時間與位置、收尾各花多久，寫到 profile\nocturne_slide_diag.log。
+// 用來拆起動延遲（展開頁動畫順暢度計畫書 Step 6）與找收合尾端的停頓。滑動中只記在記憶體，收尾時才寫檔，不拖慢每一格
+#ifdef NOCTURNE_BUILD_DEV
+double slide_diag_ms()
+{
+    LARGE_INTEGER frequency{}, counter{};
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return static_cast<double>(counter.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+}
+
+std::string& slide_diag_buffer()
+{
+    static std::string buffer;
+    return buffer;
+}
+
+void slide_diag(const char* format, ...)
+{
+    char text[400];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(text, sizeof(text), format, args);
+    va_end(args);
+    char line[460];
+    std::snprintf(line, sizeof(line), "%.1f  %s\r\n", slide_diag_ms(), text);
+    slide_diag_buffer() += line;
+}
+
+void slide_diag_flush()
+{
+    auto& buffer = slide_diag_buffer();
+    if (buffer.empty())
+        return;
+    const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+    const auto path = std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
+        + L"\\nocturne_slide_diag.log";
+    const auto file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD written{};
+        WriteFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &written, nullptr);
+        CloseHandle(file);
+    }
+    buffer.clear();
+}
+
+// 上一格投遞下一格訊息的時間（看訊息被別的訊息插隊多久）
+double& slide_diag_posted_ms()
+{
+    static double value{};
+    return value;
+}
+#else
+inline double slide_diag_ms()
+{
+    return 0;
+}
+inline void slide_diag(const char*, ...) {}
+inline void slide_diag_flush() {}
+inline double& slide_diag_posted_ms()
+{
+    static double value{};
+    return value;
+}
+#endif
 
 // 自編版新增（展開頁動畫）：蓋在展開頁原位的截圖視窗
 // 收合時每一格都要重畫露出來的主內容（2026-10-28 實測每格 3～8ms，240Hz 一格只有 4.17ms，會掉格），
@@ -1542,6 +1612,9 @@ bool FlatSplitterPanel::s_toggle_now_playing()
             continue;
 
         splitter->m_now_playing_expanded = !splitter->m_now_playing_expanded;
+        // 點下（訊息送出）到這裡過了多久：GetMessageTime 是 GetTickCount 的時間，精度約 1～16 ms
+        slide_diag("toggle %s  msg_age=%lums  sliding=%d", splitter->m_now_playing_expanded ? "expand" : "collapse",
+            GetTickCount() - static_cast<DWORD>(GetMessageTime()), splitter->m_now_playing_snapshot_wnd != nullptr);
         // 自編版（展開頁動畫）：不再一次切換區域，改成由下往上揭開／由上往下蓋回
         splitter->start_now_playing_animation();
         return true;
@@ -1562,9 +1635,11 @@ void FlatSplitterPanel::start_now_playing_animation()
 
     // B 款滑動進行中又切換：從截圖目前的位置往回滑（每格的訊息還在跑，不用再送）
     if (m_now_playing_snapshot_wnd) {
+        const auto reverse_t0 = slide_diag_ms();
         const auto offset = get_now_playing_slide_offset();
         const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
         const auto& rect = m_now_playing_slide_rect;
+        slide_diag("reverse  drawn=%d computed=%d", snapshot->offset, offset);
         snapshot->offset = offset;
 
         // 展開到一半改收合（snapshot->main 存在、目前是固定蓋住整個展開頁的模式）：什麼真視窗都不動，
@@ -1600,6 +1675,7 @@ void FlatSplitterPanel::start_now_playing_animation()
         m_now_playing_slide_from = offset;
         m_now_playing_slide_expanding = m_now_playing_expanded;
         m_now_playing_snapshot_start = std::chrono::steady_clock::now();
+        slide_diag("reverse  done in %.1fms  from=%d", slide_diag_ms() - reverse_t0, offset);
         return;
     }
 
@@ -1650,27 +1726,41 @@ bool FlatSplitterPanel::start_now_playing_slide()
     const auto stage_height = wil::rect_height(stage_rect);
     auto snapshot = std::make_unique<NowPlayingSnapshot>();
     snapshot->stage_rect = stage_rect;
+    auto mark = slide_diag_ms();
+    const auto lap = [&mark] {
+        const auto now = slide_diag_ms();
+        return now - std::exchange(mark, now);
+    };
 
     if (m_now_playing_expanded) {
         // 展開：先截主內容蓋在原位（偏移＝展開頁高度，整頁都是主內容），底下偷偷展開、畫好，
         // 再截展開頁（PrintWindow 不會畫到蓋著的截圖視窗），偏移往 0 減少＝從播放列後面往上滑
         snapshot->main = capture_now_playing_area(owner, stage_rect);
         snapshot->offset = stage_height;
+        const auto t_capture_main = lap();
         if (!snapshot->main)
             return false;
 
         m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
         if (!m_now_playing_snapshot_wnd)
             return false;
+        const auto t_create = lap();
 
         [[maybe_unused]] const auto hr = DwmFlush();
+        const auto t_flush = lap();
         on_size_changed();
+        const auto t_size = lap();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        const auto t_redraw = lap();
 
         auto stage = capture_now_playing_area(owner, stage_rect);
+        const auto t_capture_stage = lap();
         // VU 表／頻譜的視窗這時還藏著（截圖蓋著的期間不顯示），截圖裡沒有它：畫一格疊上去，跟著整頁一起滑上來
         if (stage && m_vu_meter_wnd)
             vu_meter::draw_into_slide(m_vu_meter_wnd, m_now_playing_bar_rect, stage.get(), stage_rect);
+        const auto t_vu = lap();
+        slide_diag("prep expand  capture_main=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_stage=%.1f vu=%.1f",
+            t_capture_main, t_create, t_flush, t_size, t_redraw, t_capture_stage, t_vu);
         get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage = std::move(stage);
         if (!get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage) {
             // 截不到展開頁：底下已經展開好了，直接拿掉蓋著的截圖
@@ -1681,16 +1771,23 @@ bool FlatSplitterPanel::start_now_playing_slide()
     } else {
         // 收合：截展開頁蓋在原位，底下一次收合、主內容畫好（都被截圖蓋著，看不到），截圖往下滑到播放列後面
         snapshot->stage = capture_now_playing_area(owner, stage_rect);
+        const auto t_capture_stage = lap();
         if (!snapshot->stage)
             return false;
 
         m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
         if (!m_now_playing_snapshot_wnd)
             return false;
+        const auto t_create = lap();
 
         [[maybe_unused]] const auto hr = DwmFlush();
+        const auto t_flush = lap();
         on_size_changed();
+        const auto t_size = lap();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        const auto t_redraw = lap();
+        slide_diag("prep collapse  capture_stage=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f", t_capture_stage,
+            t_create, t_flush, t_size, t_redraw);
         m_now_playing_slide_from = 0;
     }
 
@@ -1716,9 +1813,13 @@ int FlatSplitterPanel::get_now_playing_slide_offset() const
 
 void FlatSplitterPanel::on_now_playing_slide_frame()
 {
+    const auto frame_t0 = slide_diag_ms();
+    const auto queued = frame_t0 - slide_diag_posted_ms();
     const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_snapshot_start;
 
     if (elapsed >= std::chrono::milliseconds(now_playing_animation_duration_ms)) {
+        slide_diag("frame  elapsed=%.1f queued=%.1f  -> finish",
+            std::chrono::duration<double, std::milli>(elapsed).count(), queued);
         finish_now_playing_slide();
         return;
     }
@@ -1726,6 +1827,7 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
     const auto offset = get_now_playing_slide_offset();
     const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
     const auto& rect = m_now_playing_slide_rect;
+    const auto previous_offset = snapshot->offset;
 
     if (snapshot->main) {
         // 展開：視窗不動，從新的偏移往下整片重畫（展開頁截圖整片往上移了）
@@ -1739,9 +1841,15 @@ void FlatSplitterPanel::on_now_playing_slide_frame()
             wil::rect_height(rect) - offset, SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
     }
     UpdateWindow(m_now_playing_snapshot_wnd);
+    const auto t_draw = slide_diag_ms();
 
     [[maybe_unused]] const auto hr = DwmFlush();
+    const auto t_flush = slide_diag_ms();
     let_now_playing_bar_update();
+    const auto t_bar = slide_diag_ms();
+    slide_diag("frame  elapsed=%.1f offset=%d step=%d  queued=%.1f draw=%.1f flush=%.1f bar=%.1f",
+        std::chrono::duration<double, std::milli>(elapsed).count(), offset, offset - previous_offset, queued,
+        t_draw - frame_t0, t_flush - t_draw, t_bar - t_flush);
     schedule_now_playing_animation_frame();
 }
 
@@ -1761,6 +1869,8 @@ void FlatSplitterPanel::schedule_now_playing_animation_frame()
     }
 
     PostMessage(m_wnd, msg_now_playing_animation_frame, 0, 0);
+    // 投遞到真的被處理之間隔了多久（中間被別的訊息插隊的時間）
+    slide_diag_posted_ms() = slide_diag_ms();
 }
 
 // 每格結尾都 PostMessage 下一格，主執行緒的佇列一直有已投遞的訊息，優先順序比較低的 WM_TIMER、WM_PAINT 就一直排不到，
@@ -1792,11 +1902,13 @@ void FlatSplitterPanel::finish_now_playing_slide()
     const auto real_collapsed = now_playing_bar && now_playing_bar->m_wnd
         && GetWindowRgnBox(now_playing_bar->m_wnd, &region_box) != ERROR;
     const auto needs_sync = m_now_playing_slide_expanding ? real_collapsed : (snapshot && snapshot->main);
+    const auto finish_t0 = slide_diag_ms();
 
     if (needs_sync) {
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     }
+    const auto t_sync = slide_diag_ms();
 
     // 從這裡起展開頁算「完全展開」（截圖視窗還蓋著，等一下才拿掉）
     const auto snapshot_wnd = std::exchange(m_now_playing_snapshot_wnd, nullptr);
@@ -1812,8 +1924,10 @@ void FlatSplitterPanel::finish_now_playing_slide()
     if (needs_sync || meter_shown) {
         [[maybe_unused]] const auto hr = DwmFlush();
     }
+    const auto t_flush = slide_diag_ms();
 
     DestroyWindow(snapshot_wnd);
+    const auto t_destroy = slide_diag_ms();
 
     // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
     if (m_cover_zoom_wnd)
@@ -1827,8 +1941,13 @@ void FlatSplitterPanel::finish_now_playing_slide()
     // 精簡時封面下那一排的右鍵熱區也是這時才出現
     if (m_cover_line_wnd)
         cover_line::layout(m_cover_line_wnd, m_now_playing_bar_rect);
+    const auto t_layout = slide_diag_ms();
 
     on_now_playing_animation_finished();
+    slide_diag("finish %s  sync=%d %.1f  flush=%.1f destroy=%.1f layout=%.1f finished=%.1f",
+        m_now_playing_slide_expanding ? "expand" : "collapse", needs_sync, t_sync - finish_t0, t_flush - t_sync,
+        t_destroy - t_flush, t_layout - t_destroy, slide_diag_ms() - t_layout);
+    slide_diag_flush();
 }
 
 void FlatSplitterPanel::on_now_playing_animation_finished()
