@@ -1636,11 +1636,12 @@ void FlatSplitterPanel::start_now_playing_animation()
     // B 款滑動進行中又切換：從截圖目前的位置往回滑（每格的訊息還在跑，不用再送）
     if (m_now_playing_snapshot_wnd) {
         const auto reverse_t0 = slide_diag_ms();
-        const auto offset = get_now_playing_slide_offset();
         const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
         const auto& rect = m_now_playing_slide_rect;
-        slide_diag("reverse  drawn=%d computed=%d", snapshot->offset, offset);
-        snapshot->offset = offset;
+        // 從畫面上最後畫出來的那一格倒回去（2026-11-17）：以前用現在的時間重算位置，比畫面上多走了一段（219 量到 7～30 px），
+        // 下一格會先往原方向跳過去再回頭
+        const auto offset = snapshot->offset;
+        slide_diag("reverse  drawn=%d computed=%d", offset, get_now_playing_slide_offset());
 
         // 展開到一半改收合（snapshot->main 存在、目前是固定蓋住整個展開頁的模式）：什麼真視窗都不動，
         // 截圖已經有「主內容」和「展開頁」兩張圖，只要倒過來繼續滑（下面的 m_now_playing_slide_from／expanding），
