@@ -90,7 +90,12 @@ int get_spectrum_fall();
 void set_spectrum_fall(int fall);
 
 HWND create(HWND parent);
-void layout(HWND wnd, const RECT& bar_rect);
+// instant＝這次如果是從藏著變成顯示，不淡入、直接整個出現（展開動畫結束時用：截圖裡已經有錶了）
+void layout(HWND wnd, const RECT& bar_rect, bool instant = false);
+// 展開動畫用（2026-11-16）：照展開完成後的位置排好，用剛截好的展開頁 stage 當背景畫一格疊到 stage 上，
+// 錶就跟著整頁一起滑上來；視窗本身還藏著，動畫結束再用 layout(…, true) 顯示。
+// stage_screen＝stage 在螢幕上的位置
+void draw_into_slide(HWND wnd, const RECT& bar_rect, HBITMAP stage, const RECT& stage_screen);
 HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect);
 // 用上一次的播放列位置重排所有 VU 表（展開動畫結束、切換展開頁模式、設定改了時用）
 void refresh_layouts();

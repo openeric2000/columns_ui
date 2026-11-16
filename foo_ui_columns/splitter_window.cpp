@@ -1667,7 +1667,11 @@ bool FlatSplitterPanel::start_now_playing_slide()
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
 
-        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage = capture_now_playing_area(owner, stage_rect);
+        auto stage = capture_now_playing_area(owner, stage_rect);
+        // VU 表／頻譜的視窗這時還藏著（截圖蓋著的期間不顯示），截圖裡沒有它：畫一格疊上去，跟著整頁一起滑上來
+        if (stage && m_vu_meter_wnd)
+            vu_meter::draw_into_slide(m_vu_meter_wnd, m_now_playing_bar_rect, stage.get(), stage_rect);
+        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage = std::move(stage);
         if (!get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage) {
             // 截不到展開頁：底下已經展開好了，直接拿掉蓋著的截圖
             DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
@@ -1792,10 +1796,24 @@ void FlatSplitterPanel::finish_now_playing_slide()
     if (needs_sync) {
         on_size_changed();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    }
+
+    // 從這裡起展開頁算「完全展開」（截圖視窗還蓋著，等一下才拿掉）
+    const auto snapshot_wnd = std::exchange(m_now_playing_snapshot_wnd, nullptr);
+
+    // 展開：截圖裡已經有 VU 表／頻譜（start_now_playing_slide 畫上去的，或收合到一半改展開時原本就截到的），
+    // 所以真的視窗要在截圖拿掉之前就整個顯示好、不淡入，否則拿掉截圖那一格錶會先消失再淡入
+    auto meter_shown = false;
+    if (m_now_playing_slide_expanding && m_vu_meter_wnd) {
+        vu_meter::layout(m_vu_meter_wnd, m_now_playing_bar_rect, true);
+        meter_shown = IsWindowVisible(m_vu_meter_wnd) != FALSE;
+    }
+
+    if (needs_sync || meter_shown) {
         [[maybe_unused]] const auto hr = DwmFlush();
     }
 
-    DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
+    DestroyWindow(snapshot_wnd);
 
     // 截圖拿掉了，展開頁算「完全展開」：封面右下角的放大鈕這時才出現（上面的 on_size_changed 不一定會跑，跑的時候截圖也還在）
     if (m_cover_zoom_wnd)

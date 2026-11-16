@@ -313,6 +313,8 @@ struct State {
     ULONGLONG shown_at{};
     bool fading{};
     bool needs_present{true};
+    // 展開動畫開始時已經照最後的位置排好、背景也取好了（draw_into_slide）：動畫結束顯示時不用再截一次背景
+    bool slide_ready{};
 
     wil::unique_hdc memory_dc;
     wil::unique_hbitmap dib;
@@ -728,14 +730,15 @@ std::optional<WindowPlan> plan_in_stage(const Content& content, Style style, int
     return WindowPlan{RECT{left, top, left + new_w, top + new_h}, scale};
 }
 
-RECT compute_window_rect(const RECT& bar_rect, Style style)
+// in_slide＝展開動畫的截圖還蓋著（展開頁「還沒算展開完成」）也照算，見 draw_into_slide
+RECT compute_window_rect(const RECT& bar_rect, Style style, bool in_slide = false)
 {
     if (bar_rect.right <= bar_rect.left)
         return {};
 
     RECT stage_screen{};
     HWND owner{};
-    if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
+    if (!in_slide && !panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage_screen, owner))
         return {};
     const auto content = current_content();
     if (!content)
@@ -3809,7 +3812,33 @@ void forward_wheel(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
 void schedule_recapture(HWND wnd);
 
-void apply_layout(HWND wnd)
+// 記下新的位置與樣式，大小或位置變了就重算錶框
+void adopt_target(State& state, const Content& content, Style style, const RECT& target, bool moved)
+{
+    const auto width = static_cast<int>(target.right - target.left);
+    const auto height = static_cast<int>(target.bottom - target.top);
+    state.window_rect = target;
+    state.style = style;
+    state.spectrum = content.spectrum;
+    state.combined = content.combined;
+    state.spectrum_style = cached_spectrum_style();
+    state.spectrum_framed = cached_spectrum_framed();
+    state.spectrum_bands = cached_spectrum_bands();
+    if (width != state.width || height != state.height || moved) {
+        const auto plan = plan_in_stage(content, style, state.bar_rect.right - state.bar_rect.left, state.bar_rect.top);
+        rebuild_geometry(state, width, height, plan ? plan->scale : 1.f);
+    }
+}
+
+bool is_restyled(const State& state, const Content& content, Style style)
+{
+    return state.style != style || state.spectrum != content.spectrum || state.combined != content.combined
+        || (content.spectrum
+            && (state.spectrum_style != cached_spectrum_style() || state.spectrum_framed != cached_spectrum_framed()
+                || state.spectrum_bands != cached_spectrum_bands()));
+}
+
+void apply_layout(HWND wnd, bool instant = false)
 {
     auto* state = state_of(wnd);
     if (!state)
@@ -3826,41 +3855,27 @@ void apply_layout(HWND wnd)
             KillTimer(wnd, frame_timer_id);
             ShowWindow(wnd, SW_HIDE);
         }
+        state->slide_ready = false;
         return;
     }
 
     const auto visible = IsWindowVisible(wnd) != FALSE;
     const auto width = static_cast<int>(target.right - target.left);
     const auto height = static_cast<int>(target.bottom - target.top);
-    const auto spectrum_style = cached_spectrum_style();
-    const auto spectrum_framed = cached_spectrum_framed();
-    const auto spectrum_bands = cached_spectrum_bands();
-    const auto restyled = state->style != style || state->spectrum != content->spectrum || state->combined != content->combined
-        || (content->spectrum
-            && (state->spectrum_style != spectrum_style || state->spectrum_framed != spectrum_framed
-                || state->spectrum_bands != spectrum_bands));
-    const auto moved = !EqualRect(&state->window_rect, &target) || restyled;
+    const auto moved = !EqualRect(&state->window_rect, &target) || is_restyled(*state, *content, style);
 
     if (!visible || moved) {
         // 先藏起來再截背景，免得截到自己
         if (visible)
             ShowWindow(wnd, SW_HIDE);
-        state->window_rect = target;
-        state->style = style;
-        state->spectrum = content->spectrum;
-        state->combined = content->combined;
-        state->spectrum_style = spectrum_style;
-        state->spectrum_framed = spectrum_framed;
-        state->spectrum_bands = spectrum_bands;
-        if (width != state->width || height != state->height || moved) {
-            const auto plan
-                = plan_in_stage(*content, style, state->bar_rect.right - state->bar_rect.left, state->bar_rect.top);
-            rebuild_geometry(*state, width, height, plan ? plan->scale : 1.f);
-        }
+        adopt_target(*state, *content, style, target, moved);
         SetWindowPos(wnd, HWND_TOP, target.left, target.top, width, height, SWP_NOACTIVATE);
-        capture_backdrop(wnd, *state);
+        // 截背景要請 Windows 重畫整個主視窗（約 20～30 毫秒）；展開動畫開始時取過、位置也沒變就沿用，
+        // 之後 schedule_recapture 還會再截
+        if (!(std::exchange(state->slide_ready, false) && instant && !moved))
+            capture_backdrop(wnd, *state);
         state->shown_at = GetTickCount64();
-        state->fading = !visible;
+        state->fading = !visible && !instant;
         state->last_tick = GetTickCount64();
         present(wnd, *state);
         SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -4150,12 +4165,72 @@ HWND create(HWND parent)
     return wnd;
 }
 
-void layout(HWND wnd, const RECT& bar_rect)
+void layout(HWND wnd, const RECT& bar_rect, bool instant)
 {
     if (auto* state = state_of(wnd)) {
         state->bar_rect = bar_rect;
-        apply_layout(wnd);
+        apply_layout(wnd, instant);
     }
+}
+
+// 原本展開動畫的截圖裡沒有錶：動畫用的是整頁截圖，截的時候這個視窗還藏著，要等滑完才顯示再淡入，
+// 比封面晚約 0.25～0.5 秒才看得到（2026-11-16 使用者錄影；連續開關時常常還沒淡完就又收起來，整段看不到錶）。
+// 視窗在截圖蓋著的期間照舊藏著（不必每格更新、也不會被截進別的截圖），只把一格畫進截圖裡
+void draw_into_slide(HWND wnd, const RECT& bar_rect, HBITMAP stage, const RECT& stage_screen)
+{
+    auto* state = state_of(wnd);
+    if (!state || !stage || IsWindowVisible(wnd))
+        return;
+
+    state->bar_rect = bar_rect;
+    const auto content = current_content();
+    if (!content)
+        return;
+    const auto style
+        = content->combined && !content->spectrum && cached_style() == Style::round ? Style::box : cached_style();
+    const auto target = compute_window_rect(bar_rect, style, true);
+    if (IsRectEmpty(&target))
+        return;
+
+    BITMAP info{};
+    GetObject(stage, sizeof(info), &info);
+    const auto stage_w = static_cast<int>(info.bmWidth);
+    const auto stage_h = static_cast<int>(info.bmHeight);
+    if (stage_w <= 0 || stage_h <= 0)
+        return;
+    std::vector<uint32_t> pixels(static_cast<size_t>(stage_w) * stage_h);
+    BITMAPINFO header{};
+    header.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    header.bmiHeader.biWidth = stage_w;
+    header.bmiHeader.biHeight = -stage_h;
+    header.bmiHeader.biPlanes = 1;
+    header.bmiHeader.biBitCount = 32;
+    header.bmiHeader.biCompression = BI_RGB;
+    const auto screen_dc = wil::GetDC(nullptr);
+    if (!GetDIBits(screen_dc.get(), stage, 0, stage_h, pixels.data(), &header, DIB_RGB_COLORS))
+        return;
+
+    const auto moved = !EqualRect(&state->window_rect, &target) || is_restyled(*state, *content, style);
+    adopt_target(*state, *content, style, target, moved);
+    SetWindowPos(wnd, HWND_TOP, target.left, target.top, state->width, state->height, SWP_NOACTIVATE);
+
+    RECT screen = state->window_rect;
+    MapWindowPoints(GetParent(wnd), HWND_DESKTOP, reinterpret_cast<POINT*>(&screen), 2);
+    const auto ox = static_cast<int>(screen.left - stage_screen.left);
+    const auto oy = static_cast<int>(screen.top - stage_screen.top);
+    fill_backdrop(*state, pixels, stage_w, stage_h, ox, oy);
+    if (!ensure_dib(*state))
+        return;
+    state->full_redraw = true;
+    redraw(*state, state->dib_bits, true);
+
+    // 畫好的那一格是預乘透明度的（跟分層視窗用的同一張），照樣疊上去
+    const wil::unique_hdc stage_dc(CreateCompatibleDC(screen_dc.get()));
+    const auto _select_stage = wil::SelectObject(stage_dc.get(), stage);
+    const BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    GdiAlphaBlend(stage_dc.get(), ox, oy, state->width, state->height, state->memory_dc.get(), 0, 0, state->width,
+        state->height, blend);
+    state->slide_ready = true;
 }
 
 HDWP defer_layout(HDWP dwp, HWND wnd, const RECT& bar_rect)
