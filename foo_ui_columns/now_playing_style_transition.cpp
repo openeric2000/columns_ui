@@ -43,7 +43,6 @@ constexpr double stable_threshold = 1.5;
 constexpr int stage_cell_threshold = 72;
 constexpr int stage_changed_cells = 2;
 constexpr double stage_changed_average = 0.5;
-constexpr double stage_stable_average = 1.0;
 
 // 換歌交叉淡化（2026-11-14）：自然換歌在結束前這麼多秒先截圖蓋上（剩 pre_capture_window_s 秒內才排計時器）；
 // 蓋上後最多等這麼久換歌，沒等到就照常淡出
@@ -568,8 +567,10 @@ void poll_ready(Transition& transition, ULONGLONG now)
             }
             const auto from_before = difference(signature, transition.before_signature);
             const bool stage_changed = cells >= stage_changed_cells || from_before > stage_changed_average;
-            const bool stage_stable = difference(signature, transition.last_signature) < stage_stable_average;
-            ready = stage_changed && stage_stable;
+            // 2026-11-17：原本還要「跟上一張差不多」才算畫好，每次截圖 33 ms＋輪詢 15 ms，至少要多等一輪（219 動畫紀錄：切換後 90～110 ms 才淡出）。
+            // VU 表在切換當下就顯示、ESLyric 也是一次重畫，看到畫面換了就淡出（跟換歌同一個規則）；
+            // 就算 ESLyric 還在補畫，淡出剛開始時蓋層幾乎不透明，看不出來
+            ready = stage_changed;
         } else {
             const bool stable = difference(signature, transition.last_signature) < stable_threshold;
             ready = changed && stable;
