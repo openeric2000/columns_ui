@@ -11,6 +11,7 @@
 
 #include "now_playing_vu_meter.h"
 #include "now_playing_cover_zoom.h"
+#include "now_playing_dsd_source.h"
 #include "menu_items.h"
 #include "next_track_toast.h"
 #include "nocturne_segment.h"
@@ -309,6 +310,12 @@ struct State {
     double power_history_[2][power_history]{};
     int power_index{};
     visualisation_stream::ptr stream;
+    // 播 DSD 時自己讀檔（2026-11-17，見 now_playing_dsd_source.h）：目前判斷的那首、是不是本機的 .dff／.dsf、
+    // fb2k 給的資料已經連續多久全是 0、這首是否已改成自己讀（同一首不再切回來）
+    metadb_handle_ptr dsd_track;
+    bool dsd_candidate{};
+    double dsd_silent_for{};
+    bool dsd_active{};
     ULONGLONG last_tick{};
     ULONGLONG shown_at{};
     bool fading{};
@@ -2541,6 +2548,96 @@ void update_auto_reference(State& state, double dt, const double* rms)
     state.auto_reference = std::clamp(state.auto_hold_db + auto_loud_vu_offset, auto_reference_min, auto_reference_max);
 }
 
+// 播 DSD 時 fb2k 給的資料連續這麼久全是 0，就改成自己讀檔
+constexpr double dsd_takeover_seconds = 0.3;
+
+// 這一格要不要改用自己讀 DSD 檔（見 now_playing_dsd_source.h）：本機的 .dff／.dsf，而且 fb2k 給的資料連續
+// dsd_takeover_seconds 秒全是 0。同一首接手後就一直自己讀，換歌重新判斷。fb2k_silent＝這一格 fb2k 的資料全是 0（或拿不到）
+bool use_dsd_source(State& state, double dt, bool fb2k_silent, metadb_handle_ptr& track)
+{
+    if (!play_control::get()->get_now_playing(track) || !track.is_valid()) {
+        state.dsd_track.release();
+        state.dsd_active = false;
+        return false;
+    }
+    if (track != state.dsd_track) {
+        state.dsd_track = track;
+        state.dsd_candidate = dsd_source::is_candidate(track);
+        state.dsd_silent_for = 0;
+        state.dsd_active = false;
+    }
+    if (!state.dsd_candidate)
+        return false;
+    if (!state.dsd_active) {
+        state.dsd_silent_for = fb2k_silent ? state.dsd_silent_for + dt : 0;
+        state.dsd_active = dsd_source::forced() || state.dsd_silent_for >= dsd_takeover_seconds;
+#if defined(NOCTURNE_BUILD_DEV)
+        if (state.dsd_active) {
+            pfc::string8 profile;
+            FILE* file{};
+            if (filesystem::g_get_native_path(core_api::get_profile_path(), profile)
+                && _wfopen_s(&file, (mmh::to_utf16(profile.c_str()) + L"\\nocturne_dsd_diag.log").c_str(), L"ab") == 0 && file) {
+                const auto line = fmt::format("# takeover {} forced={} {}\n", GetTickCount64(), dsd_source::forced() ? 1 : 0,
+                    track->get_path());
+                fwrite(line.data(), 1, line.size(), file);
+                fclose(file);
+            }
+        }
+#endif
+    }
+    return state.dsd_active;
+}
+
+// 一段 PCM 的 RMS 與峰值（左右兩聲道；單聲道時兩邊一樣）
+bool measure_chunk(const audio_chunk& chunk, double* rms, double* peaks)
+{
+    const auto channels = static_cast<int>(chunk.get_channels());
+    const auto samples = static_cast<size_t>(chunk.get_sample_count());
+    const auto* data = chunk.get_data();
+    if (channels <= 0 || samples == 0 || !data)
+        return false;
+    for (int side = 0; side < 2; ++side) {
+        const auto channel = std::min(side, channels - 1);
+        double sum = 0;
+        double peak = 0;
+        for (size_t n = 0; n < samples; ++n) {
+            const double value = data[n * channels + channel];
+            sum += value * value;
+            peak = std::max(peak, std::abs(value));
+        }
+        rms[side] = std::sqrt(sum / samples);
+        peaks[side] = peak;
+    }
+    return true;
+}
+
+#if defined(NOCTURNE_BUILD_DEV)
+// 開發版：強制自己讀時，每格記 fb2k 與自己轉的 RMS（dBFS），給 219 對照音量與時間差（計畫書 Step 5）；
+// 每 2 秒寫一次 profile\nocturne_dsd_diag.log
+void log_dsd(const double* fb2k_rms, const double* own_rms, double position)
+{
+    static std::string buffer;
+    static ULONGLONG last_flush{};
+    const auto db = [](double value) { return 20.0 * std::log10(std::max(value, 1e-9)); };
+    buffer += fmt::format("{} {:.4f} {:.2f} {:.2f} {:.2f} {:.2f}\n", GetTickCount64(), position, db(fb2k_rms[0]),
+        db(fb2k_rms[1]), db(own_rms[0]), db(own_rms[1]));
+    const auto now = GetTickCount64();
+    if (now - last_flush < 2000)
+        return;
+    last_flush = now;
+    pfc::string8 profile;
+    if (!filesystem::g_get_native_path(core_api::get_profile_path(), profile))
+        return;
+    const auto path = mmh::to_utf16(profile.c_str()) + L"\\nocturne_dsd_diag.log";
+    FILE* file{};
+    if (_wfopen_s(&file, path.c_str(), L"ab") == 0 && file) {
+        fwrite(buffer.data(), 1, buffer.size(), file);
+        fclose(file);
+    }
+    buffer.clear();
+}
+#endif
+
 // 讀這一格的音量，更新兩支指針；有動到要重畫就傳回 true
 bool update_needles(State& state, double dt)
 {
@@ -2560,28 +2657,28 @@ bool update_needles(State& state, double dt)
         double now{};
         audio_chunk_impl chunk;
         const auto window = std::clamp(dt, 0.016, 0.05);
-        if (state.stream && state.stream->get_absolute_time(now)
-            && state.stream->get_chunk_absolute(chunk, now - window, window)) {
-            const auto channels = static_cast<int>(chunk.get_channels());
-            const auto samples = static_cast<size_t>(chunk.get_sample_count());
-            const auto* data = chunk.get_data();
-            if (channels > 0 && samples > 0 && data) {
-                for (int side = 0; side < 2; ++side) {
-                    const auto channel = std::min(side, channels - 1);
-                    double sum = 0;
-                    double peak = 0;
-                    for (size_t n = 0; n < samples; ++n) {
-                        const double value = data[n * channels + channel];
-                        sum += value * value;
-                        peak = std::max(peak, std::abs(value));
-                    }
-                    rms[side] = std::sqrt(sum / samples);
-                    peaks[side] = peak;
-                }
-                if (tuning.automatic)
-                    update_auto_reference(state, dt, rms);
+        bool measured = state.stream && state.stream->get_absolute_time(now)
+            && state.stream->get_chunk_absolute(chunk, now - window, window) && measure_chunk(chunk, rms, peaks);
+
+        // 純 DSD 時 fb2k 給的是全 0：改用自己讀檔轉出來的同一段（播放位置往前 window 秒）
+        metadb_handle_ptr track;
+        if (use_dsd_source(state, dt, !measured || (peaks[0] == 0 && peaks[1] == 0), track)) {
+            [[maybe_unused]] const double fb2k_rms[2]{rms[0], rms[1]};
+            const auto position = dsd_source::playback_seconds();
+            audio_chunk_impl own;
+            const auto samples = static_cast<size_t>(window * dsd_source::output_rate);
+            measured = dsd_source::read(track, position, samples, own) && measure_chunk(own, rms, peaks);
+            if (!measured) {
+                rms[0] = rms[1] = 0;
+                peaks[0] = peaks[1] = 0;
             }
+#if defined(NOCTURNE_BUILD_DEV)
+            if (dsd_source::forced())
+                log_dsd(fb2k_rms, rms, position);
+#endif
         }
+        if (measured && tuning.automatic)
+            update_auto_reference(state, dt, rms);
     }
 
     const auto reference = tuning.automatic ? state.auto_reference : tuning.reference_dbfs;
@@ -2803,8 +2900,33 @@ bool update_spectrum(State& state, double dt)
         }
         double now{};
         auto& chunk = state.spectrum_chunk;
-        if (state.spectrum_stream.is_valid() && state.spectrum_stream->get_absolute_time(now)
-            && state.spectrum_stream->get_spectrum_absolute(chunk, now, spec_fft_size)) {
+        bool got = state.spectrum_stream.is_valid() && state.spectrum_stream->get_absolute_time(now)
+            && state.spectrum_stream->get_spectrum_absolute(chunk, now, spec_fft_size);
+
+        // 純 DSD 時 fb2k 給的頻譜是全 0：自己讀檔轉出 spec_fft_size 個樣本（以播放位置為中心），
+        // 交給 fb2k 的 chunk_to_spectrum 算，跟平常同一套 FFT 與正規化，後面的分頻帶、斜率、自動增益都不用改
+        const auto spectrum_silent = [&chunk] {
+            const auto* bins = chunk.get_data();
+            const auto count = static_cast<size_t>(chunk.get_sample_count()) * std::max(1u, chunk.get_channels());
+            for (size_t i = 0; bins && i < count; ++i)
+                if (bins[i] > 1e-7f)
+                    return false;
+            return true;
+        };
+        metadb_handle_ptr track;
+        if (use_dsd_source(state, dt, !got || spectrum_silent(), track)) {
+            got = false;
+            const auto half = spec_fft_size / 2.0 / dsd_source::output_rate;
+            visualisation_stream_v3::ptr converter;
+            audio_chunk_impl own;
+            if (state.spectrum_stream.is_valid() && state.spectrum_stream->service_query_t(converter)
+                && dsd_source::read(track, dsd_source::playback_seconds() + half, spec_fft_size, own)) {
+                converter->chunk_to_spectrum(own, chunk, half);
+                got = true;
+            }
+        }
+
+        if (got) {
             const auto* data = chunk.get_data();
             const auto bins = static_cast<int>(chunk.get_sample_count());
             const auto channels = std::max(1u, chunk.get_channels());

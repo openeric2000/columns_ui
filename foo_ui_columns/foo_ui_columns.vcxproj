@@ -455,6 +455,7 @@
     <ClCompile Include="playlist_item_helpers.cpp" />
     <ClCompile Include="orphan_playback.cpp" />
     <ClCompile Include="cover_line.cpp" />
+    <ClCompile Include="now_playing_dsd_source.cpp" />
     <ClCompile Include="nocturne_segment.cpp" />
     <ClCompile Include="rebar_band.cpp" />
     <ClCompile Include="replaygain_mode.cpp" />
@@ -598,6 +599,7 @@
     <ClInclude Include="system_tray.h" />
     <ClInclude Include="playlist_item_helpers.h" />
     <ClInclude Include="cover_line.h" />
+    <ClInclude Include="now_playing_dsd_source.h" />
     <ClInclude Include="nocturne_segment.h" />
     <ClInclude Include="menu_button.h" />
     <ClInclude Include="rebar_band.h" />

@@ -256,6 +256,9 @@
     <ClCompile Include="cover_line.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="now_playing_dsd_source.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="nocturne_segment.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -816,6 +819,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="cover_line.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_dsd_source.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_segment.h">
