@@ -2127,6 +2127,35 @@ wil::unique_hbitmap FlatSplitterPanel::s_capture_now_playing_stage(RECT& screen_
     return capture_now_playing_area(owner, screen_rect);
 }
 
+namespace {
+// 從別的視窗點播放列切回 fb2k 的那一下（2026-11-17）：
+// 播放列整條是同一個 ESLyric 視窗，播放鍵、下一首也畫在裡面，所以不能整下點擊吃掉，只擋「切換播放頁」這個指令。
+// - s_activation_pending：滑鼠啟用訊息時 fb2k 不在前景，等著配給接下來的左鍵按下
+// - s_activation_click：目前這一下是切回來的那一下
+// - s_activation_up_tick：這一下放開的時間（還按著是 0）。ESLyric 若晚一點才執行指令也擋得到，
+//   但放開超過 1 秒就不算了，免得之後用快速鍵切換時被誤擋
+bool s_activation_pending{};
+bool s_activation_click{};
+DWORD s_activation_up_tick{};
+
+// fb2k 主視窗或它自己的小視窗（設定、提示框、選單卡片等擁有者是主視窗的）在前景，就算 fb2k 在前面
+bool is_own_window_foreground(HWND wnd)
+{
+    const auto root = GetAncestor(wnd, GA_ROOT);
+    const auto foreground = GetForegroundWindow();
+    return foreground && (foreground == root || GetAncestor(foreground, GA_ROOTOWNER) == root);
+}
+} // namespace
+
+bool FlatSplitterPanel::s_consume_activation_click()
+{
+    if (!s_activation_click)
+        return false;
+
+    s_activation_click = false;
+    return !(s_activation_up_tick && GetTickCount() - s_activation_up_tick > 1000);
+}
+
 LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
     HWND wnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR id, DWORD_PTR ref_data)
 {
@@ -2187,11 +2216,21 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
                 return 0;
         }
         return forward_menu_message();
+    case WM_MOUSEACTIVATE:
+        // 啟用訊息在左鍵按下之前送來，這時前景還是別的視窗
+        if (HIWORD(lp) == WM_LBUTTONDOWN)
+            s_activation_pending = !is_own_window_foreground(wnd);
+        break;
     case WM_LBUTTONDOWN:
         // 新的一下按下：上一次關選單那一下的放開沒送到這裡（例如在別的視窗放開），不再等它
         s_swallow_lbutton_up = false;
+        s_activation_click = s_activation_pending;
+        s_activation_pending = false;
+        s_activation_up_tick = 0;
         break;
     case WM_LBUTTONUP:
+        if (s_activation_click)
+            s_activation_up_tick = GetTickCount() | 1;
         if (s_swallow_lbutton_up) {
             s_swallow_lbutton_up = false;
             return 0;
@@ -2199,6 +2238,9 @@ LRESULT CALLBACK FlatSplitterPanel::s_now_playing_bar_subclass_proc(
         break;
     case WM_LBUTTONDBLCLK:
         s_swallow_lbutton_up = false;
+        // 雙擊的第二下一定是 fb2k 已經在前面時按的
+        s_activation_click = false;
+        s_activation_pending = false;
         // ESLyric 雙擊固定會進內建全螢幕（沒有設定可關），所以雙擊一律不交給它，改當成一般的按下。
         // 不能把剛切換後的第二下吞掉：連點切換按鈕時，每隔一下的點擊會被 Windows 判成雙擊，
         // 吞掉就變成每隔一下沒反應（2026-11-02 錄影：74 下點擊只有 43 次切換）。代價是誤雙擊會開了又關

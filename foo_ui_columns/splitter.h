@@ -107,6 +107,9 @@ public:
     // 展開狀態只存在記憶體，重開一律收合
     static bool s_toggle_now_playing();
     static bool s_is_now_playing_expanded();
+    // 自編版新增（2026-11-17）：從別的視窗點播放列切回 fb2k 的那一下，只把視窗叫到前面，不收放展開頁。
+    // 是這一下觸發的「切換播放頁」就傳回 true（同時清掉記號），呼叫端要略過切換
+    static bool s_consume_activation_click();
     // 自編版新增（下一首提示）：展開頁已經完全展開（沒有動畫、沒有截圖視窗）時，傳回展開頁在螢幕上的位置與它所在的主視窗
     static bool s_get_now_playing_stage(RECT& screen_rect, HWND& owner);
     // 自編版新增（停止畫面）：展開頁已經完全展開時，截下展開頁目前的畫面（跟 screen_rect 一樣大）；不能截就傳回空的

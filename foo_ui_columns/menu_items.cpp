@@ -265,6 +265,10 @@ void put_head_back()
 const MainMenuCommand toggle_now_playing_view{toggle_now_playing_view_id, nocturne_text::toggle_now_playing_name,
     nocturne_text::toggle_now_playing_description,
     [] {
+        // 從別的視窗點播放列切回來的那一下：只把 fb2k 叫到前面，不收放（2026-11-17）
+        if (FlatSplitterPanel::s_consume_activation_click())
+            return;
+
         const auto playback = playback_control::get();
 
         if (!FlatSplitterPanel::s_is_now_playing_expanded()) {
