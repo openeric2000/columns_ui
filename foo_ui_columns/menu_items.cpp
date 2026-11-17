@@ -777,7 +777,7 @@ long long days_from_civil(int year, int month, int day)
 
 // %cui_last_played_ago% 用（2026-11-14）：把 foo_playcount 的 %last_played%（YYYY-MM-DD HH:MM:SS）換成相對寫法。
 // ESLyric 的標題格式拿不到目前日期，所以在這裡算；沒播過（N/A）或讀不懂時回傳空值，佈局用 [ ] 整行藏起來。
-// 只在被要值的當下算，跨過午夜時要等那首歌的資訊重算（換歌、播放次數更新）才會從「今天」變「昨天」
+// 只在被要值的當下算；跨過午夜由檔尾的 MidnightRefresh 叫 ESLyric 重算，「今天」才會變「昨天」
 std::optional<std::string> format_last_played_ago(metadb_handle* handle)
 {
     static titleformat_object::ptr script;
@@ -1515,5 +1515,54 @@ void refresh_layout_fields()
     if (playlist_manager::get()->activeplaylist_get_focus_item_handle(track) && track.is_valid())
         metadb_io::get()->dispatch_refresh(track);
 }
+
+namespace {
+
+// 跨過午夜（2026-11-17）：%cui_last_played_ago% 只在被要值時算，日期換了要叫 ESLyric 重算，「今天 23:50」才會變「昨天 23:50」。
+// 每分鐘看一次日期，不排「到午夜」的計時器：睡眠、休眠中跨過午夜時，喚醒後一分鐘內也會補上
+class MidnightRefresh : public initquit {
+public:
+    void on_init() override
+    {
+        m_day = today();
+        m_timer = SetTimer(nullptr, 0, 60 * 1000, on_timer);
+        s_instance = this;
+    }
+
+    void on_quit() override
+    {
+        if (m_timer)
+            KillTimer(nullptr, m_timer);
+        m_timer = 0;
+        s_instance = nullptr;
+    }
+
+private:
+    static uint32_t today()
+    {
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        return now.wYear * 10000u + now.wMonth * 100u + now.wDay;
+    }
+
+    static void CALLBACK on_timer(HWND, UINT, UINT_PTR, DWORD)
+    {
+        if (!s_instance)
+            return;
+        const auto day = today();
+        if (day == s_instance->m_day)
+            return;
+        s_instance->m_day = day;
+        refresh_layout_fields();
+    }
+
+    inline static MidnightRefresh* s_instance{};
+    UINT_PTR m_timer{};
+    uint32_t m_day{};
+};
+
+initquit_factory_t<MidnightRefresh> midnight_refresh;
+
+} // namespace
 
 } // namespace cui::main_menu
