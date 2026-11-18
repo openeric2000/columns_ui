@@ -954,19 +954,28 @@ std::optional<std::string> text_for(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 18; }
+    t_uint32 get_field_count() override { return 19; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
             "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak",
-            "cui_play_rank"};
+            "cui_play_rank", "cui_list_marquee"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // %cui_list_marquee%：播放清單框選追蹤中（在沒選取的列或空白處按住左鍵、還沒放開）時為 1，其他時候不存在（2026-11-18）。
+        // 標頭網頁讀它：這段期間先不換封面，放開才換（每次要封面都會卡住 fb2k 主執行緒一下）
+        if (index == 18) {
+            if (!uih::ListView::s_is_marquee_active())
+                return false;
+            out->write(titleformat_inputtypes::meta, "1");
+            return true;
+        }
+
         // %cui_repeat_streak%：正在播的這首這次開 fb2k 以來連續播了幾次（播滿一分鐘才算，2 以上才存在；2026-11-17）
         if (index == 16) {
             if (!handle)
