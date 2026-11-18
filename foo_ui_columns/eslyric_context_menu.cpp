@@ -110,13 +110,16 @@ void rearrange(HMENU menu)
         if (item.info.dwItemData == more_item_marker)
             return;
 
+    // 認得「搜尋歌詞」才動（正在播放時的選單才有；沒播放時的精簡選單照原樣）。
+    // 「儲存歌詞至」「儲存歌詞」「調整位移」只有載到歌詞時才有（2026-11-18 主環境：沒歌詞的歌選單裡沒有它們，
+    // 原本兩項都要認得才動，結果整個選單沒整理），有就照規則放，沒有就跳過
     auto* search = find(L"搜尋歌詞");
-    auto* save_to = find(L"儲存歌詞至");
-    if (!search || !save_to)
+    if (!search)
         return;
 
+    auto* save_to = find(L"儲存歌詞至");
     auto* save = find(L"儲存歌詞");
-    const auto configured_directory_id = find_configured_directory_id(*save_to);
+    const auto configured_directory_id = save_to ? find_configured_directory_id(*save_to) : std::nullopt;
 
     constexpr std::wstring_view kept_keys[]{L"調整位移", L"開啟歌詞所在目錄", L"編輯歌詞", L"重載歌詞", L"搜尋歌詞"};
     auto* now_playing = find(L"正在播放");
@@ -134,6 +137,11 @@ void rearrange(HMENU menu)
     } else if (save) {
         top.push_back(save);
     }
+
+    // 沒歌詞的選單（沒有「儲存歌詞至」）最上面多留「開啟歌詞...」（使用者 11/18 指定：開啟、編輯、重載、搜尋四項）
+    if (!save_to)
+        if (auto* open = find(L"開啟歌詞"))
+            top.push_back(open);
 
     for (const auto key : kept_keys)
         if (auto* item = find(key))
