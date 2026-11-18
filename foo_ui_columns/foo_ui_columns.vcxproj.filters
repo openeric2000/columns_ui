@@ -256,6 +256,9 @@
     <ClCompile Include="eslyric_search_owner.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="eslyric_context_menu.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="cover_line.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>

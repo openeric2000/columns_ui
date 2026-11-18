@@ -244,6 +244,9 @@ inline constexpr char error_change_failed[] = "Could not change the font: {}";
 inline constexpr char failure_item[] = "\n{} ({})";
 inline constexpr char failures_message[] = "\n\nThese files were not updated. Please edit them in Notepad:{}";
 
+// ESLyric 右鍵選單：不常用的項目收進這個子選單（eslyric_context_menu.cpp）
+inline constexpr wchar_t eslyric_menu_more[] = L"More";
+
 #else
 
 // 選單（View/Layout）
@@ -466,6 +469,9 @@ inline constexpr auto error_no_usable_style = "這個字型沒有可以用的樣
 inline constexpr char error_change_failed[] = "換字型失敗：{}";
 inline constexpr char failure_item[] = "\n{}（{}）";
 inline constexpr char failures_message[] = "\n\n下面的檔案沒有換到，要自己用記事本改：{}";
+
+// ESLyric 右鍵選單：不常用的項目收進這個子選單（eslyric_context_menu.cpp）
+inline constexpr wchar_t eslyric_menu_more[] = L"更多";
 
 #endif
 

@@ -455,6 +455,7 @@
     <ClCompile Include="playlist_item_helpers.cpp" />
     <ClCompile Include="orphan_playback.cpp" />
     <ClCompile Include="eslyric_search_owner.cpp" />
+    <ClCompile Include="eslyric_context_menu.cpp" />
     <ClCompile Include="cover_line.cpp" />
     <ClCompile Include="now_playing_dsd_source.cpp" />
     <ClCompile Include="nocturne_segment.cpp" />
