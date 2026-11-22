@@ -693,6 +693,18 @@ HWND create_overlay(HWND owner, const RECT& screen)
     return wnd;
 }
 
+// 蓋層在前後順序裡要插在誰的下面，才會緊貼在主視窗正上方（2026-11-22）。
+// 新顯示的視窗 Windows 一律排到整個桌面最上面，不管擁有者在哪：fb2k 被瀏覽器蓋住時，
+// 自然換歌的蓋層（結束前先截圖蓋上）會閃到瀏覽器前面，約半秒後淡出。
+// 主視窗上面是「永遠在最上層」的視窗（或就是蓋層自己）時用 HWND_TOP：插在最上層視窗後面會讓蓋層也變成最上層
+HWND overlay_insert_after(HWND owner, HWND overlay)
+{
+    const auto above = owner ? GetWindow(owner, GW_HWNDPREV) : nullptr;
+    if (!above || above == overlay || (GetWindowLongPtr(above, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        return HWND_TOP;
+    return above;
+}
+
 // 蓋層：截下來的舊畫面（封面方塊時底下再墊一層內插的底），蓋上去、等它真的合成到螢幕上才回傳
 bool show_overlay(Graphics& g, Transition& transition, HWND owner, Gdiplus::Bitmap& before, Gdiplus::Bitmap* base)
 {
@@ -720,7 +732,9 @@ bool show_overlay(Graphics& g, Transition& transition, HWND owner, Gdiplus::Bitm
 
     if (FAILED(g.dcomp->Commit()))
         return false;
-    ShowWindow(transition.wnd, SW_SHOWNOACTIVATE);
+    // 不用 ShowWindow：它會把蓋層排到整個桌面最上面（見 overlay_insert_after）
+    SetWindowPos(transition.wnd, overlay_insert_after(owner, transition.wnd), 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     g.dcomp->WaitForCommitCompletion();
     [[maybe_unused]] const auto hr = DwmFlush();
     return true;
