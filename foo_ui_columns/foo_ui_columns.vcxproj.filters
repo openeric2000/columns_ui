@@ -1130,6 +1130,9 @@
     <ClInclude Include="nocturne_surface.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="nocturne_dcomp.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClCompile Include="nocturne_tooltip.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>

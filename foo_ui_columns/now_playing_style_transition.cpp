@@ -4,14 +4,10 @@
 #include "nocturne_build_info.h"
 #endif
 
-#include <d3d11.h>
-#include <dcomp.h>
-
+#include "nocturne_dcomp.h"
 #include "now_playing_style_transition.h"
 #include "now_playing_cover_zoom.h"
 #include "splitter.h"
-
-#pragma comment(lib, "dcomp.lib")
 
 // 展開頁封面⇄資訊卡、切換顯示內容的過渡動畫，說明見 now_playing_style_transition.h
 
@@ -91,69 +87,10 @@ using Signature = std::vector<int>;
 // 加上等新畫面時每次截圖約 30 ms，整段只有約 14 格、格間隔 34～50 ms（使用者說不順）。
 // 改成把舊、新兩張圖各上傳一次，縮放與透明度交給 DWM 的動畫（IDCompositionAnimation）：每格不花 CPU、照螢幕更新跑，
 // 主執行緒忙（ESLyric 重排版面、截圖判斷）也不會停住
-struct Graphics {
-    wil::com_ptr<ID3D11Device> d3d;
-    wil::com_ptr<ID3D11DeviceContext> context;
-    wil::com_ptr<IDCompositionDevice> dcomp;
-};
-
-Graphics* graphics()
-{
-    // 不在結束時釋放（DLL 卸載時再碰 D3D 可能出事），整個行程共用一份
-    static auto* shared = new Graphics;
-    if (shared->dcomp) {
-        BOOL valid{};
-        if (SUCCEEDED(shared->dcomp->CheckDeviceState(&valid)) && valid)
-            return shared;
-        *shared = {};
-    }
-
-    for (const auto driver : {D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP}) {
-        if (SUCCEEDED(D3D11CreateDevice(nullptr, driver, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
-                D3D11_SDK_VERSION, shared->d3d.put(), nullptr, shared->context.put())))
-            break;
-    }
-    if (!shared->d3d)
-        return nullptr;
-
-    const auto dxgi = shared->d3d.try_query<IDXGIDevice>();
-    if (!dxgi || FAILED(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(shared->dcomp.put())))) {
-        *shared = {};
-        return nullptr;
-    }
-    return shared;
-}
-
-// 一張圖（預乘透明度的 BGRA）上傳成 DirectComposition 的內容
-wil::com_ptr<IDCompositionSurface> make_surface(Graphics& g, Gdiplus::Bitmap& bitmap)
-{
-    const auto width = bitmap.GetWidth();
-    const auto height = bitmap.GetHeight();
-    if (width == 0 || height == 0)
-        return {};
-
-    wil::com_ptr<IDCompositionSurface> surface;
-    if (FAILED(g.dcomp->CreateSurface(
-            width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, surface.put())))
-        return {};
-
-    Gdiplus::BitmapData data{};
-    const Gdiplus::Rect all(0, 0, static_cast<INT>(width), static_cast<INT>(height));
-    if (bitmap.LockBits(&all, Gdiplus::ImageLockModeRead, PixelFormat32bppPARGB, &data) != Gdiplus::Ok)
-        return {};
-    const auto unlock = wil::scope_exit([&] { bitmap.UnlockBits(&data); });
-
-    wil::com_ptr<ID3D11Texture2D> texture;
-    POINT offset{};
-    if (FAILED(surface->BeginDraw(nullptr, IID_PPV_ARGS(texture.put()), &offset)))
-        return {};
-    const D3D11_BOX box{static_cast<UINT>(offset.x), static_cast<UINT>(offset.y), 0, static_cast<UINT>(offset.x) + width,
-        static_cast<UINT>(offset.y) + height, 1};
-    g.context->UpdateSubresource(texture.get(), 0, &box, data.Scan0, static_cast<UINT>(data.Stride), 0);
-    if (FAILED(surface->EndDraw()))
-        return {};
-    return surface;
-}
+// 2026-11-22：裝置、上傳圖片、分段曲線搬到 nocturne_dcomp.h，跟輸出裝置顯示的滑動動畫共用同一個裝置
+using nocturne_dcomp::Graphics;
+using nocturne_dcomp::graphics;
+using nocturne_dcomp::make_surface;
 
 // 一層：圖＋以封面中心為準的縮放＋透明度
 struct Layer {
@@ -186,35 +123,14 @@ std::optional<Layer> make_layer(Graphics& g, Gdiplus::Bitmap& bitmap, const RECT
 // 所以把曲線切 12 段，每段用兩端的值與斜率做 Hermite 內插（跟真曲線差不到 0.1%）
 wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to, double length_ms = duration_ms)
 {
-    wil::com_ptr<IDCompositionAnimation> animation;
-    if (FAILED(g.dcomp->CreateAnimation(animation.put())))
-        return {};
-
-    const double total = length_ms / 1000.0;
-    const auto value = [&](double x) { return from + (to - from) * eased(x); };
-    const auto slope = [&](double x) {
+    // 這條 bezier 沒有現成的導數公式，用數值微分（跟搬出去之前一樣）
+    const auto slope = [](double x) {
         constexpr double h = 1e-4;
         const auto a = std::max(0.0, x - h);
         const auto b = std::min(1.0, x + h);
-        return (value(b) - value(a)) / ((b - a) * total);
+        return (eased(b) - eased(a)) / (b - a);
     };
-
-    constexpr int segments = 12;
-    for (int i = 0; i < segments; ++i) {
-        const auto x0 = static_cast<double>(i) / segments;
-        const auto x1 = static_cast<double>(i + 1) / segments;
-        const auto h = (x1 - x0) * total;
-        const auto v0 = value(x0);
-        const auto v1 = value(x1);
-        const auto d0 = slope(x0);
-        const auto d1 = slope(x1);
-        const auto c = (3 * (v1 - v0) / h - 2 * d0 - d1) / h;
-        const auto d = (2 * (v0 - v1) / h + d0 + d1) / (h * h);
-        animation->AddCubic(x0 * total, static_cast<float>(v0), static_cast<float>(d0), static_cast<float>(c),
-            static_cast<float>(d));
-    }
-    animation->End(total, to);
-    return animation;
+    return nocturne_dcomp::make_animation(g, from, to, length_ms, eased, slope);
 }
 
 // 讓一層照動畫縮放、淡入淡出（scale_from == scale_to 就不縮放）

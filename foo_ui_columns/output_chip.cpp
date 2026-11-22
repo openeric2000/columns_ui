@@ -2,10 +2,15 @@
 
 #include <timeapi.h>
 
+#if __has_include("nocturne_build_info.h")
+#include "nocturne_build_info.h"
+#endif
+
 #include "output_chip.h"
 #include "fb2k_misc.h"
 #include "font_utils.h"
 #include "next_track_toast.h"
+#include "nocturne_dcomp.h"
 #include "nocturne_surface.h"
 #include "nocturne_text.h"
 #include "volume_chip.h"
@@ -26,6 +31,50 @@ constexpr UINT slide_interval_ms = 10;
 // 開始播放時裝置顯示往左推出來的時間，以及停止後往右縮回停止鈕旁的時間（回去慢一點、柔和一點：先慢後快再慢，2026-11-05 使用者指示）
 constexpr double slide_out_seconds = 0.22;
 constexpr double slide_back_seconds = 0.6;
+// 滑動蓋層（DirectComposition，2026-11-22）的視窗類別；動畫跑完再多等這麼久才換回分層視窗（DWM 最後一格要先合成上去）
+constexpr wchar_t slide_class_name[] = L"columns_ui_output_chip_slide";
+constexpr UINT slide_finish_margin_ms = 40;
+
+// 推出去：快起慢停（ease-out cubic，本身是三次多項式，DirectComposition 一段就能原樣表達）；
+// 縮回去：兩頭都慢的 smootherstep（五次，切段近似，差距遠小於 1 px）。t 是時間比例 0～1
+double slide_ease(bool back, double t)
+{
+    return back ? t * t * t * (t * (t * 6.0 - 15.0) + 10.0) : 1.0 - std::pow(1.0 - t, 3.0);
+}
+
+double slide_ease_slope(bool back, double t)
+{
+    return back ? 30.0 * t * t * (1.0 - t) * (1.0 - t) : 3.0 * (1.0 - t) * (1.0 - t);
+}
+
+#if defined(NOCTURNE_BUILD_DEV)
+// 開發版診斷（2026-11-22）：每段滑動記開始、蓋層準備花多久、結束時 DWM 合成了幾格、掉了幾格，寫到 profile\nocturne_chip_diag.log
+void chip_diag(const std::string& text)
+{
+    SYSTEMTIME time{};
+    GetLocalTime(&time);
+    const auto line = fmt::format("{:02}:{:02}:{:02}.{:03}  {}\r\n", time.wHour, time.wMinute, time.wSecond,
+        time.wMilliseconds, text);
+    const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+    const auto path = std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr())
+        + L"\\nocturne_chip_diag.log";
+    const auto file = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    DWORD written{};
+    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+    CloseHandle(file);
+}
+
+DWM_TIMING_INFO dwm_timing()
+{
+    DWM_TIMING_INFO info{};
+    info.cbSize = sizeof(info);
+    DwmGetCompositionTimingInfo(nullptr, &info);
+    return info;
+}
+#endif
 
 // 尺寸（DIP，乘上系統縮放才是像素），照預覽 mockups\fb2k-output-device-bottombar-mockup.html
 constexpr int chip_height = 36;
@@ -1024,19 +1073,34 @@ bool g_long_track{};
 // 視窗固定罩住裝置顯示會滑動的整段範圍（開始播放時推到時間文字左邊、停止時縮回停止鈕旁），裝置顯示畫在視窗裡面、跟著動畫改位置，
 // 其餘像素全透明，滑鼠會穿過去、底下的 ESLyric 畫面也不用重畫。
 // 原本是每格都移動視窗本身：每移一格，底下露出來的那塊都要請 ESLyric 重畫，看起來又糊又不順（使用者 2026-11-05 回報 FPS 不夠）
+// 2026-11-22 滑動改由 DirectComposition 跑（使用者說往左往右不夠順）：原本每 10 ms 一個 WM_TIMER 在主執行緒重畫一格，
+// 推出去那 0.22 秒正好疊在換歌最忙的時候（ESLyric、網頁標頭、播放統計都在主執行緒重算），WM_TIMER 優先度最低、送不進來，
+// 位置又照時間算，所以會一次跳一大段；10 ms 跟螢幕 16.7 ms 不同步、位置取整數像素也讓步距忽大忽小。
+// 現在滑動時把裝置顯示畫成一張圖、放進一個蓋在上面的 DirectComposition 視窗，位移交給 DWM 照螢幕更新跑（子像素、主執行緒卡住也照跑），
+// 底下的分層視窗這段期間清空；滑完再畫回分層視窗、拿掉蓋層。建不起 DirectComposition 時照舊用計時器
 class Chip {
 public:
     static LRESULT CALLBACK s_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp);
     static Chip* from(HWND wnd) { return reinterpret_cast<Chip*>(GetWindowLongPtr(wnd, GWLP_USERDATA)); }
 
-    void set_bar_rect(const RECT& rect) { m_bar_rect = rect; }
+    void set_bar_rect(const RECT& rect)
+    {
+        // 滑動途中播放列大小變了（拉視窗）：蓋層的位置對不上了，直接停在終點
+        if (m_overlay && !EqualRect(&rect, &m_bar_rect)) {
+            m_bar_rect = rect;
+            end_slide();
+            return;
+        }
+        m_bar_rect = rect;
+    }
     // 裝置清單關掉了（選了、點到外面、Esc 都算）
     void on_menu_closed();
 
     // 開始播放／停止：位置的目標變了，用滑動動畫過去
     void refresh_layout()
     {
-        const auto old_rel = m_current_rel;
+        // 滑動途中：目前位置照同一條曲線算（DirectComposition 的位置在 DWM 那邊，讀不回來）
+        const auto old_position = m_sliding ? slide_position() : static_cast<double>(m_current_rel);
         const auto old_target = m_target_rel;
         const auto was_sliding = m_sliding;
         const auto had_position = m_rel_valid && IsWindowVisible(m_wnd);
@@ -1052,31 +1116,38 @@ public:
             return;
         }
 
-        if (had_position && old_rel != m_target_rel) {
-            m_slide_back = m_target_rel > old_rel;
-            m_slide_from = old_rel;
-            m_slide_current = old_rel;
+        if (had_position && std::lround(old_position) != m_target_rel) {
+            m_slide_back = m_target_rel > old_position;
+            m_slide_from = old_position;
             m_slide_start = std::chrono::steady_clock::now();
             m_sliding = true;
+            // 先把視窗放好（起點的位置）；蓋層照視窗的位置建
+            apply_layout();
+            if (start_overlay_slide())
+                return;
             begin_high_resolution_timer();
             SetTimer(m_wnd, slide_timer_id, slide_interval_ms, nullptr);
-        } else {
-            stop_sliding_timer();
+            return;
         }
 
-        apply_layout();
+        end_slide();
     }
 
-    // 滑動動畫的一格：往目標位置移，到了就停
+    // 計時器：蓋層模式只在滑完時收尾；沒有蓋層（建不起 DirectComposition）時照舊每格往目標位置移，到了就停
     void slide_tick()
     {
-        const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_slide_start).count();
-        const auto t = std::clamp(elapsed / (m_slide_back ? slide_back_seconds : slide_out_seconds), 0.0, 1.0);
-        // 推出去：快起慢停；縮回去：兩頭都慢的 smootherstep，比較柔和
-        const auto eased = m_slide_back ? t * t * t * (t * (t * 6.0 - 15.0) + 10.0) : 1.0 - std::pow(1.0 - t, 3.0);
-        m_slide_current = m_slide_from + static_cast<int>(std::lround((m_target_rel - m_slide_from) * eased));
+        if (m_overlay) {
+            const auto remaining = slide_seconds() * (1.0 - slide_progress());
+            if (remaining <= 0.0) {
+                end_slide();
+                return;
+            }
+            SetTimer(m_wnd, slide_timer_id, static_cast<UINT>(std::ceil(remaining * 1000.0)) + slide_finish_margin_ms,
+                nullptr);
+            return;
+        }
 
-        if (t >= 1.0) {
+        if (slide_progress() >= 1.0) {
             m_sliding = false;
             stop_sliding_timer();
         }
@@ -1091,13 +1162,52 @@ public:
     void on_state_changed()
     {
         m_measure_valid = false;
+        // 滑動途中換了裝置：蓋層上的圖是舊的，直接停在終點、用新的內容畫
+        if (m_overlay) {
+            end_slide();
+            return;
+        }
         apply_layout();
     }
 
-    // 視窗被摧毀前把計時精度還回去
-    void release_timer_resolution() { stop_sliding_timer(); }
+    // 視窗被摧毀前把計時精度還回去、拿掉滑動蓋層
+    void release_timer_resolution()
+    {
+        stop_sliding_timer();
+        destroy_overlay(m_overlay);
+    }
 
 private:
+    // 滑動時蓋在裝置顯示上面的 DirectComposition 視窗（跟裝置顯示的分層視窗同位置同大小，不擋滑鼠）
+    struct SlideOverlay {
+        HWND wnd{};
+        wil::com_ptr<IDCompositionTarget> target;
+        wil::com_ptr<IDCompositionVisual> visual;
+        RECT screen{};
+        int chip_width{};
+#if defined(NOCTURNE_BUILD_DEV)
+        DWM_TIMING_INFO dwm_start{};
+#endif
+    };
+
+    double slide_seconds() const { return m_slide_back ? slide_back_seconds : slide_out_seconds; }
+    double slide_progress() const
+    {
+        const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_slide_start).count();
+        return std::clamp(elapsed / slide_seconds(), 0.0, 1.0);
+    }
+    // 滑動中裝置顯示右緣離播放列右緣的距離（像素，帶小數）
+    double slide_position() const
+    {
+        return m_slide_from + (m_target_rel - m_slide_from) * slide_ease(m_slide_back, slide_progress());
+    }
+
+    bool start_overlay_slide();
+    std::unique_ptr<SlideOverlay> create_overlay(nocturne_dcomp::Graphics& g, const RECT& screen, float offset_x);
+    static void destroy_overlay(std::unique_ptr<SlideOverlay>& overlay);
+    // 停止滑動、停在目標位置（有蓋層時先把分層視窗畫回來、等合成上去才拿掉蓋層，不會閃）
+    void end_slide();
+
     LRESULT on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp);
     void ensure_measure();
     void ensure_time_measure();
@@ -1153,10 +1263,10 @@ private:
     bool m_sliding{};
     // 這一段是往右縮回去（停止）還是往左推出來（開始播放）
     bool m_slide_back{};
-    int m_slide_from{};
-    int m_slide_current{};
+    double m_slide_from{};
     std::chrono::steady_clock::time_point m_slide_start;
     bool m_high_resolution_timer{};
+    std::unique_ptr<SlideOverlay> m_overlay;
     // 裝置顯示在視窗裡的位置（左緣、寬度）
     int m_chip_x{};
     int m_chip_width{};
@@ -1221,7 +1331,7 @@ RECT Chip::compute_layout()
     const auto right_playing_long = time_right - static_cast<int>(std::ceil(m_time_text_width_long)) - dip(time_gap);
 
     m_target_rel = (g_playing ? right_playing : right_stopped) - m_bar_rect.right;
-    m_current_rel = m_sliding ? m_slide_current : m_target_rel;
+    m_current_rel = m_sliding ? static_cast<int>(std::lround(slide_position())) : m_target_rel;
     m_rel_valid = true;
 
     // 名字放不放得下、放多寬，以「小時版」的位置（最左的那端）為準，各種狀態裝置顯示一樣寬
@@ -1257,6 +1367,11 @@ void Chip::apply_layout()
     const auto target = compute_layout();
 
     if (IsRectEmpty(&target)) {
+        if (m_overlay) {
+            m_sliding = false;
+            stop_sliding_timer();
+            destroy_overlay(m_overlay);
+        }
         if (IsWindowVisible(m_wnd)) {
             Panel::hide();
             ShowWindow(m_wnd, SW_HIDE);
@@ -1288,8 +1403,207 @@ void Chip::render()
     if (client.right <= 0 || client.bottom <= 0)
         return;
 
-    present_layered(m_wnd, nullptr, client.right, client.bottom,
-        [&](Gdiplus::Graphics& g) { draw_chip(g, client.bottom); });
+    // 滑動蓋層在的時候，裝置顯示由蓋層畫，這裡整片透明（不然會疊兩份）
+    present_layered(m_wnd, nullptr, client.right, client.bottom, [&](Gdiplus::Graphics& g) {
+        if (!m_overlay)
+            draw_chip(g, client.bottom);
+    });
+}
+
+LRESULT CALLBACK slide_overlay_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_NCHITTEST:
+        // 不擋滑鼠：滑動途中點到的是底下的播放列
+        return HTTRANSPARENT;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    }
+    return DefWindowProc(wnd, msg, wp, lp);
+}
+
+std::unique_ptr<Chip::SlideOverlay> Chip::create_overlay(nocturne_dcomp::Graphics& g, const RECT& screen, float offset_x)
+{
+    static const auto class_registered = [] {
+        WNDCLASSEX window_class{};
+        window_class.cbSize = sizeof(window_class);
+        window_class.lpfnWndProc = slide_overlay_proc;
+        window_class.hInstance = core_api::get_my_instance();
+        window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        window_class.lpszClassName = slide_class_name;
+        return RegisterClassEx(&window_class) != 0;
+    }();
+    if (!class_registered)
+        return {};
+
+    const auto height = wil::rect_height(screen);
+    if (m_chip_width <= 0 || height <= 0)
+        return {};
+
+    // 裝置顯示畫成一張剛好它大小的圖（跟分層視窗用同一個 draw_chip、同樣的反鋸齒設定，像素一模一樣）
+    Gdiplus::Bitmap bitmap(m_chip_width, height, PixelFormat32bppPARGB);
+    {
+        Gdiplus::Graphics canvas(&bitmap);
+        canvas.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        canvas.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
+        canvas.Clear(Gdiplus::Color(0, 0, 0, 0));
+        // draw_chip 會先往右移 m_chip_x，這裡先抵掉
+        canvas.TranslateTransform(static_cast<float>(-m_chip_x), 0.f);
+        draw_chip(canvas, height);
+    }
+    const auto surface = nocturne_dcomp::make_surface(g, bitmap);
+    if (!surface)
+        return {};
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto t_surface = std::chrono::steady_clock::now();
+#endif
+
+    auto overlay = std::make_unique<SlideOverlay>();
+    overlay->screen = screen;
+    overlay->chip_width = m_chip_width;
+
+    // 沒有重新導向點陣圖：畫面完全由 DirectComposition 提供，沒放內容的地方是透明的。掛在主視窗底下，跟著它在最上層
+    overlay->wnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+        slide_class_name, L"", WS_POPUP, screen.left, screen.top, wil::rect_width(screen), height,
+        GetAncestor(m_wnd, GA_ROOT), nullptr, core_api::get_my_instance(), nullptr);
+    if (!overlay->wnd)
+        return {};
+
+    // 關掉 Windows 開視窗時的淡入動畫，一出現就要跟底下的裝置顯示一模一樣
+    BOOL disable_transitions = TRUE;
+    DwmSetWindowAttribute(overlay->wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
+
+    if (FAILED(g.dcomp->CreateTargetForHwnd(overlay->wnd, TRUE, overlay->target.put()))
+        || FAILED(g.dcomp->CreateVisual(overlay->visual.put()))) {
+        destroy_overlay(overlay);
+        return {};
+    }
+    overlay->visual->SetContent(surface.get());
+    // 子像素位移：線性內插（停在整數位置時跟原圖一樣清楚）
+    overlay->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+    overlay->visual->SetOffsetX(offset_x);
+    overlay->visual->SetOffsetY(0.f);
+    if (FAILED(overlay->target->SetRoot(overlay->visual.get())) || FAILED(g.dcomp->Commit())) {
+        destroy_overlay(overlay);
+        return {};
+    }
+
+    // 先在起點蓋上、等它真的合成到螢幕上，呼叫端才清空底下的分層視窗（反過來會閃一格空白）
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto t_show = std::chrono::steady_clock::now();
+#endif
+    ShowWindow(overlay->wnd, SW_SHOWNOACTIVATE);
+    g.dcomp->WaitForCommitCompletion();
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto t_commit = std::chrono::steady_clock::now();
+#endif
+    [[maybe_unused]] const auto hr = DwmFlush();
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto t_flush = std::chrono::steady_clock::now();
+    const auto info = dwm_timing();
+    const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    chip_diag(fmt::format("  overlay window+dcomp={:.1f} ms show+commit={:.1f} ms flush={:.1f} ms refresh={}/{}Hz",
+        ms(t_surface, t_show), ms(t_show, t_commit), ms(t_commit, t_flush), info.rateRefresh.uiNumerator,
+        info.rateRefresh.uiDenominator));
+#endif
+    return overlay;
+}
+
+void Chip::destroy_overlay(std::unique_ptr<SlideOverlay>& overlay)
+{
+    if (!overlay)
+        return;
+    // 先拆掉 DirectComposition 的內容再關視窗
+    overlay->visual.reset();
+    overlay->target.reset();
+    if (overlay->wnd && IsWindow(overlay->wnd))
+        DestroyWindow(overlay->wnd);
+    overlay.reset();
+}
+
+bool Chip::start_overlay_slide()
+{
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto setup_start = std::chrono::steady_clock::now();
+    const char* mode = "reuse";
+#endif
+    auto* g = nocturne_dcomp::graphics();
+    RECT screen{};
+    if (!g || !IsWindowVisible(m_wnd) || !GetWindowRect(m_wnd, &screen) || IsRectEmpty(&screen)) {
+        destroy_overlay(m_overlay);
+        return false;
+    }
+
+    // 視窗裡「裝置顯示左緣」＝ base ＋ 右緣離播放列右緣的距離（compute_layout 的 m_chip_x 算法）
+    const auto base = m_chip_x - m_current_rel;
+    const auto from = static_cast<float>(base + m_slide_from);
+    const auto to = static_cast<float>(base + m_target_rel);
+
+    // 已經有蓋層而且位置、寬度沒變（滑動途中改了目標）：同一張圖換一條動畫就好；不然重建
+    if (!(m_overlay && EqualRect(&m_overlay->screen, &screen) && m_overlay->chip_width == m_chip_width)) {
+#if defined(NOCTURNE_BUILD_DEV)
+        chip_diag(fmt::format("  graphics ready={:.1f} ms",
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - setup_start).count()));
+#endif
+        auto overlay = create_overlay(*g, screen, from);
+        if (!overlay) {
+            destroy_overlay(m_overlay);
+            render();
+            return false;
+        }
+#if defined(NOCTURNE_BUILD_DEV)
+        mode = "new";
+        overlay->dwm_start = dwm_timing();
+#endif
+        auto previous = std::move(m_overlay);
+        m_overlay = std::move(overlay);
+        // 蓋層已經在螢幕上了：清空底下的分層視窗
+        render();
+        destroy_overlay(previous);
+    }
+
+    const auto length_ms = slide_seconds() * 1000.0;
+    const auto back = m_slide_back;
+    const auto animation = nocturne_dcomp::make_animation(
+        *g, from, to, length_ms, [back](double t) { return slide_ease(back, t); },
+        [back](double t) { return slide_ease_slope(back, t); });
+    if (!animation) {
+        end_slide();
+        return true;
+    }
+    m_overlay->visual->SetOffsetX(animation.get());
+    g->dcomp->Commit();
+    // 動畫從 Commit 起算；這邊的曲線（滑動途中改目標、收尾時間）也從這時起算
+    m_slide_start = std::chrono::steady_clock::now();
+    SetTimer(m_wnd, slide_timer_id, static_cast<UINT>(std::ceil(length_ms)) + slide_finish_margin_ms, nullptr);
+
+#if defined(NOCTURNE_BUILD_DEV)
+    chip_diag(fmt::format("slide {} overlay={} from={:.1f} to={:.1f} length={:.0f} ms setup={:.1f} ms",
+        back ? "back" : "out", mode, from, to, length_ms,
+        std::chrono::duration<double, std::milli>(m_slide_start - setup_start).count()));
+#endif
+    return true;
+}
+
+void Chip::end_slide()
+{
+    m_sliding = false;
+    stop_sliding_timer();
+    if (!m_overlay) {
+        apply_layout();
+        return;
+    }
+
+    auto overlay = std::move(m_overlay);
+#if defined(NOCTURNE_BUILD_DEV)
+    const auto dwm = dwm_timing();
+    chip_diag(fmt::format("slide end dwm_frames={} dropped={} missed={}", dwm.cFrame - overlay->dwm_start.cFrame,
+        dwm.cFramesDropped - overlay->dwm_start.cFramesDropped, dwm.cFramesMissed - overlay->dwm_start.cFramesMissed));
+#endif
+    // 分層視窗畫回裝置顯示（在終點），等合成上去才拿掉蓋層
+    apply_layout();
+    [[maybe_unused]] const auto hr = DwmFlush();
+    destroy_overlay(overlay);
 }
 
 void Chip::draw_chip(Gdiplus::Graphics& g, int height) const

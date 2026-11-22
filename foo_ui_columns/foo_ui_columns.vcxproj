@@ -512,6 +512,7 @@
     <ClInclude Include="now_playing_mode_picker.h" />
     <ClInclude Include="popup_dismiss.h" />
     <ClInclude Include="nocturne_surface.h" />
+    <ClInclude Include="nocturne_dcomp.h" />
     <ClCompile Include="nocturne_tooltip.cpp" />
     <ClInclude Include="nocturne_tooltip.h" />
     <ClInclude Include="now_playing_style_transition.h" />
