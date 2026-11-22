@@ -1066,6 +1066,10 @@ constexpr std::string_view open_preferences_marker = "[Nocturne] open-preference
 // - 「[Nocturne] ready」：網頁第一次載入完成（標頭、封面都套用了）。主視窗啟動時先不顯示，收到這句才顯示（開機優化 B，2026-11-06）；
 //   視窗不在等的時候（網頁重新載入、已經顯示）收到只是忽略
 constexpr std::string_view page_ready_marker = "[Nocturne] ready";
+// - 「[Nocturne] albumlist tree pending／built」：自編版 Album list 開機時資料夾樹改在背景建（2026-11-22），
+//   面板建立時說待建、樹放好時說建好了；主視窗有收到待建就等標頭和樹都好了才淡入（見 MainWindow::on_startup_tree_pending）
+constexpr std::string_view album_tree_pending_marker = "[Nocturne] albumlist tree pending";
+constexpr std::string_view album_tree_built_marker = "[Nocturne] albumlist tree built";
 // - 「[Nocturne] tip show <左> <上> <右> <下> <網頁寬> <網頁高> <文字>」：網頁元件的滑鼠提示（2026-11-12）。
 //   座標是網頁裡的實體像素（CSS 像素×devicePixelRatio）；用網頁寬高找出是哪個網頁面板，換成螢幕座標後畫在元件正下方
 //   （nocturne_tooltip.h）。「[Nocturne] tip hide」收起
@@ -1154,7 +1158,17 @@ public:
         }
 
         if (text.find(page_ready_marker) != std::string_view::npos) {
-            fb2k::inMainThread([] { main_window.end_startup_hold("page ready", true); });
+            fb2k::inMainThread([] { main_window.on_startup_page_ready(); });
+            return;
+        }
+
+        if (text.find(album_tree_pending_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { main_window.on_startup_tree_pending(); });
+            return;
+        }
+
+        if (text.find(album_tree_built_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { main_window.on_startup_tree_built(); });
             return;
         }
 

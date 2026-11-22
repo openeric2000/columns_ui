@@ -454,6 +454,33 @@ bool cui::MainWindow::should_hold_startup_show(const WINDOWPLACEMENT& placement,
     return GetModuleHandle(L"foo_webview2.dll") != nullptr;
 }
 
+void cui::MainWindow::on_startup_page_ready()
+{
+    m_startup_page_ready = true;
+    end_startup_hold_if_all_ready();
+}
+
+void cui::MainWindow::on_startup_tree_pending()
+{
+    ++m_startup_trees_pending;
+    m_startup_tree_seen = true;
+}
+
+void cui::MainWindow::on_startup_tree_built()
+{
+    if (m_startup_trees_pending > 0)
+        --m_startup_trees_pending;
+    end_startup_hold_if_all_ready();
+}
+
+void cui::MainWindow::end_startup_hold_if_all_ready()
+{
+    if (!m_startup_page_ready || m_startup_trees_pending > 0)
+        return;
+
+    end_startup_hold(m_startup_tree_seen ? "page ready + album list" : "page ready", true);
+}
+
 void cui::MainWindow::end_startup_hold(const char* reason, bool fade)
 {
     if (!m_startup_hold_active)

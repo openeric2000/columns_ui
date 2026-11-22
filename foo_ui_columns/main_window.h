@@ -67,6 +67,12 @@ public:
     void end_startup_hold(const char* reason = "other", bool fade = false);
     // 視窗還隱形著、在等網頁回報「好了」（等完會淡入；最多等到逾時）
     bool is_startup_hold_active() const { return m_startup_hold_active; }
+    // 開機時要等的兩邊（2026-11-22）：標頭網頁回報好了；自編版 Album list 面板建立時說「資料夾樹待建」、
+    // 放好樹時說「建好了」。有收到「待建」就兩邊都好才淡入，免得淡入途中左邊的樹才跳出來；
+    // 沒有 Album list（或是舊版，不會說「待建」）就跟以前一樣只等網頁
+    void on_startup_page_ready();
+    void on_startup_tree_pending();
+    void on_startup_tree_built();
     void finish_startup_fade();
     void shutdown();
     void on_query_capability();
@@ -146,6 +152,10 @@ private:
     void start_startup_hold_watchdog(DWORD wait_ms);
     void stop_startup_hold_watchdog();
     bool m_startup_hold_active{};
+    bool m_startup_page_ready{};
+    int m_startup_trees_pending{};
+    bool m_startup_tree_seen{};
+    void end_startup_hold_if_all_ready();
     ULONGLONG m_startup_hold_started_ms{};
     wil::unique_handle m_startup_hold_cancel;
     std::thread m_startup_hold_watchdog;
