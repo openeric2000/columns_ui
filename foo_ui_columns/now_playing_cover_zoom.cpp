@@ -455,9 +455,10 @@ private:
             return {};
 
         // 純封面模式（2026-11-12 使用者要求跟封面＋歌詞一樣用右下角小按鈕看大圖）：位置照標記的 solo-cover／solo-info，
-        // 沒寫就不顯示（舊版面靠點封面開大圖）。其他模式的資訊卡（樣式 3）沒有封面
+        // 沒寫就不顯示（舊版面靠點封面開大圖）。資訊卡（樣式 3）沒有封面，不顯示；
+        // 純封面模式 2026-11-22 起也能點封面切資訊卡，所以不分模式
         const auto solo = main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover;
-        if (!solo && main_menu::get_now_playing_style() == 3)
+        if (main_menu::get_now_playing_style() == 3)
             return {};
 
         // GDI+ 字型表還在背景暖機時不在主執行緒建字型（同音量圖示），暖機做完會重排

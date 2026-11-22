@@ -7,6 +7,7 @@
 #include "nocturne_dcomp.h"
 #include "now_playing_style_transition.h"
 #include "now_playing_cover_zoom.h"
+#include "menu_items.h"
 #include "splitter.h"
 
 // 展開頁封面⇄資訊卡、切換顯示內容的過渡動畫，說明見 now_playing_style_transition.h
@@ -794,7 +795,11 @@ void run(std::function<void()> apply)
         return;
     }
 
-    const auto cover_in_stage = cover_zoom::cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage));
+    // 純封面模式（2026-11-22 起也能點封面切資訊卡）：動畫範圍是置中的大封面
+    const auto solo = main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover;
+    const auto cover_in_stage = solo
+        ? cover_zoom::solo_cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage))
+        : cover_zoom::cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage));
     if (!cover_in_stage) {
         apply();
         return;
