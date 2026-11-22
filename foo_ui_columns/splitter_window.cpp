@@ -10,6 +10,7 @@
 #include "now_playing_vu_meter.h"
 #include "cover_line.h"
 #include "nocturne_build_info.h"
+#include "nocturne_dcomp.h"
 
 namespace cui::panels::splitter {
 
@@ -135,6 +136,78 @@ struct NowPlayingSnapshot {
     // 展開頁在螢幕上的位置、展開頁截圖目前往下偏移多少
     RECT stage_rect{};
     int offset{};
+
+    // 2026-11-23：內容改由 DirectComposition 提供時（target 不是空的），兩張截圖上傳成兩個圖層，上面的 HBITMAP 就放掉了：
+    // 主內容圖層固定在左上角，展開頁圖層疊在上面、垂直位置＝偏移，由 DWM 照曲線移動，主執行緒不再逐格重畫。
+    // 視窗固定蓋住整個展開頁，沒放內容的地方是透明的（主內容截圖拿不到時，偏移上方露出底下真的主內容）
+    wil::com_ptr<IDCompositionTarget> target;
+    wil::com_ptr<IDCompositionVisual> root;
+    wil::com_ptr<IDCompositionVisual> main_visual;
+    wil::com_ptr<IDCompositionVisual> stage_visual;
+    // 滑完的通知：執行緒集區的計時器時間到就投遞 msg_now_playing_slide_done 給分割面板。
+    // 不用 WM_TIMER：它是最低優先的訊息，主執行緒的佇列一忙就被往後拖
+    PTP_TIMER finish_timer{};
+    HWND notify_wnd{};
+    std::atomic<WPARAM> generation{};
+#ifdef NOCTURNE_BUILD_DEV
+    DWM_TIMING_INFO dwm_start{};
+#endif
+
+    NowPlayingSnapshot() = default;
+    NowPlayingSnapshot(const NowPlayingSnapshot&) = delete;
+    NowPlayingSnapshot& operator=(const NowPlayingSnapshot&) = delete;
+    ~NowPlayingSnapshot() { close_finish_timer(); }
+
+    // 取消還沒到的通知，並等正在投遞的那次做完（之後就不會再有舊流水號以外的通知）
+    void cancel_finish_timer()
+    {
+        if (!finish_timer)
+            return;
+        SetThreadpoolTimer(finish_timer, nullptr, 0, 0);
+        WaitForThreadpoolTimerCallbacks(finish_timer, TRUE);
+    }
+
+    void close_finish_timer()
+    {
+        cancel_finish_timer();
+        if (finish_timer)
+            CloseThreadpoolTimer(std::exchange(finish_timer, nullptr));
+    }
+
+    // delay_ms 之後通知 notify_wnd；換一段動畫（倒回）時流水號加一，舊的通知收到也不理
+    void arm_finish_timer(double delay_ms)
+    {
+        if (!finish_timer)
+            finish_timer = CreateThreadpoolTimer(
+                [](PTP_CALLBACK_INSTANCE, PVOID context, PTP_TIMER) {
+                    const auto self = static_cast<NowPlayingSnapshot*>(context);
+                    PostMessage(self->notify_wnd, msg_now_playing_slide_done, self->generation.load(), 0);
+                },
+                this, nullptr);
+        if (!finish_timer) {
+            PostMessage(notify_wnd, msg_now_playing_slide_done, generation.load(), 0);
+            return;
+        }
+        cancel_finish_timer();
+        ++generation;
+        // 負數＝從現在起算，單位 100 ns
+        ULARGE_INTEGER due{};
+        due.QuadPart = static_cast<ULONGLONG>(-static_cast<LONGLONG>(std::ceil(delay_ms * 10000.0)));
+        FILETIME due_time{due.LowPart, due.HighPart};
+        SetThreadpoolTimer(finish_timer, &due_time, 0, 0);
+    }
+
+    // 拿掉視窗之前先拆掉 DirectComposition 的內容
+    void release_composition()
+    {
+        close_finish_timer();
+        stage_visual.reset();
+        main_visual.reset();
+        if (target)
+            target->SetRoot(nullptr);
+        root.reset();
+        target.reset();
+    }
 };
 
 NowPlayingSnapshot* get_now_playing_snapshot(HWND wnd)
@@ -156,7 +229,8 @@ LRESULT CALLBACK now_playing_snapshot_wndproc(HWND wnd, UINT msg, WPARAM wp, LPA
         PAINTSTRUCT ps{};
         const auto paint_dc = wil::BeginPaint(wnd, &ps);
         const auto snapshot = get_now_playing_snapshot(wnd);
-        if (!snapshot)
+        // 內容由 DirectComposition 提供時沒有東西要畫（視窗沒有重新導向點陣圖，畫了也不會出現）
+        if (!snapshot || snapshot->target)
             return 0;
 
         // 視窗上緣在展開頁裡的位置（收合時視窗跟著往下移；展開時是 0），以及展開頁截圖從視窗第幾列開始
@@ -227,7 +301,8 @@ wil::unique_hbitmap capture_now_playing_area(HWND owner, const RECT& screen_rect
 
 // 在螢幕 window_rect 開一個不搶焦點、不擋滑鼠的視窗顯示截圖
 // 開成功才把 snapshot 交給視窗；失敗時還在呼叫端手上（收合改展開換視窗時，失敗要把圖拿回舊視窗）
-HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot>&& snapshot, const RECT& window_rect)
+// 截圖視窗的類別（一般版與 DirectComposition 版共用），第一次用到時註冊
+bool register_now_playing_snapshot_class()
 {
     static const auto class_registered = [] {
         WNDCLASSEX wc{};
@@ -238,8 +313,12 @@ HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot>
         wc.lpszClassName = now_playing_snapshot_class_name;
         return RegisterClassEx(&wc) != 0;
     }();
+    return class_registered;
+}
 
-    if (!class_registered)
+HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot>&& snapshot, const RECT& window_rect)
+{
+    if (!register_now_playing_snapshot_class())
         return nullptr;
 
     const auto wnd = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, now_playing_snapshot_class_name, L"",
@@ -255,9 +334,127 @@ HWND create_now_playing_snapshot(HWND owner, std::unique_ptr<NowPlayingSnapshot>
     BOOL disable_transitions = TRUE;
     DwmSetWindowAttribute(wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
 
-    ShowWindow(wnd, SW_SHOWNOACTIVATE);
+    // 不用 ShowWindow：它會把截圖視窗排到整個桌面最上面，fb2k 在背景用快速鍵切換時會閃到別的程式前面（2026-11-23）
+    SetWindowPos(wnd, nocturne_dcomp::overlay_insert_after(owner, wnd), 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     UpdateWindow(wnd);
     return wnd;
+}
+
+// 開發版才有的開關（2026-11-23，量測用）：profile 資料夾裡有這個名字的檔案就生效
+#ifdef NOCTURNE_BUILD_DEV
+bool slide_dev_flag(const wchar_t* name)
+{
+    const pfc::string8 native = ::filesystem::g_get_native_path(core_api::get_profile_path());
+    const auto path = std::wstring(pfc::stringcvt::string_wide_from_utf8(native.c_str()).get_ptr()) + L"\\" + name;
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+#else
+constexpr bool slide_dev_flag(const wchar_t*)
+{
+    return false;
+}
+#endif
+
+// 截圖上傳成一個圖層（線性內插：停在整數位置時跟原圖一樣清楚）
+wil::com_ptr<IDCompositionVisual> make_snapshot_layer(nocturne_dcomp::Graphics& g, HBITMAP bitmap)
+{
+    const auto surface = nocturne_dcomp::make_surface(g, bitmap);
+    wil::com_ptr<IDCompositionVisual> visual;
+    if (!surface || FAILED(g.dcomp->CreateVisual(visual.put())))
+        return {};
+    visual->SetContent(surface.get());
+    visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+    return visual;
+}
+
+// 主內容圖層放到展開頁圖層下面（沒有展開頁圖層時就是唯一一層）
+bool add_snapshot_main_layer(nocturne_dcomp::Graphics& g, NowPlayingSnapshot& snapshot, HBITMAP main)
+{
+    snapshot.main_visual = make_snapshot_layer(g, main);
+    if (!snapshot.main_visual)
+        return false;
+    // AddVisual：參考圖層是空的時，insertAbove＝FALSE 放在所有圖層前面
+    if (FAILED(snapshot.stage_visual ? snapshot.root->AddVisual(snapshot.main_visual.get(), FALSE, snapshot.stage_visual.get())
+                                     : snapshot.root->AddVisual(snapshot.main_visual.get(), FALSE, nullptr))) {
+        snapshot.main_visual.reset();
+        return false;
+    }
+    return true;
+}
+
+// 展開頁圖層疊在主內容圖層上面，垂直位置＝目前的偏移
+bool add_snapshot_stage_layer(nocturne_dcomp::Graphics& g, NowPlayingSnapshot& snapshot, HBITMAP stage)
+{
+    snapshot.stage_visual = make_snapshot_layer(g, stage);
+    if (!snapshot.stage_visual)
+        return false;
+    snapshot.stage_visual->SetOffsetY(static_cast<float>(snapshot.offset));
+    if (FAILED(snapshot.main_visual ? snapshot.root->AddVisual(snapshot.stage_visual.get(), TRUE, snapshot.main_visual.get())
+                                    : snapshot.root->AddVisual(snapshot.stage_visual.get(), FALSE, nullptr))) {
+        snapshot.stage_visual.reset();
+        return false;
+    }
+    return true;
+}
+
+// 截圖視窗的 DirectComposition 版（2026-11-23）：沒有重新導向點陣圖，畫面完全由圖層提供。
+// 現有的截圖（snapshot->main／stage）上傳好、Commit、等它真的合成到螢幕上才回傳，一出現就跟原本的畫面一模一樣。
+// 成功才把 snapshot 交給視窗；DirectComposition 建不起來或上傳失敗時傳回 nullptr，snapshot 還在呼叫端手上（改開一般的截圖視窗）
+HWND create_now_playing_composition(
+    HWND owner, HWND notify_wnd, std::unique_ptr<NowPlayingSnapshot>& snapshot, const RECT& window_rect)
+{
+    if (slide_dev_flag(L"nocturne_slide_no_dcomp"))
+        return nullptr;
+    const auto g = nocturne_dcomp::graphics();
+    if (!g)
+        return nullptr;
+
+    if (!register_now_playing_snapshot_class())
+        return nullptr;
+
+    const auto wnd = CreateWindowEx(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        now_playing_snapshot_class_name, L"", WS_POPUP, window_rect.left, window_rect.top, wil::rect_width(window_rect),
+        wil::rect_height(window_rect), owner, nullptr, core_api::get_my_instance(), nullptr);
+    if (!wnd)
+        return nullptr;
+
+    auto& s = *snapshot;
+    const auto fail = [&] {
+        s.release_composition();
+        DestroyWindow(wnd);
+        return nullptr;
+    };
+    if (FAILED(g->dcomp->CreateTargetForHwnd(wnd, TRUE, s.target.put())) || FAILED(g->dcomp->CreateVisual(s.root.put()))
+        || FAILED(s.target->SetRoot(s.root.get())))
+        return fail();
+    if (s.main && !add_snapshot_main_layer(*g, s, s.main.get()))
+        return fail();
+    if (s.stage && !add_snapshot_stage_layer(*g, s, s.stage.get()))
+        return fail();
+    if (FAILED(g->dcomp->Commit()))
+        return fail();
+
+    // 圖已經在顯示卡上了，GDI 那份不用留
+    s.main.reset();
+    s.stage.reset();
+    s.notify_wnd = notify_wnd;
+    SetWindowLongPtr(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(snapshot.release()));
+
+    // 關掉 Windows 開視窗時的淡入動畫；不用 ShowWindow（會排到整個桌面最上面，見 overlay_insert_after）
+    BOOL disable_transitions = TRUE;
+    DwmSetWindowAttribute(wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
+    SetWindowPos(wnd, nocturne_dcomp::overlay_insert_after(owner, wnd), 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+    g->dcomp->WaitForCommitCompletion();
+    return wnd;
+}
+
+// 展開 ease-out sine、收合 ease-in-out sine（跟區域動畫、逐格重畫的退路同一條）
+double now_playing_slide_ease(bool expanding, double x)
+{
+    x = std::clamp(x, 0.0, 1.0);
+    return expanding ? cubic_bezier(0.61, 1.0, 0.88, 1.0, x) : cubic_bezier(0.37, 0.0, 0.63, 1.0, x);
 }
 
 } // namespace
@@ -1638,9 +1835,21 @@ void FlatSplitterPanel::start_now_playing_animation()
         const auto reverse_t0 = slide_diag_ms();
         const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
         const auto& rect = m_now_playing_slide_rect;
+
+        // DirectComposition（2026-11-23）：畫面上的位置是 DWM 照時鐘算的，讀不回來，照同一條曲線自己推算現在走到哪，
+        // 從那裡開一段反方向的動畫。開始時間都是 Commit 當下記的，從 Commit 到 DWM 真的套用的延遲兩段一樣，互相抵掉。
+        // 收合到一半改展開也不用再截主內容：視窗固定蓋整頁、沒放圖層的地方透明，露出來的就是底下還收合著的真主內容
+        if (snapshot->target) {
+            const auto position = get_now_playing_slide_position();
+            m_now_playing_slide_from = position;
+            m_now_playing_slide_expanding = m_now_playing_expanded;
+            animate_now_playing_slide_composition();
+            slide_diag("dcomp reverse  from=%.1f  in %.1fms", position, slide_diag_ms() - reverse_t0);
+            return;
+        }
         // 從畫面上最後畫出來的那一格倒回去（2026-11-17）：以前用現在的時間重算位置，比畫面上多走了一段（219 量到 7～30 px），
         // 下一格會先往原方向跳過去再回頭
-        const auto offset = snapshot->offset;
+        const int offset = snapshot->offset;
         slide_diag("reverse  drawn=%d computed=%d", offset, get_now_playing_slide_offset());
 
         // 展開到一半改收合（snapshot->main 存在、目前是固定蓋住整個展開頁的模式）：什麼真視窗都不動，
@@ -1742,7 +1951,10 @@ bool FlatSplitterPanel::start_now_playing_slide()
         if (!snapshot->main)
             return false;
 
-        m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
+        // 2026-11-23：先試 DirectComposition 版，建不起來才開一般的
+        m_now_playing_snapshot_wnd = create_now_playing_composition(owner, m_wnd, snapshot, stage_rect);
+        if (!m_now_playing_snapshot_wnd)
+            m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
         if (!m_now_playing_snapshot_wnd)
             return false;
         const auto t_create = lap();
@@ -1756,15 +1968,27 @@ bool FlatSplitterPanel::start_now_playing_slide()
 
         auto stage = capture_now_playing_area(owner, stage_rect);
         const auto t_capture_stage = lap();
-        // VU 表／頻譜的視窗這時還藏著（截圖蓋著的期間不顯示），截圖裡沒有它：畫一格疊上去，跟著整頁一起滑上來
+        // VU 表／頻譜的視窗這時還藏著（截圖蓋著的期間不顯示），截圖裡沒有它：畫一格疊上去，跟著整頁一起滑上來。
+        // DirectComposition 版要在這之後才上傳（draw_into_slide 直接改這張圖）
         if (stage && m_vu_meter_wnd)
             vu_meter::draw_into_slide(m_vu_meter_wnd, m_now_playing_bar_rect, stage.get(), stage_rect);
         const auto t_vu = lap();
-        slide_diag("prep expand  capture_main=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_stage=%.1f vu=%.1f",
-            t_capture_main, t_create, t_flush, t_size, t_redraw, t_capture_stage, t_vu);
-        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage = std::move(stage);
-        if (!get_now_playing_snapshot(m_now_playing_snapshot_wnd)->stage) {
-            // 截不到展開頁：底下已經展開好了，直接拿掉蓋著的截圖
+        const auto snapshot_ptr = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+        auto stage_ok = stage != nullptr;
+        if (snapshot_ptr->target) {
+            const auto g = nocturne_dcomp::graphics();
+            stage_ok = stage_ok && g && add_snapshot_stage_layer(*g, *snapshot_ptr, stage.get());
+        } else {
+            snapshot_ptr->stage = std::move(stage);
+        }
+        const auto t_upload = lap();
+        slide_diag("prep expand  dcomp=%d capture_main=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_stage=%.1f "
+                   "vu=%.1f upload=%.1f",
+            snapshot_ptr->target != nullptr, t_capture_main, t_create, t_flush, t_size, t_redraw, t_capture_stage, t_vu,
+            t_upload);
+        if (!stage_ok) {
+            // 截不到（或上傳不了）展開頁：底下已經展開好了，直接拿掉蓋著的截圖
+            snapshot_ptr->release_composition();
             DestroyWindow(std::exchange(m_now_playing_snapshot_wnd, nullptr));
             return true;
         }
@@ -1779,7 +2003,9 @@ bool FlatSplitterPanel::start_now_playing_slide()
         if (!snapshot->stage)
             return false;
 
-        m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
+        m_now_playing_snapshot_wnd = create_now_playing_composition(owner, m_wnd, snapshot, stage_rect);
+        if (!m_now_playing_snapshot_wnd)
+            m_now_playing_snapshot_wnd = create_now_playing_snapshot(owner, std::move(snapshot), stage_rect);
         if (!m_now_playing_snapshot_wnd)
             return false;
         const auto t_create = lap();
@@ -1790,37 +2016,116 @@ bool FlatSplitterPanel::start_now_playing_slide()
         const auto t_size = lap();
         RedrawWindow(m_wnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         const auto t_redraw = lap();
-        // PrintWindow 畫的是主視窗本身，蓋在上面的截圖視窗（另一個頂層視窗）不會進來：截到的就是收合好的主內容。
-        // 截不到就退回舊做法（視窗跟著往下移）
-        get_now_playing_snapshot(m_now_playing_snapshot_wnd)->main = capture_now_playing_area(owner, stage_rect);
+        // 一般版：再截一張收合好的主內容當偏移上方的底。PrintWindow 畫的是主視窗本身，蓋在上面的截圖視窗
+        // （另一個頂層視窗）不會進來，截到的就是收合好的主內容；截不到就退回舊做法（視窗跟著往下移）。
+        // DirectComposition 版不截（2026-11-23）：視窗固定蓋整頁，偏移上方透明，露出來的就是底下已經收合、畫好的真主內容。
+        // 219 收合 20 次逐格比過，露出來的主內容跟截圖版一樣；準備時間少一張截圖（約 110 → 85 ms）
+        const auto snapshot_ptr = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+        if (!snapshot_ptr->target)
+            snapshot_ptr->main = capture_now_playing_area(owner, stage_rect);
         const auto t_capture_main = lap();
-        slide_diag("prep collapse  capture_stage=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_main=%.1f",
-            t_capture_stage, t_create, t_flush, t_size, t_redraw, t_capture_main);
+        slide_diag("prep collapse  dcomp=%d capture_stage=%.1f create=%.1f flush=%.1f size=%.1f redraw=%.1f capture_main=%.1f",
+            snapshot_ptr->target != nullptr, t_capture_stage, t_create, t_flush, t_size, t_redraw, t_capture_main);
         m_now_playing_slide_from = 0;
     }
 
     m_now_playing_slide_rect = stage_rect;
     m_now_playing_slide_expanding = m_now_playing_expanded;
+    if (get_now_playing_snapshot(m_now_playing_snapshot_wnd)->target) {
+        animate_now_playing_slide_composition();
+        return true;
+    }
     m_now_playing_snapshot_start = std::chrono::steady_clock::now();
     schedule_now_playing_animation_frame();
     return true;
 }
 
-int FlatSplitterPanel::get_now_playing_slide_offset() const
+double FlatSplitterPanel::get_now_playing_slide_position() const
 {
     const auto elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - m_now_playing_snapshot_start)
                                 .count();
-    const auto linear_progress = std::clamp(elapsed_ms / now_playing_animation_duration_ms, 0.0, 1.0);
     // 曲線跟區域動畫相同：展開 ease-out sine、收合 ease-in-out sine
-    const auto progress = m_now_playing_slide_expanding ? cubic_bezier(0.61, 1.0, 0.88, 1.0, linear_progress)
-                                                        : cubic_bezier(0.37, 0.0, 0.63, 1.0, linear_progress);
+    const auto progress
+        = now_playing_slide_ease(m_now_playing_slide_expanding, elapsed_ms / now_playing_animation_duration_ms);
     const auto target = m_now_playing_slide_expanding ? 0 : wil::rect_height(m_now_playing_slide_rect);
-    return std::lround(m_now_playing_slide_from + (target - m_now_playing_slide_from) * progress);
+    return m_now_playing_slide_from + (target - m_now_playing_slide_from) * progress;
+}
+
+int FlatSplitterPanel::get_now_playing_slide_offset() const
+{
+    return static_cast<int>(std::lround(get_now_playing_slide_position()));
+}
+
+void FlatSplitterPanel::animate_now_playing_slide_composition()
+{
+    const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+    const auto g = nocturne_dcomp::graphics();
+    const auto expanding = m_now_playing_slide_expanding;
+    const auto from = m_now_playing_slide_from;
+    const auto to = expanding ? 0.0 : static_cast<double>(wil::rect_height(m_now_playing_slide_rect));
+
+    // DirectComposition 只吃分段三次多項式：切 12 段（219 量過跟原曲線最多差 0.18 px），斜率用數值微分
+    const auto ease = [expanding](double x) { return now_playing_slide_ease(expanding, x); };
+    const auto slope = [expanding](double x) {
+        constexpr double h = 1e-4;
+        const auto a = std::max(0.0, x - h);
+        const auto b = std::min(1.0, x + h);
+        return (now_playing_slide_ease(expanding, b) - now_playing_slide_ease(expanding, a)) / (b - a);
+    };
+    const auto animation = g && snapshot && snapshot->stage_visual
+        ? nocturne_dcomp::make_animation(*g, static_cast<float>(from), static_cast<float>(to),
+              now_playing_animation_duration_ms, ease, slope)
+        : wil::com_ptr<IDCompositionAnimation>{};
+
+#ifdef NOCTURNE_BUILD_DEV
+    if (snapshot && !snapshot->dwm_start.cbSize) {
+        snapshot->dwm_start.cbSize = sizeof(snapshot->dwm_start);
+        DwmGetCompositionTimingInfo(nullptr, &snapshot->dwm_start);
+    }
+#endif
+
+    if (!animation) {
+        // 動畫建不起來：直接放到終點，馬上收尾（截圖已經停在終點，跟底下真的視窗一樣）
+        if (g && snapshot && snapshot->stage_visual) {
+            snapshot->stage_visual->SetOffsetY(static_cast<float>(to));
+            g->dcomp->Commit();
+        }
+        m_now_playing_snapshot_start = std::chrono::steady_clock::now() - std::chrono::milliseconds(now_playing_animation_duration_ms);
+        if (snapshot)
+            snapshot->arm_finish_timer(0);
+        slide_diag("dcomp animation failed  from=%.1f to=%.1f", from, to);
+        return;
+    }
+
+    snapshot->stage_visual->SetOffsetY(animation.get());
+    g->dcomp->Commit();
+    // 動畫從 Commit 起算（倒回時推算位置也從這時起算）。從 Commit 到 DWM 真的套用的延遲，前後兩段一樣、互相抵掉。
+    // 2026-11-23 219 量過：倒回時畫面最遠到的位置跟推算的位置，10 次的分布跟逐格重畫（從畫面上最後一格倒回、誤差 0）一樣
+    // （都是錄影量測本身的雜訊，標準差 6.8 px）；改成對齊 GetFrameStatistics 的下一格合成時間反而略差，沒有採用
+    m_now_playing_snapshot_start = std::chrono::steady_clock::now();
+    // 晚一點點收尾畫面也不會跳（截圖停在終點）；早了會在最後一兩格拿掉截圖
+    snapshot->arm_finish_timer(now_playing_animation_duration_ms + 20.0);
+    slide_diag("dcomp start %s  from=%.1f to=%.1f", expanding ? "expand" : "collapse", from, to);
+}
+
+void FlatSplitterPanel::on_now_playing_slide_done(WPARAM generation)
+{
+    if (!m_now_playing_snapshot_wnd)
+        return;
+    const auto snapshot = get_now_playing_snapshot(m_now_playing_snapshot_wnd);
+    // 倒回之後，前一段的通知可能已經投遞出來了：流水號不同就不理
+    if (!snapshot || !snapshot->target || snapshot->generation.load() != generation)
+        return;
+    finish_now_playing_slide();
 }
 
 void FlatSplitterPanel::on_now_playing_slide_frame()
 {
+    // DirectComposition 版由 DWM 移動，不逐格重畫（收尾走 on_now_playing_slide_done）
+    if (get_now_playing_snapshot(m_now_playing_snapshot_wnd)->target)
+        return;
+
     const auto frame_t0 = slide_diag_ms();
     const auto queued = frame_t0 - slide_diag_posted_ms();
     const auto elapsed = std::chrono::steady_clock::now() - m_now_playing_snapshot_start;
@@ -1937,6 +2242,20 @@ void FlatSplitterPanel::finish_now_playing_slide()
     }
     const auto t_flush = slide_diag_ms();
 
+    // DirectComposition 版：先拆掉圖層再關視窗（同換歌蓋層、輸出裝置滑動）
+    if (const auto snapshot = get_now_playing_snapshot(snapshot_wnd); snapshot && snapshot->target) {
+#ifdef NOCTURNE_BUILD_DEV
+        DWM_TIMING_INFO dwm{};
+        dwm.cbSize = sizeof(dwm);
+        DwmGetCompositionTimingInfo(nullptr, &dwm);
+        const auto& start = snapshot->dwm_start;
+        slide_diag("dcomp end  late=%.1fms dwm_frames=%llu dropped=%llu missed=%llu",
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - m_now_playing_snapshot_start).count()
+                - now_playing_animation_duration_ms - (t_flush - finish_t0),
+            dwm.cFrame - start.cFrame, dwm.cFramesDropped - start.cFramesDropped, dwm.cFramesMissed - start.cFramesMissed);
+#endif
+        snapshot->release_composition();
+    }
     DestroyWindow(snapshot_wnd);
     const auto t_destroy = slide_diag_ms();
 

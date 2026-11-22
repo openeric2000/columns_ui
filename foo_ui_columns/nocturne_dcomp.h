@@ -75,6 +75,60 @@ inline wil::com_ptr<IDCompositionSurface> make_surface(Graphics& g, Gdiplus::Bit
     return surface;
 }
 
+// 一張 GDI 截圖（HBITMAP）上傳成 DirectComposition 的內容（2026-11-23，展開頁滑動用）。
+// 截圖本來就不透明，而 GDI 畫出來的透明度位元組是 0，所以用 DXGI_ALPHA_MODE_IGNORE：整張照不透明合成，不用逐點補 255
+inline wil::com_ptr<IDCompositionSurface> make_surface(Graphics& g, HBITMAP bitmap)
+{
+    BITMAP info{};
+    if (!bitmap || !GetObject(bitmap, sizeof(info), &info) || info.bmWidth <= 0 || info.bmHeight <= 0)
+        return {};
+    const auto width = static_cast<UINT>(info.bmWidth);
+    const auto height = static_cast<UINT>(info.bmHeight);
+
+    // 讀成 32 位元、由上往下排（高度給負的）
+    BITMAPINFO header{};
+    header.bmiHeader.biSize = sizeof(header.bmiHeader);
+    header.bmiHeader.biWidth = info.bmWidth;
+    header.bmiHeader.biHeight = -info.bmHeight;
+    header.bmiHeader.biPlanes = 1;
+    header.bmiHeader.biBitCount = 32;
+    header.bmiHeader.biCompression = BI_RGB;
+    std::vector<uint32_t> pixels(static_cast<size_t>(width) * height);
+    {
+        const auto screen_dc = wil::GetDC(nullptr);
+        if (GetDIBits(screen_dc.get(), bitmap, 0, height, pixels.data(), &header, DIB_RGB_COLORS) != static_cast<int>(height))
+            return {};
+    }
+
+    wil::com_ptr<IDCompositionSurface> surface;
+    if (FAILED(g.dcomp->CreateSurface(width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE, surface.put())))
+        return {};
+
+    wil::com_ptr<ID3D11Texture2D> texture;
+    POINT offset{};
+    if (FAILED(surface->BeginDraw(nullptr, IID_PPV_ARGS(texture.put()), &offset)))
+        return {};
+    const D3D11_BOX box{static_cast<UINT>(offset.x), static_cast<UINT>(offset.y), 0, static_cast<UINT>(offset.x) + width,
+        static_cast<UINT>(offset.y) + height, 1};
+    g.context->UpdateSubresource(texture.get(), 0, &box, pixels.data(), width * 4, 0);
+    if (FAILED(surface->EndDraw()))
+        return {};
+    return surface;
+}
+
+// 蓋層在前後順序裡要插在誰的下面，才會緊貼在主視窗正上方（2026-11-22，原本在 now_playing_style_transition.cpp；
+// 2026-11-23 搬來這裡給展開頁滑動的截圖視窗一起用）。
+// 新顯示的視窗 Windows 一律排到整個桌面最上面，不管擁有者在哪：fb2k 被瀏覽器蓋住時，
+// 自然換歌的蓋層（結束前先截圖蓋上）會閃到瀏覽器前面，約半秒後淡出。
+// 主視窗上面是「永遠在最上層」的視窗（或就是蓋層自己）時用 HWND_TOP：插在最上層視窗後面會讓蓋層也變成最上層
+inline HWND overlay_insert_after(HWND owner, HWND overlay)
+{
+    const auto above = owner ? GetWindow(owner, GW_HWNDPREV) : nullptr;
+    if (!above || above == overlay || (GetWindowLongPtr(above, GWL_EXSTYLE) & WS_EX_TOPMOST))
+        return HWND_TOP;
+    return above;
+}
+
 // from → to、照 ease（時間比例 0～1 → 進度 0～1）與它的導數 slope 走 length_ms 的動畫。
 // DirectComposition 只吃分段三次多項式，所以切 segments 段，每段用兩端的值與斜率做 Hermite 內插：
 // 曲線本身是三次（例如 1-(1-t)^3）時一段就完全一樣；五次的 smootherstep 切 12 段，差距遠小於 0.01 px

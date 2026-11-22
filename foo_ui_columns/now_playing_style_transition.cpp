@@ -92,6 +92,7 @@ using Signature = std::vector<int>;
 using nocturne_dcomp::Graphics;
 using nocturne_dcomp::graphics;
 using nocturne_dcomp::make_surface;
+using nocturne_dcomp::overlay_insert_after;
 
 // 一層：圖＋以封面中心為準的縮放＋透明度
 struct Layer {
@@ -691,18 +692,6 @@ HWND create_overlay(HWND owner, const RECT& screen)
         DwmSetWindowAttribute(wnd, DWMWA_TRANSITIONS_FORCEDISABLED, &disable_transitions, sizeof(disable_transitions));
     }
     return wnd;
-}
-
-// 蓋層在前後順序裡要插在誰的下面，才會緊貼在主視窗正上方（2026-11-22）。
-// 新顯示的視窗 Windows 一律排到整個桌面最上面，不管擁有者在哪：fb2k 被瀏覽器蓋住時，
-// 自然換歌的蓋層（結束前先截圖蓋上）會閃到瀏覽器前面，約半秒後淡出。
-// 主視窗上面是「永遠在最上層」的視窗（或就是蓋層自己）時用 HWND_TOP：插在最上層視窗後面會讓蓋層也變成最上層
-HWND overlay_insert_after(HWND owner, HWND overlay)
-{
-    const auto above = owner ? GetWindow(owner, GW_HWNDPREV) : nullptr;
-    if (!above || above == overlay || (GetWindowLongPtr(above, GWL_EXSTYLE) & WS_EX_TOPMOST))
-        return HWND_TOP;
-    return above;
 }
 
 // 蓋層：截下來的舊畫面（封面方塊時底下再墊一層內插的底），蓋上去、等它真的合成到螢幕上才回傳

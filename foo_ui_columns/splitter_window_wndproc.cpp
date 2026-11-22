@@ -29,6 +29,10 @@ LRESULT FlatSplitterPanel::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         // 自編版新增（展開頁動畫）
         on_now_playing_animation_frame();
         return 0;
+    case msg_now_playing_slide_done:
+        // 自編版新增（2026-11-23）：交給 DirectComposition 的那段滑完了
+        on_now_playing_slide_done(wp);
+        return 0;
     case WM_DESTROY:
         m_now_playing_animating = false;
         if (m_now_playing_snapshot_wnd)

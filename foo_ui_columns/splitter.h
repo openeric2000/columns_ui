@@ -23,6 +23,8 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 // 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
 // （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
+// 展開頁滑動交給 DirectComposition 時（2026-11-23），滑完的通知：另一條執行緒時間到才投遞，wParam＝這段動畫的流水號
+inline constexpr UINT msg_now_playing_slide_done = WM_USER + 0x4f0;
 
 enum Orientation {
     horizontal,
@@ -259,6 +261,12 @@ private:
     void on_now_playing_slide_frame();
     // 截圖視窗目前往下偏移多少：0＝蓋住整個展開頁，展開頁高度＝整個收到播放列後面
     int get_now_playing_slide_offset() const;
+    // 同上，不取整數（DirectComposition 倒回時從這裡接著走，見 start_now_playing_animation）
+    double get_now_playing_slide_position() const;
+    // 截圖視窗的內容由 DirectComposition 提供時（2026-11-23）：把這段滑動交給 DWM、排好滑完的通知
+    void animate_now_playing_slide_composition();
+    // 滑完的通知到了（流水號對得上才收尾）
+    void on_now_playing_slide_done(WPARAM generation);
     // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
     void finish_now_playing_slide();
     // 自編版新增（2026-11-09）：展開／收合動畫完全結束時呼叫；收合完成就把資訊卡切回封面（下次打開一定是封面）
@@ -301,7 +309,8 @@ private:
     HWND m_cover_line_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
-    int m_now_playing_slide_from{};
+    // 2026-11-23 起是小數：DirectComposition 倒回時從推算出來的位置接著走，取整數會差半格
+    double m_now_playing_slide_from{};
     bool m_now_playing_slide_expanding{};
     int m_last_position{};
     size_t m_panel_dragging{};
