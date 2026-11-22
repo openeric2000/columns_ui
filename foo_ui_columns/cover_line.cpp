@@ -40,6 +40,11 @@ std::string next_title;
 std::string next_artist;
 bool next_valid{};
 bool next_update_scheduled{};
+// 框選中晚點再算（見 update_next）：重試的計時器
+UINT_PTR next_marquee_retry_timer{};
+constexpr UINT next_marquee_retry_ms = 100;
+// 封面下那一排「下一首」的編號（style 1）
+constexpr uint32_t style_next = 1;
 // 挑選卡拖曳中的暫時預覽（1～5；0＝沒有預覽，照設定）：封面下那一排先換成經過的段，放開才存
 std::atomic<uint32_t> preview_style{0};
 
@@ -52,9 +57,29 @@ std::string format_handle(const metadb_handle_ptr& handle, const char* script)
     return out.c_str();
 }
 
+void schedule_next_update();
+
+void CALLBACK on_next_marquee_retry(HWND, UINT, UINT_PTR, DWORD)
+{
+    KillTimer(nullptr, next_marquee_retry_timer);
+    next_marquee_retry_timer = 0;
+    schedule_next_update();
+}
+
 // 下一首的規則跟右下角的下一首提示同一套（佇列第一首 → 播放跟隨游標 → 下一列；隨機、單曲循環、沒有下一列就沒有）
+// 2026-11-22 框選卡頓：開著「播放跟隨游標」時下一首就是焦點那首，框選每掃到一列焦點就變、這裡就叫一次 refresh_layout_fields，
+// 那是對正在播的歌送 dispatch_refresh，fb2k 會廣播給所有元件（Album list 走整棵樹重建、標頭清封面快取、ESLyric 整個版面重算）。
+// xperf 量到框選 8 秒主執行緒忙 1.95 秒、其中 Album list 0.56 秒。所以：
+// - 框選中先不算，每 0.1 秒看一次，放開後只算一次
+// - 封面下那一排沒顯示「下一首」時照樣算好存著（欄位讀的是存好的值），但不廣播；換到「下一首」那一排時 on_style_changed 會重算版面
 void update_next()
 {
+    if (uih::ListView::s_is_marquee_active()) {
+        if (!next_marquee_retry_timer)
+            next_marquee_retry_timer = SetTimer(nullptr, 0, next_marquee_retry_ms, on_next_marquee_retry);
+        return;
+    }
+
     std::string title;
     std::string artist;
     bool valid{};
@@ -75,7 +100,7 @@ void update_next()
         next_title = std::move(title);
         next_artist = std::move(artist);
     }
-    if (changed)
+    if (changed && style_for_fields() == style_next)
         main_menu::refresh_layout_fields();
 }
 
