@@ -20,6 +20,10 @@ inline constexpr auto toggle_now_playing_description
       "stopped, the first queued track is loaded paused first; with an empty queue it does not expand.";
 inline constexpr auto stop_or_collapse_name = "Stop or Collapse Now Playing";
 inline constexpr auto stop_or_collapse_description = "Stops playback and closes the now playing view.";
+inline constexpr auto toggle_remaining_time_name = "Toggle Remaining Time";
+inline constexpr auto toggle_remaining_time_description
+    = "Switches the playback bar time between \"elapsed / length\" and \"elapsed / -remaining\".";
+inline constexpr wchar_t remaining_time_setting[] = L"Show remaining time in the playback bar (or click the time to switch)";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view near the end of a track.";
@@ -256,6 +260,10 @@ inline constexpr auto toggle_now_playing_description
 inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
     = "停止播放並收起展開頁。";
+inline constexpr auto toggle_remaining_time_name = "切換剩餘時間";
+inline constexpr auto toggle_remaining_time_description
+    = "播放列的時間在「已播 / 曲長」和「已播 / -剩餘」之間切換。";
+inline constexpr wchar_t remaining_time_setting[] = L"播放列時間顯示剩餘時間（也可以直接點時間切換）";
 inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description
     = "歌曲最後幾秒，在展開頁角落顯示下一首。";

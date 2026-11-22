@@ -842,12 +842,13 @@ BEGIN
     LTEXT           "Seconds per notch with Shift",IDC_WHEEL_SHIFT_LABEL,7,80,313,8
     EDITTEXT        IDC_WHEEL_SHIFT_SECONDS,7,91,50,13,ES_AUTOHSCROLL | ES_NUMBER
     CONTROL         "",IDC_WHEEL_SHIFT_SPIN,"msctls_updown32",UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS,46,91,11,13
-    LTEXT           "Output device",IDC_TITLE2,7,118,313,17
-    CONTROL         "Show the current output device",IDC_CHIP_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,144,313,10
-    CONTROL         "Click to switch",IDC_CHIP_CLICK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,160,313,10
-    PUSHBUTTON      "Edit device names...",IDC_CHIP_ALIASES,7,178,120,14,WS_TABSTOP
-    LTEXT           "Volume",IDC_TITLE3,7,208,313,17
-    CONTROL         "Collapse the volume bar to an icon (recommended at 125%+ Windows scaling)",IDC_VOLUME_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,234,313,10
+    CONTROL         "Show remaining time",IDC_REMAINING_TIME,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,112,313,10
+    LTEXT           "Output device",IDC_TITLE2,7,136,313,17
+    CONTROL         "Show the current output device",IDC_CHIP_ENABLED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,162,313,10
+    CONTROL         "Click to switch",IDC_CHIP_CLICK,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,178,313,10
+    PUSHBUTTON      "Edit device names...",IDC_CHIP_ALIASES,7,196,120,14,WS_TABSTOP
+    LTEXT           "Volume",IDC_TITLE3,7,226,313,17
+    CONTROL         "Collapse the volume bar to an icon (recommended at 125%+ Windows scaling)",IDC_VOLUME_ICON,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,252,313,10
 END
 
 // 「介面」分頁（原本的外觀、展開頁、啟動三個分頁合併；對話框沿用外觀那個編號）：捲軸與清單、啟動兩段

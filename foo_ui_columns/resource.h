@@ -454,6 +454,7 @@
 #define IDC_EXPANDED_INFO_LABEL        1380
 #define IDC_EXPANDED_INFO              1381
 #define IDC_EXPANDED_INFO_NOTE         1382
+#define IDC_REMAINING_TIME             1383
 #define IDC_ABOUT_NAME                 1340
 #define IDC_ABOUT_VERSION              1341
 #define IDC_STATIC                      -1

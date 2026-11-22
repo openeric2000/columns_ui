@@ -1300,9 +1300,11 @@ void Chip::ensure_time_measure()
     if (m_time_text_width_short > 0 && dpi == m_time_dpi)
         return;
 
+    // 後半段可以切成剩餘時間（2026-11-22，「0:05 / -1:51」），兩版都多量一個負號；
+    // 不管目前顯示哪一種都用有負號的寬度，切換已播／剩餘時裝置顯示不會跟著動（使用者 11/22 定）
     m_time_dpi = dpi;
-    m_time_text_width_short = measure_text(L"59:59 / 59:59", dip_f(time_font_dip));
-    m_time_text_width_long = measure_text(L"11:52:32 / 11:52:32", dip_f(time_font_dip));
+    m_time_text_width_short = measure_text(L"59:59 / -59:59", dip_f(time_font_dip));
+    m_time_text_width_long = measure_text(L"11:52:32 / -11:52:32", dip_f(time_font_dip));
 }
 
 RECT Chip::compute_layout()

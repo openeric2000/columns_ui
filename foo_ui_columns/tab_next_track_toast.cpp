@@ -25,7 +25,7 @@
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
-// - 播放：進度條滾輪、輸出裝置顯示、音量條收成圖示
+// - 播放：進度條滾輪、時間顯示剩餘（2026-11-22）、輸出裝置顯示、音量條收成圖示
 // - 下一首與佇列：展開頁角落的下一首提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）＋播放別首歌時保留播放佇列
 //   （佇列 11/02 起放在這一頁底下，11/05 併進「播放」，11/06 獨立成分頁，11/08 使用者說一個選項一個分頁太浪費，又併回這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
@@ -132,6 +132,7 @@ public:
         now_playing_progress::wheel_seek_enabled.reset();
         now_playing_progress::wheel_step_seconds.reset();
         now_playing_progress::wheel_shift_step_seconds.reset();
+        main_menu::show_remaining_time.reset();
         output_chip::enabled.reset();
         output_chip::click_to_switch.reset();
         volume_chip::enabled.reset();
@@ -145,6 +146,7 @@ private:
         SetDlgItemText(wnd, IDC_WHEEL_SEEK_ENABLED, nocturne_text::wheel_seek_enabled);
         SetDlgItemText(wnd, IDC_WHEEL_STEP_LABEL, nocturne_text::wheel_step_label);
         SetDlgItemText(wnd, IDC_WHEEL_SHIFT_LABEL, nocturne_text::wheel_shift_step_label);
+        SetDlgItemText(wnd, IDC_REMAINING_TIME, nocturne_text::remaining_time_setting);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::chip_settings_title);
         SetDlgItemText(wnd, IDC_CHIP_ENABLED, nocturne_text::chip_show);
         SetDlgItemText(wnd, IDC_CHIP_CLICK, nocturne_text::chip_click);
@@ -156,6 +158,7 @@ private:
         CheckDlgButton(wnd, IDC_WHEEL_SEEK_ENABLED, check_state(now_playing_progress::wheel_seek_enabled.get()));
         CheckDlgButton(wnd, IDC_CHIP_ENABLED, check_state(output_chip::enabled.get()));
         CheckDlgButton(wnd, IDC_CHIP_CLICK, check_state(output_chip::click_to_switch.get()));
+        CheckDlgButton(wnd, IDC_REMAINING_TIME, check_state(main_menu::show_remaining_time.get()));
 
         init_seconds_spin(wnd, IDC_WHEEL_STEP_SPIN, now_playing_progress::wheel_step_min,
             now_playing_progress::wheel_step_max, now_playing_progress::wheel_step_seconds.get());
@@ -190,6 +193,8 @@ private:
             output_chip::click_to_switch = is_checked;
         else if (id == IDC_VOLUME_ICON)
             volume_chip::enabled = is_checked;
+        else if (id == IDC_REMAINING_TIME)
+            main_menu::show_remaining_time = is_checked;
         else if (id == IDC_CHIP_ALIASES)
             output_chip::open_alias_file();
     }

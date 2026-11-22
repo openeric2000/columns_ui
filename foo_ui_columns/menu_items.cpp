@@ -308,6 +308,13 @@ const MainMenuCommand next_track_toast_toggle{next_track_toast_toggle_id, noctur
     nocturne_text::next_track_toggle_description, [] { next_track_toast::enabled = !next_track_toast::enabled.get(); },
     [] { return next_track_toast::enabled.get(); }};
 
+// 自編版新增（2026-11-22）：播放列時間文字用 mm://View/Layout/切換剩餘時間，後半段在曲長與剩餘時間之間切換。
+// 跟播放鍵一樣，從別的視窗點過來的那一下也算（只有「切換播放頁」會擋那一下）
+const MainMenuCommand toggle_remaining_time{toggle_remaining_time_id, nocturne_text::toggle_remaining_time_name,
+    nocturne_text::toggle_remaining_time_description,
+    [] { main_menu::show_remaining_time = !main_menu::show_remaining_time.get(); },
+    [] { return main_menu::show_remaining_time.get(); }};
+
 // 自編版新增：播放停止（按停止、清單播完）時，展開中的播放頁一律收回（2026-11-12 起佇列有歌也收，見上面的 staged）；
 // 換曲與結束 fb2k 不處理。也在這裡追蹤「暫停就位」的那首有沒有真的播過
 class NowPlayingViewPlayCallback : public play_callback_static {
@@ -608,6 +615,8 @@ std::atomic<int64_t> paused_length_ms{-1};
 
 // 進度條預覽的位置（毫秒），沒有預覽時為 -1（見 main_menu::set_seek_preview）；給 %cui_time_text% 用
 std::atomic<int64_t> seek_preview_ms{-1};
+// 進度條預覽時的曲長（毫秒），曲長不明時為 -1；給 %cui_time_left% 算剩餘時間。先寫曲長再寫位置
+std::atomic<int64_t> seek_preview_length_ms{-1};
 
 // 跟 %playback_time% 同樣的寫法：不到一小時「M:SS」，一小時以上「H:MM:SS」
 std::string format_clock(int64_t milliseconds)
@@ -954,19 +963,43 @@ std::optional<std::string> text_for(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 19; }
+    t_uint32 get_field_count() override { return 21; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
             "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak",
-            "cui_play_rank", "cui_list_marquee"};
+            "cui_play_rank", "cui_list_marquee", "cui_time_remaining", "cui_time_left"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // %cui_time_remaining%：播放列時間後半段要顯示剩餘時間時為 1，顯示曲長時不存在（2026-11-22）
+        if (index == 19) {
+            if (!main_menu::show_remaining_time.get())
+                return false;
+            out->write(titleformat_inputtypes::meta, "1");
+            return true;
+        }
+
+        // %cui_time_left%：跟 %cui_time_text% 同一個位置算出來的剩餘時間（不含負號），兩者都沒有就不存在；
+        // 版面用 $if2(%cui_time_left%,%playback_time_remaining%)，拖進度、暫停中前後兩段才對得上
+        if (index == 20) {
+            auto position = seek_preview_ms.load();
+            auto length = seek_preview_length_ms.load();
+            if (position < 0) {
+                position = paused_position_ms.load();
+                length = paused_length_ms.load();
+            }
+            if (position < 0 || length < 0)
+                return false;
+
+            out->write(titleformat_inputtypes::meta, format_clock(std::max<int64_t>(0, length - position)).c_str());
+            return true;
+        }
+
         // %cui_list_marquee%：播放清單框選追蹤中（在沒選取的列或空白處按住左鍵、還沒放開）時為 1，其他時候不存在（2026-11-18）。
         // 標頭網頁讀它：這段期間先不換封面，放開才換（每次要封面都會卡住 fb2k 主執行緒一下）
         if (index == 18) {
@@ -1357,7 +1390,7 @@ service_factory_single_t<MainMenuCommands> _mainmenu_commands_layout(
     stop_or_collapse, show_now_playing_cover, now_playing_style_centered, now_playing_style_info, cycle_now_playing_style,
     now_playing_mode_cover, now_playing_mode_lyrics, now_playing_mode_vu, now_playing_mode_spectrum,
     now_playing_mode_lyrics_vu, now_playing_mode_lyrics_spectrum, now_playing_mode_button, next_track_toast_toggle,
-    theme_font);
+    toggle_remaining_time, theme_font);
 
 service_factory_single_t<MainMenuCommands> _mainmenu_commands_playlist_misc(
     groups::playlist_misc_part, mainmenu_commands::sort_priority_dontcare, playlist_view_search, activate_now_playing);
@@ -1492,17 +1525,29 @@ std::optional<double> get_paused_position()
     return static_cast<double>(position) / 1000.0;
 }
 
+fbh::ConfigBool show_remaining_time(
+    GUID{0x9b4d6e21, 0x73fa, 0x4c08, {0xa5, 0x1e, 0x3d, 0x92, 0xc7, 0x60, 0xb8, 0x4f}}, false,
+    [](bool, bool, std::optional<uint32_t>) { fb2k::inMainThread([] { refresh_layout_fields(); }); });
+
 void set_seek_preview(std::optional<double> seconds)
 {
     // 只在主執行緒呼叫，所以「上次通知時顯示的整秒」與時間戳不用 atomic；毫秒值給標題格式（可能在別的執行緒）讀，用 atomic
     static int64_t shown_second = -1;
+    static int64_t shown_left_second = -1;
     static ULONGLONG last_refresh_tick = 0;
 
     const auto position_ms = seconds ? std::llround(std::max(0.0, *seconds) * 1000.0) : int64_t{-1};
+    const auto length = playback_control::get()->playback_get_length();
+    const auto length_ms = length > 0 ? std::llround(length * 1000.0) : int64_t{-1};
+    commands::seek_preview_length_ms = length_ms;
     commands::seek_preview_ms = position_ms;
 
+    // 後半段顯示剩餘時間時，剩餘的整秒跟已播的整秒不一定同時變，兩個都要看
     const auto second = position_ms < 0 ? int64_t{-1} : position_ms / 1000;
-    if (second == shown_second)
+    const auto left_second = position_ms < 0 || length_ms < 0 || !show_remaining_time.get()
+        ? int64_t{-1}
+        : std::max<int64_t>(0, length_ms - position_ms) / 1000;
+    if (second == shown_second && left_second == shown_left_second)
         return;
 
     // 拖得很快時略過太密的通知，下一次呼叫（進度條每格都會呼叫）會補上；結束預覽（回到 -1）一律馬上通知
@@ -1511,6 +1556,7 @@ void set_seek_preview(std::optional<double> seconds)
         return;
 
     shown_second = second;
+    shown_left_second = left_second;
     last_refresh_tick = now;
     commands::refresh_now_playing_track();
 }
