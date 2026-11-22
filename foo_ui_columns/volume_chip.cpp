@@ -50,10 +50,12 @@ constexpr float track_width_dip = 4;
 constexpr float thumb_diameter_dip = 12;
 constexpr int gap_above_zone_dip = 4;
 constexpr int shadow_dip = 10;
-constexpr int bubble_room_dip = 90;
+// dB 提示泡 2026-11-22 使用者要放大：字 12→15、高 20→26、內距 8→10，左邊空位 90→116（最長的「-100.00 dB」放得下）
+constexpr int bubble_room_dip = 116;
 constexpr int bubble_gap_dip = 8;
-constexpr int bubble_height_dip = 20;
-constexpr float bubble_font_dip = 12;
+constexpr int bubble_height_dip = 26;
+constexpr float bubble_font_dip = 15;
+constexpr int bubble_padding_dip = 10;
 
 // 滾輪每格調幾 dB
 constexpr float wheel_step_db = 2.0f;
@@ -559,7 +561,7 @@ private:
         Gdiplus::RectF measured;
         g.MeasureString(text.c_str(), -1, &font, Gdiplus::PointF(0, 0), &format, &measured);
 
-        const auto padding = static_cast<float>(dip(8));
+        const auto padding = static_cast<float>(dip(bubble_padding_dip));
         const auto width = std::min(measured.Width + 2 * padding, static_cast<float>(m_room - dip(bubble_gap_dip)));
         const auto height = static_cast<float>(dip(bubble_height_dip));
         const auto right = static_cast<float>(m_pill_x - dip(bubble_gap_dip));
