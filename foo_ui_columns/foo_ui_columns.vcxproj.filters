@@ -725,6 +725,9 @@
     <ClCompile Include="expanded_cover_bg.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="listening_log.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>

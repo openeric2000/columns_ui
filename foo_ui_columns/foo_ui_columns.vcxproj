@@ -294,6 +294,7 @@
     <ClCompile Include="nocturne_default_stub.cpp" />
     <ClCompile Include="thin_scrollbar.cpp" />
     <ClCompile Include="expanded_cover_bg.cpp" />
+    <ClCompile Include="listening_log.cpp" />
     <ClCompile Include="gdi.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="imaging.cpp" />
