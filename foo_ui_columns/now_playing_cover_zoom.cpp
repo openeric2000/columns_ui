@@ -27,10 +27,11 @@ constexpr int stage_min_height_dip = 300; // main.xml 的 stage min-height：比
 // 平常只畫箭頭（白 .24），底下墊一層往右下偏 1 DIP 的淡黑陰影，白色或很淺的封面上才認得出來；
 // 滑過、按下才出現深色圓底（.59／.71）與全白箭頭
 // 2026-11-11 使用者說滑過時也太明顯：圓底 .59→.18、箭頭全白→.59（按下圓底 .71→.27、箭頭 .75）；淡陰影一直都畫
+// 2026-11-23 使用者說平常（沒滑過）還要再淡一點：箭頭 .24→.16、陰影 .18→.12（陰影滑過時也照畫；滑過、按下的圓底與箭頭不變）
 const Gdiplus::Color disc_hot_colour(46, 0, 0, 0);
 const Gdiplus::Color disc_pressed_colour(70, 0, 0, 0);
-const Gdiplus::Color icon_colour(61, 241, 241, 241);
-const Gdiplus::Color icon_shadow_colour(46, 0, 0, 0);
+const Gdiplus::Color icon_colour(40, 241, 241, 241);
+const Gdiplus::Color icon_shadow_colour(30, 0, 0, 0);
 const Gdiplus::Color icon_hot_colour(150, 255, 255, 255);
 const Gdiplus::Color icon_pressed_colour(190, 255, 255, 255);
 
