@@ -17,6 +17,39 @@
 
 #pragma comment(lib, "shlwapi.lib")
 
+// 公開版（build_columns_ui.ps1 -Public 定義 NOCTURNE_PUBLIC_BUILD）不放聆聽紀錄（使用者 2026-11-23 決定，Step 8 也不放）：
+// 不記播放、不寫 nocturne-stats、不存縮圖、不註冊 play_callback／initquit。
+// 對外的函式只留空殼：次數、最後播放、聆聽秒數一律傳回 nullopt，呼叫端（menu_items.cpp）就照舊用 foo_playcount；
+// 「連續第 N 次」照 fb2k 原本的 60 秒門檻算（比 60 秒短的歌播到倒數 1 秒）。
+#ifdef NOCTURNE_PUBLIC_BUILD
+
+namespace cui::listening_log {
+
+bool is_counted(double length, uint32_t listened)
+{
+    const auto at = length > 0 && length < 60.0 ? std::max(1.0, length - 1.0) : 60.0;
+    return listened >= at;
+}
+
+std::optional<uint32_t> play_count(metadb_handle*)
+{
+    return {};
+}
+
+std::optional<std::string> last_played(metadb_handle*)
+{
+    return {};
+}
+
+std::optional<double> listened_seconds(metadb_handle*)
+{
+    return {};
+}
+
+} // namespace cui::listening_log
+
+#else
+
 // 聆聽紀錄（2026-11-23，工作區 docs\計畫書\聆聽紀錄計畫書.md 的 Step 2、Step 3）
 //
 // 自己記每一次播放，不靠 foo_playcount／foo_enhanced_playcount：
@@ -1104,3 +1137,5 @@ std::optional<double> listened_seconds(metadb_handle* handle)
 }
 
 } // namespace cui::listening_log
+
+#endif // NOCTURNE_PUBLIC_BUILD

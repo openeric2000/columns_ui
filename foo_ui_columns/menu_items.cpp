@@ -975,7 +975,12 @@ std::optional<std::string> text_for(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
+#ifdef NOCTURNE_PUBLIC_BUILD
+    // 公開版沒有聆聽紀錄（listening_log.cpp），最後三個新播放次數欄位（%cui_play_count% 等，Step 8）不提供
+    t_uint32 get_field_count() override { return 21; }
+#else
     t_uint32 get_field_count() override { return 24; }
+#endif
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
