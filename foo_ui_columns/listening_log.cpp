@@ -5,9 +5,15 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <cmath>
 #include <filesystem>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
+#include <unordered_map>
+
+#include "listening_log.h"
+#include "ng_playlist/ng_playlist.h"
 
 #pragma comment(lib, "shlwapi.lib")
 
@@ -32,6 +38,7 @@
 //   往 .jsonl 加一行時同時加到 .js；fb2k 啟動時在背景整份重建一次（兩邊沒同步、或舊資料還沒有 .js 時補齊）。
 //   另外兩個小檔：library.js（曲庫總首數、媒體庫根目錄，啟動時寫）、now.js（正在播放，換歌、暫停、停止時寫）。
 //   .js 都是從 .jsonl 或 fb2k 狀態算出來的，刪掉也沒關係，下次啟動會再產生。
+// - 新的播放次數（Step 8）：播放器上看得到的次數改照新門檻算，見下面「新的播放次數」一節與 listening_log.h。
 
 namespace cui::listening_log {
 
@@ -395,6 +402,186 @@ std::string make_thumb(const metadb_handle_ptr& track)
     }
 }
 
+// ---------- 新的播放次數（Step 8） ----------
+// baseline.jsonl：第一次啟動（還沒有這個檔）時照路徑存下媒體庫每首的 foo_playcount 次數與最後播放，第一行記切換時間：
+//   {"switch":UTC 毫秒,"source":"foo_playcount"}
+//   {"p":路徑,"s":子音軌,"n":次數,"lp":"YYYY-MM-DD HH:MM:SS"}
+// 新次數＝快照次數＋切換之後照新門檻算到的次數。切換之後的播放在啟動時從 plays-年.jsonl 讀一次（t ≥ 切換時間的），
+// 之後播放中過了門檻就即時加一。切換時間是第一次裝上這版 DLL 的那一刻，在那之前的播放已經算在 foo_playcount 的次數裡。
+// 快照裡沒有的歌（之後才加進媒體庫、搬過檔、媒體庫外的檔）：起點＝foo_playcount 現在的次數扣掉切換之後照 60 秒規則算的次數。
+//   新加的歌兩者相等，起點是 0；搬過檔的 foo_playcount 照標籤對、次數還在，起點就是搬之前的次數。
+// 為什麼要快照：foo_playcount 照標籤對紀錄，之後改標籤次數就接不上；快照照路徑存，跟聆聽紀錄一樣不怕改標籤。
+
+struct Counts {
+    bool in_baseline{};
+    uint32_t base{};          // 快照的次數
+    std::string base_last;    // 快照的最後播放（foo_playcount 的寫法）
+    uint32_t added{};         // 切換之後照新門檻算到的次數
+    uint32_t old_rule{};      // 切換之後照 60 秒規則會算的次數（只給快照裡沒有的歌算起點用）
+    int64_t last_ms{};        // 切換之後最後一次算數的那次播放的開始時間
+    double listened{};        // 切換之後實際聽的秒數（含沒到門檻的）
+};
+
+std::shared_mutex counts_mutex;
+std::unordered_map<std::string, Counts> counts;   // 鍵：路徑|子音軌
+bool counts_loaded{};                             // 以上兩個都受 counts_mutex 保護
+
+std::string count_key(const std::string& path, int64_t subsong)
+{
+    return path + "|" + std::to_string(subsong);
+}
+
+std::string count_key(const metadb_handle_ptr& track)
+{
+    return count_key(native_path(track), track->get_subsong_index());
+}
+
+// fb2k 原本的規則（foo_playcount 收的通知）：播到 60 秒，比 60 秒短的歌播到倒數 1 秒
+bool old_rule_counted(double length, uint32_t listened)
+{
+    const auto at = length > 0 && length < 60.0 ? std::max(1.0, length - 1.0) : 60.0;
+    return listened >= at;
+}
+
+bool new_rule_counted(double length, uint32_t listened)
+{
+    if (length <= 0)
+        return false;
+    if (length >= 30.0)
+        return listened >= std::min(length / 2.0, 240.0);
+    return listened >= std::floor(length) - 1.0;
+}
+
+std::string format_local_time(int64_t unix_ms)
+{
+    const auto seconds = static_cast<time_t>(unix_ms / 1000);
+    tm local{};
+    localtime_s(&local, &seconds);
+    return fmt::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+        local.tm_hour, local.tm_min, local.tm_sec);
+}
+
+// foo_playcount 的現值（快照裡沒有的歌、還沒載入完時用）
+std::string live_field(metadb_handle* handle, const char* script)
+{
+    titleformat_object::ptr object;
+    titleformat_compiler::get()->compile_safe(object, script);
+    pfc::string8 text;
+    handle->format_title(nullptr, text, object, nullptr);
+    return std::string(text.c_str());
+}
+
+uint32_t live_play_count(metadb_handle* handle)
+{
+    static titleformat_object::ptr script;
+    static std::once_flag compiled;
+    std::call_once(compiled, [] { titleformat_compiler::get()->compile_safe(script, "[%play_count%]"); });
+    pfc::string8 text;
+    handle->format_title(nullptr, text, script, nullptr);
+    return static_cast<uint32_t>(std::strtoul(text.c_str(), nullptr, 10));
+}
+
+// 讀整個檔（UTF-8）；沒有或太大傳回空字串
+std::string read_file(const std::wstring& path)
+{
+    const auto file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return {};
+    LARGE_INTEGER size{};
+    std::string data;
+    if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart < 512ll * 1024 * 1024) {
+        data.resize(static_cast<size_t>(size.QuadPart));
+        DWORD read{};
+        if (!ReadFile(file, data.data(), static_cast<DWORD>(data.size()), &read, nullptr))
+            read = 0;
+        data.resize(read);
+    }
+    CloseHandle(file);
+    return data;
+}
+
+template <class Callback>
+void for_each_line(const std::string& data, Callback&& callback)
+{
+    size_t begin = 0;
+    while (begin < data.size()) {
+        auto end = data.find('\n', begin);
+        if (end == std::string::npos)
+            end = data.size();
+        std::string_view line(data.data() + begin, end - begin);
+        if (!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
+        // 只收完整的一行（fb2k 當掉時最後一行可能只寫了一半）
+        if (line.size() >= 2 && line.front() == '{' && line.back() == '}')
+            callback(line);
+        begin = end + 1;
+    }
+}
+
+// 從我們自己寫的一行 JSON 取值。key 帶引號與冒號（"\"p\":"），字串裡的引號都有跳脫，不會誤配到值裡面
+std::optional<std::string> json_string(std::string_view line, std::string_view key)
+{
+    const auto at = line.find(key);
+    if (at == std::string_view::npos)
+        return {};
+    auto i = at + key.size();
+    if (i >= line.size() || line[i] != '"')
+        return {};
+    std::string out;
+    for (++i; i < line.size(); ++i) {
+        const char ch = line[i];
+        if (ch == '"')
+            return out;
+        if (ch != '\\') {
+            out += ch;
+            continue;
+        }
+        if (++i >= line.size())
+            return {};
+        switch (line[i]) {
+        case 'n':
+            out += '\n';
+            break;
+        case 'r':
+            out += '\r';
+            break;
+        case 't':
+            out += '\t';
+            break;
+        case 'u': {
+            // 我們只會把控制字元寫成 \u00XX；其他的照 UTF-8 原樣寫
+            if (i + 4 >= line.size())
+                return {};
+            const auto code = std::strtoul(std::string(line.substr(i + 1, 4)).c_str(), nullptr, 16);
+            if (code < 0x80)
+                out += static_cast<char>(code);
+            i += 4;
+            break;
+        }
+        default:
+            out += line[i];
+        }
+    }
+    return {};
+}
+
+std::optional<double> json_number(std::string_view line, std::string_view key)
+{
+    const auto at = line.find(key);
+    if (at == std::string_view::npos)
+        return {};
+    const std::string rest(line.substr(at + key.size(), 32));
+    char* end{};
+    const auto value = std::strtod(rest.c_str(), &end);
+    if (end == rest.c_str())
+        return {};
+    return value;
+}
+
+// 背景執行緒：讀快照與切換之後的播放，整份做好再交給主執行緒換上
+void load_counts();
+
 // ---------- 這一次播放 ----------
 
 struct Session {
@@ -407,7 +594,28 @@ struct Session {
     // now.js 用：開始時間、路徑、歌長、歌名、藝人、專輯（JSON 物件前半，在主執行緒先組好）
     std::string now_prefix;
     bool paused{};
+    // 新的播放次數：這一次已經過了新門檻／60 秒規則（各只算一次）；pending＝過門檻時次數表還沒載入完，載入後補加
+    bool counted{};
+    bool old_counted{};
+    bool count_pending{};
+    bool old_pending{};
 };
+
+// 這一次播放過了門檻：次數表加一。次數表還沒載入完傳回 false（呼叫端記下來，載入後補）。呼叫端握著 session_mutex
+bool add_count(const Session& session, bool new_rule)
+{
+    std::unique_lock lock(counts_mutex);
+    if (!counts_loaded)
+        return false;
+    auto& entry = counts[count_key(session.track)];
+    if (new_rule) {
+        ++entry.added;
+        entry.last_ms = std::max(entry.last_ms, session.start_ms);
+    } else {
+        ++entry.old_rule;
+    }
+    return true;
+}
 
 // now.js 的內容（呼叫端要握著 session_mutex）
 std::string now_body(const Session& session)
@@ -459,6 +667,13 @@ void finish(bool sync)
     line += ",\"img\":";
     append_json_string(line, done->thumb);
     line += "}";
+
+    // 新的累計聆聽時間：寫進紀錄檔的這一次也加進次數表（次數在播放中過門檻時已經加過）
+    {
+        std::unique_lock lock(counts_mutex);
+        if (counts_loaded)
+            counts[count_key(done->track)].listened += done->listened;
+    }
 
     const auto path = plays_file(done->start_ms);
     if (sync)
@@ -513,12 +728,31 @@ public:
 
     void on_playback_new_track(metadb_handle_ptr track) override { start(track); }
 
-    // 播放中每秒一次（暫停時不會來）：這一次播放實際聽了幾秒
+    // 播放中每秒一次（暫停時不會來）：這一次播放實際聽了幾秒；過了門檻就把新的播放次數加一
     void on_playback_time(double time) override
     {
-        std::scoped_lock lock(session_mutex);
-        if (current)
+        metadb_handle_ptr refresh;
+        {
+            std::scoped_lock lock(session_mutex);
+            if (!current)
+                return;
             ++current->listened;
+            if (!current->counted && new_rule_counted(current->length, current->listened)) {
+                current->counted = true;
+                if (add_count(*current, true))
+                    refresh = current->track;
+                else
+                    current->count_pending = true;
+            }
+            if (!current->old_counted && current->length > 0 && old_rule_counted(current->length, current->listened)) {
+                current->old_counted = true;
+                if (!add_count(*current, false))
+                    current->old_pending = true;
+            }
+        }
+        // 資訊卡、播放清單、標頭跟著重算（foo_playcount 播滿一分鐘時也是這樣通知）
+        if (refresh.is_valid())
+            metadb_io::get()->dispatch_refresh(refresh);
     }
 
     void on_playback_stop(play_control::t_stop_reason reason) override
@@ -675,15 +909,198 @@ void save_library_info()
     std::thread([body = std::move(body)] { write_file_atomic(stats_dir() + L"\\library.js", body); }).detach();
 }
 
+// ---------- 新的播放次數：讀檔與快照 ----------
+
+void load_counts()
+{
+    auto map = std::make_shared<std::unordered_map<std::string, Counts>>();
+    int64_t switch_ms{};
+    for_each_line(read_file(stats_dir() + L"\\baseline.jsonl"), [&](std::string_view line) {
+        if (const auto value = json_number(line, "\"switch\":")) {
+            switch_ms = static_cast<int64_t>(*value);
+            return;
+        }
+        const auto path = json_string(line, "\"p\":");
+        if (!path)
+            return;
+        auto& entry = (*map)[count_key(*path, static_cast<int64_t>(json_number(line, "\"s\":").value_or(0)))];
+        entry.in_baseline = true;
+        entry.base = static_cast<uint32_t>(json_number(line, "\"n\":").value_or(0));
+        entry.base_last = json_string(line, "\"lp\":").value_or("");
+    });
+    // 沒有快照（寫失敗）就不啟用：欄位一直退回 foo_playcount 的舊值
+    if (!switch_ms)
+        return;
+
+    std::error_code error;
+    for (const auto& file : std::filesystem::directory_iterator(stats_dir(), error)) {
+        const auto name = file.path().filename().wstring();
+        if (!name.starts_with(L"plays-") || file.path().extension() != L".jsonl")
+            continue;
+        for_each_line(read_file(file.path().wstring()), [&](std::string_view line) {
+            const auto start = static_cast<int64_t>(json_number(line, "\"t\":").value_or(0));
+            const auto path = json_string(line, "\"p\":");
+            if (start < switch_ms || !path)
+                return;
+            const auto length = json_number(line, "\"len\":").value_or(0);
+            const auto listened = static_cast<uint32_t>(json_number(line, "\"sec\":").value_or(0));
+            auto& entry = (*map)[count_key(*path, static_cast<int64_t>(json_number(line, "\"s\":").value_or(0)))];
+            entry.listened += listened;
+            if (new_rule_counted(length, listened)) {
+                ++entry.added;
+                entry.last_ms = std::max(entry.last_ms, start);
+            }
+            if (length > 0 && old_rule_counted(length, listened))
+                ++entry.old_rule;
+        });
+    }
+
+    fb2k::inMainThread([map] {
+        {
+            std::unique_lock lock(counts_mutex);
+            counts = std::move(*map);
+            counts_loaded = true;
+        }
+        // 正在播的這首在載入前就過了門檻：現在補加
+        metadb_handle_ptr playing;
+        {
+            std::scoped_lock lock(session_mutex);
+            if (current) {
+                if (current->count_pending && add_count(*current, true))
+                    current->count_pending = false;
+                if (current->old_pending && add_count(*current, false))
+                    current->old_pending = false;
+                playing = current->track;
+            }
+        }
+        // 載入前畫出來的是 foo_playcount 的舊值：播放清單整份重算，正在播的這首通知資訊卡與標頭
+        panels::playlist_view::PlaylistView::s_update_all_items();
+        if (playing.is_valid())
+            metadb_io::get()->dispatch_refresh(playing);
+    });
+}
+
+// 第一次啟動（沒有 baseline.jsonl）：照路徑存下媒體庫每首的 foo_playcount 次數與最後播放，存好再載入
+void save_baseline_and_load()
+{
+    const auto final_path = stats_dir() + L"\\baseline.jsonl";
+    std::error_code ignored;
+    if (std::filesystem::exists(final_path, ignored)) {
+        std::thread(load_counts).detach();
+        return;
+    }
+
+    auto items = std::make_shared<metadb_handle_list>();
+    library_manager::get()->get_all_items(*items);
+    const auto switch_ms = now_unix_ms();
+
+    std::thread([items, switch_ms, final_path] {
+        titleformat_object::ptr script;
+        titleformat_compiler::get()->compile_safe(script, "[%play_count%]$char(1)[%last_played%]");
+        std::string text = fmt::format("{{\"switch\":{},\"source\":\"foo_playcount\"}}\n", switch_ms);
+        size_t tracks{};
+        pfc::string8 buffer;
+        for (size_t index = 0; index < items->get_count(); ++index) {
+            if (index % 1000 == 0 && core_api::is_shutting_down())
+                return;
+            const auto& track = items->get_item_ref(index);
+            track->format_title(nullptr, buffer, script, nullptr);
+            const std::string_view value(buffer.c_str());
+            const auto split = value.find('\x01');
+            if (split == std::string_view::npos)
+                continue;
+            const auto played = static_cast<uint32_t>(std::strtoul(std::string(value.substr(0, split)).c_str(), nullptr, 10));
+            std::string last(value.substr(split + 1));
+            if (last == "N/A")
+                last.clear();
+            if (played == 0 && last.empty())
+                continue;
+            text += "{\"p\":";
+            append_json_string(text, native_path(track));
+            text += fmt::format(",\"s\":{},\"n\":{},\"lp\":", track->get_subsong_index(), played);
+            append_json_string(text, last);
+            text += "}\n";
+            ++tracks;
+        }
+        if (!write_file_atomic(final_path, text))
+            return;
+        fb2k::inMainThread([tracks] {
+            console::print(fmt::format("Nocturne: play count baseline saved ({} tracks)", tracks).c_str());
+        });
+        load_counts();
+    }).detach();
+}
+
 void on_library_ready()
 {
     save_history();
     save_library_info();
+    save_baseline_and_load();
     std::thread(rebuild_all_js_mirrors).detach();
 }
 
 FB2K_ON_INIT_STAGE(on_library_ready, init_stages::after_library_init);
 
+// 這首在次數表裡的資料與起點。次數表還沒載入完傳回 false
+struct Lookup {
+    uint32_t base{};
+    Counts entry;
+};
+
+bool lookup(metadb_handle* handle, Lookup& out)
+{
+    const auto key = count_key(metadb_handle_ptr(handle));
+    {
+        std::shared_lock lock(counts_mutex);
+        if (!counts_loaded)
+            return false;
+        if (const auto it = counts.find(key); it != counts.end())
+            out.entry = it->second;
+    }
+    if (out.entry.in_baseline) {
+        out.base = out.entry.base;
+    } else {
+        // 快照裡沒有：foo_playcount 現值扣掉切換之後照 60 秒規則算的次數
+        const auto live = live_play_count(handle);
+        out.base = live > out.entry.old_rule ? live - out.entry.old_rule : 0;
+    }
+    return true;
+}
+
 } // namespace
+
+bool is_counted(double length, uint32_t listened)
+{
+    return new_rule_counted(length, listened);
+}
+
+std::optional<uint32_t> play_count(metadb_handle* handle)
+{
+    Lookup found;
+    if (!handle || !lookup(handle, found))
+        return {};
+    return found.base + found.entry.added;
+}
+
+std::optional<std::string> last_played(metadb_handle* handle)
+{
+    Lookup found;
+    if (!handle || !lookup(handle, found))
+        return {};
+    if (found.entry.added > 0)
+        return format_local_time(found.entry.last_ms);
+    if (found.entry.in_baseline)
+        return found.entry.base_last;
+    auto live = live_field(handle, "[%last_played%]");
+    return live == "N/A" ? std::string{} : live;
+}
+
+std::optional<double> listened_seconds(metadb_handle* handle)
+{
+    Lookup found;
+    if (!handle || !lookup(handle, found))
+        return {};
+    return found.base * std::max(0.0, handle->get_length()) + found.entry.listened;
+}
 
 } // namespace cui::listening_log

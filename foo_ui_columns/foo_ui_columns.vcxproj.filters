@@ -830,6 +830,9 @@
     <ClInclude Include="cover_line.h">
       <Filter>Utilities</Filter>
     </ClInclude>
+    <ClInclude Include="listening_log.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
     <ClInclude Include="now_playing_dsd_source.h">
       <Filter>Utilities</Filter>
     </ClInclude>

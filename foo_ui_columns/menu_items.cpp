@@ -24,6 +24,7 @@
 #include "now_playing_mode_picker.h"
 #include "playlist_item_helpers.h"
 #include "cover_line.h"
+#include "listening_log.h"
 
 namespace cui::main_menu {
 
@@ -707,12 +708,14 @@ metadb_handle_ptr now_playing_file;
 // 這首是什麼時候開始播的（GetTickCount64），%cui_last_played_ago% 判斷「現在」用
 std::atomic<ULONGLONG> now_playing_file_since{};
 // %cui_repeat_streak% 用（2026-11-17，待做清單 v1.5 第 12 個）：同一首連續「算了幾次播放」。
-// 跟播放次數同一個標準（使用者 11/17 選）：播滿一分鐘才算一次（比一分鐘短的歌播到倒數一秒），
+// 跟播放次數同一個標準（使用者 11/17 選）。2026-11-23 播放次數改成新門檻（聽一半或滿 4 分鐘，聆聽紀錄 Step 8），
+// 這裡跟著改：數這一次實際播了幾秒（每秒一次的 on_playback_time，暫停不算、往後拖不會變多），過了門檻算一次。
 // 只聽幾秒就切掉的不算、也不會打斷連續。停止不清掉；重開 fb2k 從頭算
 metadb_handle_ptr last_counted_file;
 uint32_t repeat_streak{};
 bool counted_this_play{};
-double count_after_seconds{60.0};
+double counting_length{};
+uint32_t listened_this_play{};
 
 void set_now_playing_file(const metadb_handle_ptr& track)
 {
@@ -724,8 +727,8 @@ void set_now_playing_file(const metadb_handle_ptr& track)
         now_playing_file_since = GetTickCount64();
         if (track.is_valid()) {
             counted_this_play = false;
-            const auto length = track->get_length();
-            count_after_seconds = length > 0 && length < 60.0 ? std::max(1.0, length - 1.0) : 60.0;
+            counting_length = track->get_length();
+            listened_this_play = 0;
         }
     }
     // 舊的與新的那幾列都要重算（▶ 要換位置）
@@ -741,11 +744,13 @@ public:
 
     void on_playback_new_track(metadb_handle_ptr track) override { set_now_playing_file(track); }
 
-    // 每秒一次：播到算一次播放的位置時，更新連續次數（%cui_repeat_streak%）
+    // 每秒一次：實際播的秒數過了門檻時，更新連續次數（%cui_repeat_streak%）
     void on_playback_time(double time) override
     {
         std::scoped_lock lock(now_playing_file_mutex);
-        if (counted_this_play || !now_playing_file.is_valid() || time < count_after_seconds)
+        ++listened_this_play;
+        if (counted_this_play || !now_playing_file.is_valid()
+            || !cui::listening_log::is_counted(counting_length, listened_this_play))
             return;
         counted_this_play = true;
         repeat_streak = now_playing_file == last_counted_file ? repeat_streak + 1 : 1;
@@ -797,8 +802,12 @@ std::optional<std::string> format_last_played_ago(metadb_handle* handle)
     static std::once_flag compiled;
     std::call_once(compiled, [] { titleformat_compiler::get()->compile_safe(script, "%last_played%"); });
 
+    // 2026-11-23 改讀新的最後播放（聆聽紀錄 Step 8，過了新門檻才更新）；次數表還沒載入完退回 foo_playcount
     pfc::string8 text;
-    handle->format_title(nullptr, text, script, nullptr);
+    if (const auto value = cui::listening_log::last_played(handle))
+        text = value->c_str();
+    else
+        handle->format_title(nullptr, text, script, nullptr);
 
     int year{}, month{}, day{}, hour{}, minute{}, second{};
     if (sscanf_s(text.c_str(), "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) < 5)
@@ -859,6 +868,9 @@ constexpr ULONGLONG refresh_ms = 10 * 60 * 1000;
 
 uint32_t count_of(metadb_handle* handle)
 {
+    // 2026-11-23 改用新的播放次數（聆聽紀錄 Step 8）；次數表還沒載入完退回 foo_playcount
+    if (const auto count = cui::listening_log::play_count(handle))
+        return *count;
     static titleformat_object::ptr script;
     static std::once_flag compiled;
     std::call_once(compiled, [] { titleformat_compiler::get()->compile_safe(script, "%play_count%"); });
@@ -963,19 +975,97 @@ std::optional<std::string> text_for(metadb_handle* handle)
 // 標題格式可能在別的執行緒算，所以展開狀態讀 atomic，不碰分割面板本身；樣式只是單一 32 位元整數設定值，直接讀
 class NowPlayingViewFieldProvider : public metadb_display_field_provider {
 public:
-    t_uint32 get_field_count() override { return 21; }
+    t_uint32 get_field_count() override { return 24; }
     void get_field_name(t_uint32 index, pfc::string_base& out) override
     {
         constexpr const char* names[]{"cui_now_playing_expanded", "cui_now_playing_style", "cui_paused_position_ms",
             "cui_paused_length_ms", "cui_now_playing_file", "cui_time_text", "cui_volume_icon", "cui_expanded_bg",
             "cui_now_playing_mode", "cui_now_playing_mode_toast", "cui_queue_allow_duplicates", "cui_expanded_compact",
             "cui_cover_line", "cui_next_title", "cui_next_artist", "cui_last_played_ago", "cui_repeat_streak",
-            "cui_play_rank", "cui_list_marquee", "cui_time_remaining", "cui_time_left"};
+            "cui_play_rank", "cui_list_marquee", "cui_time_remaining", "cui_time_left", "cui_play_count",
+            "cui_last_played", "cui_listened_seconds"};
         out = names[index];
     }
 
     bool process_field(t_uint32 index, metadb_handle* handle, titleformat_text_out* out) override
     {
+        // 新的播放次數（2026-11-23，聆聽紀錄 Step 8；見 listening_log.h）：版面、播放清單、標頭用它們取代 foo_playcount 的欄位。
+        // %cui_play_count%：新的播放次數
+        // %cui_last_played%：新的最後播放（YYYY-MM-DD HH:MM:SS）
+        // %cui_listened_seconds%：新的累計聆聽秒數（整數），取代版面原本的 $mul(%play_count%,%length_seconds%)
+        // 0 次、沒播過時跟 foo_playcount 一模一樣：寫「0」「N/A」，條件判斷的真假也照它（使用者 11/23：清單沒播過的要顯示 0）。
+        // 次數表還沒載入完（剛啟動那一下）直接用 foo_playcount 的舊值，畫面不會閃成空白
+        if (index >= 21 && index <= 23) {
+            if (!handle)
+                return false;
+            static titleformat_object::ptr fallback[3];
+            static titleformat_object::ptr fallback_if[3];
+            static std::once_flag compiled;
+            std::call_once(compiled, [] {
+                constexpr const char* fields[]{"%play_count%", "%last_played%", "$mul(%play_count%,%length_seconds%)"};
+                for (size_t i = 0; i < 3; ++i) {
+                    titleformat_compiler::get()->compile_safe(fallback[i], fields[i]);
+                    titleformat_compiler::get()->compile_safe(
+                        fallback_if[i], (std::string("$if(") + fields[i] + ",1,0)").c_str());
+                }
+            });
+            // 0 次／沒播過時 foo_playcount 的寫法與真假：第一次遇到 foo_playcount 這首也是 0 次（或 N/A）時探一次記住；
+            // 還沒探到就當成「有值」
+            static std::atomic<int> zero_truth{-1};
+            static std::atomic<int> never_truth{-1};
+            const auto empty_truth = [handle](std::atomic<int>& cache, const char* field, const char* expected) {
+                if (cache.load() >= 0)
+                    return cache.load() == 1;
+                titleformat_object::ptr text_script;
+                titleformat_object::ptr if_script;
+                titleformat_compiler::get()->compile_safe(text_script, field);
+                titleformat_compiler::get()->compile_safe(if_script, (std::string("$if(") + field + ",1,0)").c_str());
+                pfc::string8 text;
+                handle->format_title(nullptr, text, text_script, nullptr);
+                if (std::string_view(text.c_str()) != expected)
+                    return true;
+                handle->format_title(nullptr, text, if_script, nullptr);
+                cache = std::string_view(text.c_str()) == "1" ? 1 : 0;
+                return cache.load() == 1;
+            };
+
+            // 次數表還沒載入完：照 foo_playcount 的現值原樣輸出（字與真假都照它）
+            // （format_title 的回傳值是「資訊讀到了沒」，不是欄位真假，所以真假另外用 $if 算）
+            const auto write_live = [&] {
+                pfc::string8 live;
+                pfc::string8 truth;
+                handle->format_title(nullptr, live, fallback[index - 21], nullptr);
+                handle->format_title(nullptr, truth, fallback_if[index - 21], nullptr);
+                out->write(titleformat_inputtypes::meta, live.c_str());
+                return std::string_view(truth.c_str()) == "1";
+            };
+            const auto write = [&](const std::string& text, bool truth) {
+                out->write(titleformat_inputtypes::meta, text.c_str());
+                return truth;
+            };
+
+            if (index == 21) {
+                const auto count = cui::listening_log::play_count(handle);
+                if (!count)
+                    return write_live();
+                return write(pfc::format_uint(*count).get_ptr(),
+                    *count > 0 || empty_truth(zero_truth, "%play_count%", "0"));
+            }
+            if (index == 22) {
+                const auto last = cui::listening_log::last_played(handle);
+                if (!last)
+                    return write_live();
+                if (last->empty())
+                    return write("N/A", empty_truth(never_truth, "%last_played%", "N/A"));
+                return write(*last, true);
+            }
+            const auto seconds = cui::listening_log::listened_seconds(handle);
+            if (!seconds)
+                return write_live();
+            const auto whole = static_cast<uint64_t>(std::max(0.0, *seconds));
+            return write(pfc::format_uint(whole).get_ptr(), whole > 0 || empty_truth(zero_truth, "%play_count%", "0"));
+        }
+
         // %cui_time_remaining%：播放列時間後半段要顯示剩餘時間時為 1，顯示曲長時不存在（2026-11-22）
         if (index == 19) {
             if (!main_menu::show_remaining_time.get())
