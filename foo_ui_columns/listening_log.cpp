@@ -57,7 +57,7 @@ std::optional<double> listened_seconds(metadb_handle*)
 //   兩個統計元件都只是收這個通知，改不了。使用者要「聽一半或滿 4 分鐘」，所以這裡記下每次實際聽了幾秒，
 //   門檻交給聆聽紀錄面板（網頁）判斷，之後想改門檻，記過的紀錄也能照新規則重算。
 // - 每播完一首（換歌、停止、關 fb2k）在 profile\nocturne-stats\plays-年.jsonl 加一行：
-//   {"t":開始時間（UTC 毫秒）,"p":路徑,"s":子音軌,"len":歌長秒,"sec":實際聽了幾秒,"ti":歌名,"ar":藝人,"al":專輯,"img":封面縮圖}
+//   {"t":開始時間（UTC 毫秒）,"e":結束時間（2026-11-23 起才有）,"p":路徑,"s":子音軌,"len":歌長秒,"sec":實際聽了幾秒,"ti":歌名,"ar":藝人,"al":專輯,"img":封面縮圖}
 //   只往後加、不改寫；聽不到 5 秒的不記（多半是在選歌）。fb2k 當掉最多少掉正在播的那一首。
 // - 實際聽了幾秒：fb2k 播放中每秒呼叫一次 on_playback_time，數這個就好。暫停時不會呼叫；往後拖動不會讓它變多。
 // - 封面縮圖：網頁讀不到每首歌的封面，所以開始播一首時在背景取封面、裁成正方形縮成 200×200 JPEG，
@@ -451,7 +451,7 @@ struct Counts {
     std::string base_last;    // 快照的最後播放（foo_playcount 的寫法）
     uint32_t added{};         // 切換之後照新門檻算到的次數
     uint32_t old_rule{};      // 切換之後照 60 秒規則會算的次數（只給快照裡沒有的歌算起點用）
-    int64_t last_ms{};        // 切換之後最後一次算數的那次播放的開始時間
+    int64_t last_ms{};        // 切換之後最後一次算數的那次播放：播放中是開始時間，播完改成結束時間
     double listened{};        // 切換之後實際聽的秒數（含沒到門檻的）
 };
 
@@ -683,9 +683,16 @@ void finish(bool sync)
     if (!done || done->listened < min_listened_seconds || done->length <= 0 || !done->track.is_valid())
         return;
 
+    // 結束時間（2026-11-23 使用者：剛播完寫「5 分鐘前」不合理）：播完、切歌、停止的這一刻。
+    // 「幾分鐘前」、最後播放都改從這裡算；算在哪一天、哪個小時的統計照舊用開始時間 t。
+    // e 緊接在 t 後面：json_number 找第一個 "e":，放在路徑、歌名前面才不會被字串裡的同樣字樣搶先
+    const auto end_ms = now_unix_ms();
+
     // 歌名等等在主執行緒取（這個函式只從播放回呼與 on_quit 呼叫，都在主執行緒）
     std::string line = "{\"t\":";
     line += std::to_string(done->start_ms);
+    line += ",\"e\":";
+    line += std::to_string(end_ms);
     line += ",\"p\":";
     append_json_string(line, native_path(done->track));
     line += ",\"s\":";
@@ -702,11 +709,22 @@ void finish(bool sync)
     line += "}";
 
     // 新的累計聆聽時間：寫進紀錄檔的這一次也加進次數表（次數在播放中過門檻時已經加過）
+    // 這一次有算進次數的話，最後播放改成結束時間（過門檻時先記開始時間，播放中顯示「現在」）
+    bool last_changed{};
     {
         std::unique_lock lock(counts_mutex);
-        if (counts_loaded)
-            counts[count_key(done->track)].listened += done->listened;
+        if (counts_loaded) {
+            auto& entry = counts[count_key(done->track)];
+            entry.listened += done->listened;
+            if (done->counted && end_ms > entry.last_ms) {
+                entry.last_ms = end_ms;
+                last_changed = true;
+            }
+        }
     }
+    // 播放清單裡這首的那幾列重算，馬上變「剛剛」。只動那幾列；不用 dispatch_refresh，換歌那一刻不廣播給整個介面
+    if (last_changed && !sync)
+        panels::playlist_view::PlaylistView::s_on_now_playing_file_change(done->track, done->track);
 
     const auto path = plays_file(done->start_ms);
     if (sync)
@@ -975,13 +993,15 @@ void load_counts()
             const auto path = json_string(line, "\"p\":");
             if (start < switch_ms || !path)
                 return;
+            // 最後播放用結束時間；2026-11-23 之前寫的紀錄沒有 e，照舊用開始時間
+            const auto end = static_cast<int64_t>(json_number(line, "\"e\":").value_or(static_cast<double>(start)));
             const auto length = json_number(line, "\"len\":").value_or(0);
             const auto listened = static_cast<uint32_t>(json_number(line, "\"sec\":").value_or(0));
             auto& entry = (*map)[count_key(*path, static_cast<int64_t>(json_number(line, "\"s\":").value_or(0)))];
             entry.listened += listened;
             if (new_rule_counted(length, listened)) {
                 ++entry.added;
-                entry.last_ms = std::max(entry.last_ms, start);
+                entry.last_ms = std::max(entry.last_ms, end);
             }
             if (length > 0 && old_rule_counted(length, listened))
                 ++entry.old_rule;
