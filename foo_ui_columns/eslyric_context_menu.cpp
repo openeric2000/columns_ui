@@ -16,6 +16,10 @@
 //   只搬動項目、不改 ID，按下去的還是 ESLyric 自己的功能
 // - 用選單文字認項目（ESLyric 設成繁中）：認不出來的項目照原本的位置留著；連「搜尋歌詞」「儲存歌詞至」都認不出來
 //   （ESLyric 換了語言或改版）就整個不動
+// - 公開版（NOCTURNE_PUBLIC_BUILD）不整理，選單維持 ESLyric 原本的樣子（使用者 2026-11-23：精簡成這樣是個人用的）。
+//   整個模組不編進去，不接手 TrackPopupMenu；「儲存歌詞至 → 設定檔目錄」照 ESLyric 原本的位置留著
+
+#ifndef NOCTURNE_PUBLIC_BUILD
 
 namespace cui::eslyric_context_menu {
 
@@ -285,3 +289,5 @@ initquit_factory_t<EslyricContextMenuInitQuit> eslyric_context_menu_initquit;
 } // namespace
 
 } // namespace cui::eslyric_context_menu
+
+#endif // NOCTURNE_PUBLIC_BUILD
