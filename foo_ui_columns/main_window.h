@@ -46,23 +46,33 @@ extern fbh::ConfigBool lock_main_window_size;
 // 自編版新增（開機優化 B，2026-11-06）：啟動時先不顯示主視窗，等網頁面板回報「好了」再顯示，免得一打開看到空殼畫面
 // （視窗先出現、專輯樹是空的、網頁面板只有 WebView2 字樣）。預設開；關掉就跟原本一樣，視窗建好立刻顯示
 extern fbh::ConfigBool startup_hold_until_ready;
-// 等太久（沒有網頁面板、網頁壞掉、機器很慢）就直接顯示：從行程啟動起算（使用者按下去之後最多等這麼久），
-// 視窗建立時已經剩不到 startup_hold_min_ms 就不等了（機器慢到這個地步，等也只是讓空殼晚幾秒出現），
-// 但視窗顯示出來時仍然淡入（m_startup_late_fade_pending）
-inline constexpr DWORD startup_hold_timeout_ms = 3000;
-inline constexpr DWORD startup_hold_min_ms = 400;
-// 網頁回報「好了」之後柔和淡入的時間（透明度 0 → 100%，曲線跟輸出裝置面板縮回去一樣是兩頭都慢的 smootherstep）。
-// 慢速啟動（太晚才建立視窗）也用這個時間淡入；逾時、第二次啟動轉送時不淡入，直接出現
-inline constexpr DWORD startup_fade_ms = 400;
+// 最多等多久：從視窗建立（開始隱形）起算，不是從行程啟動起算。
+// 視窗建立後網頁還要 1.2～1.8 秒（SSD）或 2.8～4.4 秒（HDD 冷啟動）才回報好了；以前的 3 秒從行程啟動算，
+// 視窗晚一點建立（冷啟動、從檔案總管開音檔）就不夠等，視窗直接跳出來（2026-11-16 實測）
+inline constexpr DWORD startup_hold_timeout_ms = 5000;
+// 逾時後主執行緒要負責淡入；它卡住超過這麼久沒接手，監看執行緒才自己把視窗顯示出來（不淡入，保底用）
+inline constexpr DWORD startup_hold_timeout_grace_ms = 2000;
+// 柔和淡入的時間（透明度 0 → 100%）。網頁回報「好了」與逾時都淡入；曲線是一開始就動、結尾放慢的 ease-out：
+// 以前 400 ms 的 smootherstep 頭尾各 100 ms 幾乎不動，錄影上看得到變化的只有約 0.2 秒
+inline constexpr DWORD startup_fade_ms = 600;
 
 class MainWindow {
 public:
     HWND initialise(user_interface::HookProc_t hook, bool is_hidden = false);
 
     // 結束「先不顯示」的狀態，讓視窗的畫面出現。
-    // 網頁回報「好了」、逾時、第二次啟動轉送時都走這裡；沒在延後的時候什麼都不做，可以放心重複呼叫。
-    // fade＝true 時柔和淡入（只有網頁回報好了那條路用；其餘直接出現）
+    // 網頁回報「好了」、逾時都走這裡（「叫出視窗」不提早結束，見 user_interface_impl.cpp 的 activate）；
+    // 沒在延後的時候什麼都不做，可以放心重複呼叫。
+    // fade＝true 時柔和淡入（網頁回報好了、逾時都用）；監看執行緒已經保底顯示過就不再淡入
     void end_startup_hold(const char* reason = "other", bool fade = false);
+    // 視窗還隱形著、在等網頁回報「好了」（等完會淡入；最多等到逾時）
+    bool is_startup_hold_active() const { return m_startup_hold_active; }
+    // 開機時要等的兩邊（2026-11-22）：標頭網頁回報好了；自編版 Album list 面板建立時說「資料夾樹待建」、
+    // 放好樹時說「建好了」。有收到「待建」就兩邊都好才淡入，免得淡入途中左邊的樹才跳出來；
+    // 沒有 Album list（或是舊版，不會說「待建」）就跟以前一樣只等網頁
+    void on_startup_page_ready();
+    void on_startup_tree_pending();
+    void on_startup_tree_built();
     void finish_startup_fade();
     void shutdown();
     void on_query_capability();
@@ -136,18 +146,21 @@ private:
     // 不用真的隱藏視窗：實測網頁面板（foo_webview2）在隱藏的視窗裡建立後，顯示出來也不會渲染（標頭一直是空殼的「WebView2」字樣）
     static bool should_hold_startup_show(const WINDOWPLACEMENT& placement, bool is_hidden);
     bool begin_startup_hold();
-    // 逾時由另一條執行緒負責：主執行緒開機時常忙到訊息佇列排不完，WM_TIMER 會被拖延（慢機器實測預期 6 秒結果拖到 12 秒），
-    // 解除 DWM 隱形可以從任何執行緒做，所以到時間就直接做，再通知主執行緒收尾
+    // 逾時由另一條執行緒計時：主執行緒開機時常忙到訊息佇列排不完，WM_TIMER 會被拖延（慢機器實測預期 6 秒結果拖到 12 秒）。
+    // 到時間先通知主執行緒淡入；主執行緒再過 startup_hold_timeout_grace_ms 還沒接手，才由這條執行緒直接解除隱形
+    // （解除 DWM 隱形可以從任何執行緒做），免得視窗永遠看不到
     void start_startup_hold_watchdog(DWORD wait_ms);
     void stop_startup_hold_watchdog();
     bool m_startup_hold_active{};
-    // 視窗建立得太晚（HDD 冷啟動等）所以不等網頁、但已經先隱形：視窗顯示出來之後要馬上接淡入
-    bool m_startup_late_fade_pending{};
+    bool m_startup_page_ready{};
+    int m_startup_trees_pending{};
+    bool m_startup_tree_seen{};
+    void end_startup_hold_if_all_ready();
     ULONGLONG m_startup_hold_started_ms{};
     wil::unique_handle m_startup_hold_cancel;
     std::thread m_startup_hold_watchdog;
-    // 監看執行緒已經因逾時把視窗顯示出來了（這時網頁才回報好了就不能再淡入，不然視窗會先消失再淡入）
-    std::atomic<bool> m_startup_hold_timed_out{};
+    // 監看執行緒已經保底把視窗顯示出來了（這時才輪到主執行緒就不能再淡入，不然視窗會先消失再淡入）
+    std::atomic<bool> m_startup_hold_forced_show{};
 
     // 柔和淡入：視窗先變成全透明的分層視窗、解除隱形，再由另一條執行緒把透明度推上去
     // （開機時主執行緒的計時器會被拖延，淡入不能靠它），推完通知主執行緒把自己加的分層樣式拿掉

@@ -5,6 +5,7 @@
 #include "setup_dialog.h"
 #include "get_msg_hook.h"
 #include "main_window.h"
+#include "menu_button.h"
 #include "panel_utils.h"
 #include "rebar.h"
 #include "status_bar.h"
@@ -67,6 +68,14 @@ LRESULT cui::MainWindow::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
     if (const auto result = m_keyboard_shortcut_processor.handle_message(wnd, msg, wp); result)
         return *result;
+
+    // 自編版新增（2026-11-14）：自編版 Album list 的資料夾樹「可不可以捲動」變了，側欄頂排重畫（底部細線，見 menu_button.h）
+    static const UINT wm_album_list_scrollable
+        = RegisterWindowMessage(panels::menu_button::album_list_scrollable_message);
+    if (wm_album_list_scrollable && msg == wm_album_list_scrollable) {
+        panels::menu_button::refresh_dividers();
+        return 0;
+    }
 
     if (m_wm_taskbarcreated && msg == m_wm_taskbarcreated) {
         if (systray::is_system_tray_icon_created) {
@@ -191,8 +200,8 @@ LRESULT cui::MainWindow::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         m_fallback_menu.reset();
         break;
     case MSG_STARTUP_HOLD_TIMEOUT:
-        // 開機優化 B：等網頁回報「好了」等太久，監看執行緒已經把視窗顯示出來，這裡只做收尾
-        end_startup_hold("timeout");
+        // 開機優化 B：等網頁回報「好了」等太久，不等了，照樣淡入（網頁已經先回報的話這裡什麼都不做）
+        end_startup_hold("timeout", true);
         return 0;
     case MSG_STARTUP_FADE_DONE:
         finish_startup_fade();

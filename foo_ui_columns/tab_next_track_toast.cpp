@@ -25,7 +25,7 @@
 
 // 自編版新增：Preferences → Tools → Nocturne 設定頁（2026-11-05）
 // 跟 ESLyric 一樣放在 Tools 底下的獨立頁面，用 Columns UI 設定頁同一套分頁架構（PreferencesTabsHost），五個分頁：
-// - 播放：進度條滾輪、輸出裝置顯示、音量條收成圖示
+// - 播放：進度條滾輪、時間顯示剩餘（2026-11-22）、輸出裝置顯示、音量條收成圖示
 // - 下一首與佇列：展開頁角落的下一首提示（2026-11-02 做在 Columns UI 的分頁裡，11/05 搬到這裡）＋播放別首歌時保留播放佇列
 //   （佇列 11/02 起放在這一頁底下，11/05 併進「播放」，11/06 獨立成分頁，11/08 使用者說一個選項一個分頁太浪費，又併回這裡）
 // - 字型：開「主題字型」對話框（原本只在 View → Layout 選單裡）
@@ -132,6 +132,7 @@ public:
         now_playing_progress::wheel_seek_enabled.reset();
         now_playing_progress::wheel_step_seconds.reset();
         now_playing_progress::wheel_shift_step_seconds.reset();
+        main_menu::show_remaining_time.reset();
         output_chip::enabled.reset();
         output_chip::click_to_switch.reset();
         volume_chip::enabled.reset();
@@ -145,6 +146,7 @@ private:
         SetDlgItemText(wnd, IDC_WHEEL_SEEK_ENABLED, nocturne_text::wheel_seek_enabled);
         SetDlgItemText(wnd, IDC_WHEEL_STEP_LABEL, nocturne_text::wheel_step_label);
         SetDlgItemText(wnd, IDC_WHEEL_SHIFT_LABEL, nocturne_text::wheel_shift_step_label);
+        SetDlgItemText(wnd, IDC_REMAINING_TIME, nocturne_text::remaining_time_setting);
         SetDlgItemText(wnd, IDC_TITLE2, nocturne_text::chip_settings_title);
         SetDlgItemText(wnd, IDC_CHIP_ENABLED, nocturne_text::chip_show);
         SetDlgItemText(wnd, IDC_CHIP_CLICK, nocturne_text::chip_click);
@@ -156,6 +158,7 @@ private:
         CheckDlgButton(wnd, IDC_WHEEL_SEEK_ENABLED, check_state(now_playing_progress::wheel_seek_enabled.get()));
         CheckDlgButton(wnd, IDC_CHIP_ENABLED, check_state(output_chip::enabled.get()));
         CheckDlgButton(wnd, IDC_CHIP_CLICK, check_state(output_chip::click_to_switch.get()));
+        CheckDlgButton(wnd, IDC_REMAINING_TIME, check_state(main_menu::show_remaining_time.get()));
 
         init_seconds_spin(wnd, IDC_WHEEL_STEP_SPIN, now_playing_progress::wheel_step_min,
             now_playing_progress::wheel_step_max, now_playing_progress::wheel_step_seconds.get());
@@ -190,6 +193,8 @@ private:
             output_chip::click_to_switch = is_checked;
         else if (id == IDC_VOLUME_ICON)
             volume_chip::enabled = is_checked;
+        else if (id == IDC_REMAINING_TIME)
+            main_menu::show_remaining_time = is_checked;
         else if (id == IDC_CHIP_ALIASES)
             output_chip::open_alias_file();
     }
@@ -591,7 +596,7 @@ void set_enabled(bool enabled)
 // 關鍵字（2026-11-11 使用者要可以自己輸入，預設先填好）：分號分隔，比對檔名與歌名。鍵名、預設值要跟 Album list 一致
 inline constexpr char keywords_config_key[] = "nocturne.folderTree.hideInstrumental.keywords";
 inline constexpr char keywords_default[]
-    = "instrumental;inst.;(inst;[inst;inst);inst];off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
+    = "instrumental;inst.;(inst;[inst;inst);inst];inst ver;-inst-;game inst;off vocal;off-vocal;offvocal;karaoke;\xE3\x82\xAB\xE3\x83\xA9\xE3\x82"
       "\xAA\xE3\x82\xB1;backing track;without vocal;\xE4\xBC\xB4\xE5\xA5\x8F"; // …;カラオケ;…;伴奏
 
 std::string get_keywords()
@@ -786,7 +791,8 @@ private:
 // ---- 展開頁（2026-11-11）----
 // 使用者說設定放滿了就開新分頁、維持鬆弛度。三個小標題：
 // - 背景：封面虛化背景＋亮度上限（原本在「介面」分頁，邏輯在 expanded_cover_bg.cpp）；沒勾時亮度上限整個藏起來
-// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）
+// - 顯示內容：展開頁要有哪幾種（左上角按鈕左鍵換下一種、右鍵跳卡片；2026-11-12 起不再有二選一的設定）；
+//   封面下方資訊詳細／精簡（2026-11-14，邏輯在 now_playing_cover_zoom.cpp 的 compact_info）
 // - 歌詞：歌詞防誤拖（邏輯在 now_playing_cover_zoom.cpp 的 lyrics_lock）
 // 都是改了馬上生效
 class TabNocturneExpanded : public NocturneTab {
@@ -805,6 +811,7 @@ public:
         expanded_cover_bg::cap_percent.reset();
         main_menu::now_playing_modes::set_mask(main_menu::now_playing_modes::all_modes);
         main_menu::on_now_playing_modes_changed();
+        cover_zoom::compact_info.reset();
         lyrics_lock::set_enabled(lyrics_lock::enabled_default);
     }
 
@@ -817,20 +824,33 @@ private:
     }
 
     // 「展開頁要有」：外觀用跟下面一樣的下拉選單（2026-11-11 使用者說原本的按鈕是白底、跟下面的不一樣），
-    // 裡面只放一項＝勾選的模式用頓號接起來；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
+    // 裡面只放一項＝勾選的摘要；點下去（或 F4、Alt+↓、空白鍵）不開清單，改開可以勾選的選單（choose_modes）
+    // 摘要（2026-11-14 使用者說全列出來太長）：全勾＝「全部」、少一兩種＝「除了 …」、其他直接列出勾選的
     static void update_modes_text(HWND wnd)
     {
         using main_menu::NowPlayingMode;
         const auto mask = main_menu::now_playing_modes::get_mask();
-        std::wstring text;
         const auto& modes = main_menu::now_playing_mode_order;
-        for (size_t i = 0; i < std::size(modes); ++i) {
-            if ((mask & main_menu::now_playing_modes::bit_of(modes[i])) == 0)
-                continue;
-            if (!text.empty())
-                text += nocturne_text::modes_separator;
-            text += nocturne_text::mode_short_names[main_menu::mode_name_index(modes[i])];
-        }
+        std::vector<NowPlayingMode> checked;
+        std::vector<NowPlayingMode> unchecked;
+        for (const auto mode : modes)
+            ((mask & main_menu::now_playing_modes::bit_of(mode)) != 0 ? checked : unchecked).push_back(mode);
+        const auto join = [](const std::vector<NowPlayingMode>& list) {
+            std::wstring joined;
+            for (const auto mode : list) {
+                if (!joined.empty())
+                    joined += nocturne_text::modes_separator;
+                joined += nocturne_text::mode_short_names[main_menu::mode_name_index(mode)];
+            }
+            return joined;
+        };
+        std::wstring text;
+        if (unchecked.empty())
+            text = nocturne_text::modes_all;
+        else if (unchecked.size() <= 2 && checked.size() > unchecked.size())
+            text = nocturne_text::modes_except + join(unchecked);
+        else
+            text = join(checked);
         const auto combo = GetDlgItem(wnd, IDC_MODES);
         ComboBox_ResetContent(combo);
         ComboBox_AddString(combo, text.c_str());
@@ -933,6 +953,14 @@ private:
         update_modes_text(wnd);
         SetWindowSubclass(GetDlgItem(wnd, IDC_MODES), s_modes_combo_proc, 1, 0);
 
+        // 封面下方資訊：詳細／精簡（2026-11-14）
+        SetDlgItemText(wnd, IDC_EXPANDED_INFO_LABEL, nocturne_text::expanded_info_label);
+        SetDlgItemText(wnd, IDC_EXPANDED_INFO_NOTE, nocturne_text::expanded_info_note);
+        const auto info_combo = GetDlgItem(wnd, IDC_EXPANDED_INFO);
+        for (const auto& name : nocturne_text::expanded_info_names)
+            ComboBox_AddString(info_combo, name);
+        ComboBox_SetCurSel(info_combo, cover_zoom::compact_info.get() ? 1 : 0);
+
         // 歌詞
         SetDlgItemText(wnd, IDC_TITLE3, nocturne_text::expanded_section_lyrics);
         SetDlgItemText(wnd, IDC_LYRICS_LOCK, nocturne_text::lyrics_lock);
@@ -954,6 +982,10 @@ private:
             if (selection != CB_ERR)
                 expanded_cover_bg::cap_percent
                     = expanded_cover_bg::cap_min + gsl::narrow<uint32_t>(selection) * expanded_cover_bg::cap_step;
+        } else if (id == IDC_EXPANDED_INFO && code == CBN_SELCHANGE) {
+            const auto selection = ComboBox_GetCurSel(GetDlgItem(wnd, id));
+            if (selection != CB_ERR)
+                cover_zoom::compact_info = selection == 1;
         } else if (id == IDC_LYRICS_LOCK && code == BN_CLICKED) {
             lyrics_lock::set_enabled(IsDlgButtonChecked(wnd, IDC_LYRICS_LOCK) == BST_CHECKED);
         }
@@ -1034,6 +1066,10 @@ constexpr std::string_view open_preferences_marker = "[Nocturne] open-preference
 // - 「[Nocturne] ready」：網頁第一次載入完成（標頭、封面都套用了）。主視窗啟動時先不顯示，收到這句才顯示（開機優化 B，2026-11-06）；
 //   視窗不在等的時候（網頁重新載入、已經顯示）收到只是忽略
 constexpr std::string_view page_ready_marker = "[Nocturne] ready";
+// - 「[Nocturne] albumlist tree pending／built」：自編版 Album list 開機時資料夾樹改在背景建（2026-11-22），
+//   面板建立時說待建、樹放好時說建好了；主視窗有收到待建就等標頭和樹都好了才淡入（見 MainWindow::on_startup_tree_pending）
+constexpr std::string_view album_tree_pending_marker = "[Nocturne] albumlist tree pending";
+constexpr std::string_view album_tree_built_marker = "[Nocturne] albumlist tree built";
 // - 「[Nocturne] tip show <左> <上> <右> <下> <網頁寬> <網頁高> <文字>」：網頁元件的滑鼠提示（2026-11-12）。
 //   座標是網頁裡的實體像素（CSS 像素×devicePixelRatio）；用網頁寬高找出是哪個網頁面板，換成螢幕座標後畫在元件正下方
 //   （nocturne_tooltip.h）。「[Nocturne] tip hide」收起
@@ -1122,7 +1158,17 @@ public:
         }
 
         if (text.find(page_ready_marker) != std::string_view::npos) {
-            fb2k::inMainThread([] { main_window.end_startup_hold("page ready", true); });
+            fb2k::inMainThread([] { main_window.on_startup_page_ready(); });
+            return;
+        }
+
+        if (text.find(album_tree_pending_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { main_window.on_startup_tree_pending(); });
+            return;
+        }
+
+        if (text.find(album_tree_built_marker) != std::string_view::npos) {
+            fb2k::inMainThread([] { main_window.on_startup_tree_built(); });
             return;
         }
 

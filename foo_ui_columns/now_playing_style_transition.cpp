@@ -4,14 +4,11 @@
 #include "nocturne_build_info.h"
 #endif
 
-#include <d3d11.h>
-#include <dcomp.h>
-
+#include "nocturne_dcomp.h"
 #include "now_playing_style_transition.h"
 #include "now_playing_cover_zoom.h"
+#include "menu_items.h"
 #include "splitter.h"
-
-#pragma comment(lib, "dcomp.lib")
 
 // 展開頁封面⇄資訊卡、切換顯示內容的過渡動畫，說明見 now_playing_style_transition.h
 
@@ -43,7 +40,17 @@ constexpr double stable_threshold = 1.5;
 constexpr int stage_cell_threshold = 72;
 constexpr int stage_changed_cells = 2;
 constexpr double stage_changed_average = 0.5;
-constexpr double stage_stable_average = 1.0;
+
+// 換歌交叉淡化（2026-11-14）：自然換歌在結束前這麼多秒先截圖蓋上（剩 pre_capture_window_s 秒內才排計時器）；
+// 蓋上後最多等這麼久換歌，沒等到就照常淡出
+// 2026-11-14 219 實測：結束前 0.25 秒排的計時器，實際在換歌前 344 ms 蓋上（計時器誤差＋截圖約 30 ms），改 0.18
+constexpr double pre_capture_lead_s = 0.18;
+constexpr double pre_capture_window_s = 2.5;
+constexpr ULONGLONG track_wait_limit_ms = 1500;
+// 換歌後不等畫面「穩定」：ESLyric 的封面自己溶 0.26 秒、歌詞會捲動，整個展開頁一直在動，照換模式的規則每次都等滿 0.45 秒
+// （實測換歌後停住 469～484 ms 才淡出）。改成至少等 track_settle_min_ms、看到畫面換了就淡出（底下還在溶沒關係），最多等 track_settle_limit_ms
+constexpr ULONGLONG track_settle_min_ms = 100;
+constexpr ULONGLONG track_settle_limit_ms = 300;
 
 // 跟 CSS 的 cubic-bezier(x1, y1, x2, y2) 相同（同 splitter_window.cpp），給時間比例 x 求進度
 double cubic_bezier(double x1, double y1, double x2, double y2, double x)
@@ -81,69 +88,11 @@ using Signature = std::vector<int>;
 // 加上等新畫面時每次截圖約 30 ms，整段只有約 14 格、格間隔 34～50 ms（使用者說不順）。
 // 改成把舊、新兩張圖各上傳一次，縮放與透明度交給 DWM 的動畫（IDCompositionAnimation）：每格不花 CPU、照螢幕更新跑，
 // 主執行緒忙（ESLyric 重排版面、截圖判斷）也不會停住
-struct Graphics {
-    wil::com_ptr<ID3D11Device> d3d;
-    wil::com_ptr<ID3D11DeviceContext> context;
-    wil::com_ptr<IDCompositionDevice> dcomp;
-};
-
-Graphics* graphics()
-{
-    // 不在結束時釋放（DLL 卸載時再碰 D3D 可能出事），整個行程共用一份
-    static auto* shared = new Graphics;
-    if (shared->dcomp) {
-        BOOL valid{};
-        if (SUCCEEDED(shared->dcomp->CheckDeviceState(&valid)) && valid)
-            return shared;
-        *shared = {};
-    }
-
-    for (const auto driver : {D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP}) {
-        if (SUCCEEDED(D3D11CreateDevice(nullptr, driver, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
-                D3D11_SDK_VERSION, shared->d3d.put(), nullptr, shared->context.put())))
-            break;
-    }
-    if (!shared->d3d)
-        return nullptr;
-
-    const auto dxgi = shared->d3d.try_query<IDXGIDevice>();
-    if (!dxgi || FAILED(DCompositionCreateDevice(dxgi.get(), IID_PPV_ARGS(shared->dcomp.put())))) {
-        *shared = {};
-        return nullptr;
-    }
-    return shared;
-}
-
-// 一張圖（預乘透明度的 BGRA）上傳成 DirectComposition 的內容
-wil::com_ptr<IDCompositionSurface> make_surface(Graphics& g, Gdiplus::Bitmap& bitmap)
-{
-    const auto width = bitmap.GetWidth();
-    const auto height = bitmap.GetHeight();
-    if (width == 0 || height == 0)
-        return {};
-
-    wil::com_ptr<IDCompositionSurface> surface;
-    if (FAILED(g.dcomp->CreateSurface(
-            width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, surface.put())))
-        return {};
-
-    Gdiplus::BitmapData data{};
-    const Gdiplus::Rect all(0, 0, static_cast<INT>(width), static_cast<INT>(height));
-    if (bitmap.LockBits(&all, Gdiplus::ImageLockModeRead, PixelFormat32bppPARGB, &data) != Gdiplus::Ok)
-        return {};
-    const auto unlock = wil::scope_exit([&] { bitmap.UnlockBits(&data); });
-
-    wil::com_ptr<ID3D11Texture2D> texture;
-    POINT offset{};
-    if (FAILED(surface->BeginDraw(nullptr, IID_PPV_ARGS(texture.put()), &offset)))
-        return {};
-    const D3D11_BOX box{static_cast<UINT>(offset.x), static_cast<UINT>(offset.y), 0, static_cast<UINT>(offset.x) + width,
-        static_cast<UINT>(offset.y) + height, 1};
-    g.context->UpdateSubresource(texture.get(), 0, &box, data.Scan0, static_cast<UINT>(data.Stride), 0);
-    if (FAILED(surface->EndDraw()))
-        return {};
-    return surface;
-}
+// 2026-11-22：裝置、上傳圖片、分段曲線搬到 nocturne_dcomp.h，跟輸出裝置顯示的滑動動畫共用同一個裝置
+using nocturne_dcomp::Graphics;
+using nocturne_dcomp::graphics;
+using nocturne_dcomp::make_surface;
+using nocturne_dcomp::overlay_insert_after;
 
 // 一層：圖＋以封面中心為準的縮放＋透明度
 struct Layer {
@@ -172,39 +121,18 @@ std::optional<Layer> make_layer(Graphics& g, Gdiplus::Bitmap& bitmap, const RECT
     return layer;
 }
 
-// from → to、照 cubic-bezier(0.4, 0, 0.2, 1) 走 duration_ms 的動畫：DirectComposition 只吃分段三次多項式，
+// from → to、照 cubic-bezier(0.4, 0, 0.2, 1) 走 length_ms 的動畫：DirectComposition 只吃分段三次多項式，
 // 所以把曲線切 12 段，每段用兩端的值與斜率做 Hermite 內插（跟真曲線差不到 0.1%）
-wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to)
+wil::com_ptr<IDCompositionAnimation> make_animation(Graphics& g, float from, float to, double length_ms = duration_ms)
 {
-    wil::com_ptr<IDCompositionAnimation> animation;
-    if (FAILED(g.dcomp->CreateAnimation(animation.put())))
-        return {};
-
-    const double total = duration_ms / 1000.0;
-    const auto value = [&](double x) { return from + (to - from) * eased(x); };
-    const auto slope = [&](double x) {
+    // 這條 bezier 沒有現成的導數公式，用數值微分（跟搬出去之前一樣）
+    const auto slope = [](double x) {
         constexpr double h = 1e-4;
         const auto a = std::max(0.0, x - h);
         const auto b = std::min(1.0, x + h);
-        return (value(b) - value(a)) / ((b - a) * total);
+        return (eased(b) - eased(a)) / (b - a);
     };
-
-    constexpr int segments = 12;
-    for (int i = 0; i < segments; ++i) {
-        const auto x0 = static_cast<double>(i) / segments;
-        const auto x1 = static_cast<double>(i + 1) / segments;
-        const auto h = (x1 - x0) * total;
-        const auto v0 = value(x0);
-        const auto v1 = value(x1);
-        const auto d0 = slope(x0);
-        const auto d1 = slope(x1);
-        const auto c = (3 * (v1 - v0) / h - 2 * d0 - d1) / h;
-        const auto d = (2 * (v0 - v1) / h + d0 + d1) / (h * h);
-        animation->AddCubic(x0 * total, static_cast<float>(v0), static_cast<float>(d0), static_cast<float>(c),
-            static_cast<float>(d));
-    }
-    animation->End(total, to);
-    return animation;
+    return nocturne_dcomp::make_animation(g, from, to, length_ms, eased, slope);
 }
 
 // 讓一層照動畫縮放、淡入淡出（scale_from == scale_to 就不縮放）
@@ -217,6 +145,46 @@ void animate(Graphics& g, Layer& layer, float scale_from, float scale_to, float 
         }
     }
     if (const auto opacity = make_animation(g, opacity_from, opacity_to))
+        layer.effect->SetOpacity(opacity.get());
+}
+
+// 毫秒時鐘（GetTickCount64 只有約 16 ms 精度，算動畫走到哪不夠準）
+double now_ms()
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// 一層目前這段動畫的起點、終點與時間：連點倒回去時要知道它現在走到哪（DWM 那邊的值讀不回來，照同一條曲線自己算）
+struct Track {
+    float opacity_from{1.f};
+    float opacity_to{1.f};
+    float scale_from{1.f};
+    float scale_to{1.f};
+    double start{};
+    double length{};
+
+    double progress(double now) const { return length > 0 ? eased((now - start) / length) : 1.0; }
+    float opacity(double now) const
+    {
+        return static_cast<float>(opacity_from + (opacity_to - opacity_from) * progress(now));
+    }
+    float scale(double now) const { return static_cast<float>(scale_from + (scale_to - scale_from) * progress(now)); }
+    double end() const { return start + length; }
+};
+
+// 照 track 設定一層的動畫（縮放沒變就直接設定值）
+void animate(Graphics& g, Layer& layer, const Track& track)
+{
+    if (track.scale_from != track.scale_to) {
+        if (const auto scale = make_animation(g, track.scale_from, track.scale_to, track.length)) {
+            layer.scale->SetScaleX(scale.get());
+            layer.scale->SetScaleY(scale.get());
+        }
+    } else {
+        layer.scale->SetScaleX(track.scale_to);
+        layer.scale->SetScaleY(track.scale_to);
+    }
+    if (const auto opacity = make_animation(g, track.opacity_from, track.opacity_to, track.length))
         layer.effect->SetOpacity(opacity.get());
 }
 
@@ -241,6 +209,18 @@ struct Transition {
     bool ready{};
     // 整個展開頁淡出（切換展開頁顯示內容，2026-11-11）：蓋層放舊畫面，ESLyric 畫好後整個蓋層淡出、透出底下真的新畫面，不縮放
     bool whole_stage{};
+    // 換歌交叉淡化（2026-11-14）：舊畫面先蓋上、還沒換歌；換歌（on_playback_new_track）後才開始等 ESLyric 畫好
+    bool track{};
+    bool waiting_track{};
+    ULONGLONG shown_at{};
+    // 封面方塊連點倒回去（2026-11-16）：兩層各自目前的動畫、現在要往哪一面（true＝切換後那面）、
+    // 切換後那面的取樣（倒回去再點回來時用來確認底下畫好了）、拿掉蓋層前底下要長得像哪一面
+    Track old_track;
+    Track new_track;
+    bool target_new{true};
+    Signature new_signature;
+    std::optional<Signature> confirm_signature;
+    ULONGLONG confirm_deadline{};
 };
 
 std::unique_ptr<Transition> g_transition;
@@ -460,6 +440,31 @@ void finish()
 void poll_ready(Transition& transition, ULONGLONG now)
 {
     const auto elapsed = now - transition.applied_at;
+
+    // 換歌：畫面跟蓋上時不一樣了（新的字畫出來了）就淡出，不等穩定
+    if (transition.track) {
+        if (elapsed < track_settle_min_ms)
+            return;
+        bool changed = false;
+        if (auto shot = capture(transition.screen)) {
+            const auto signature = signature_of(*shot, transition.cover);
+            int cells = 0;
+            for (size_t i = 0; i + 2 < signature.size() && i + 2 < transition.before_signature.size(); i += 3) {
+                const auto d = std::abs(signature[i] - transition.before_signature[i])
+                    + std::abs(signature[i + 1] - transition.before_signature[i + 1])
+                    + std::abs(signature[i + 2] - transition.before_signature[i + 2]);
+                if (d > stage_cell_threshold)
+                    cells++;
+            }
+            changed = cells >= stage_changed_cells || difference(signature, transition.before_signature) > stage_changed_average;
+        }
+        if (!changed && elapsed < track_settle_limit_ms)
+            return;
+        transition.ready = true;
+        transition.ready_at = now;
+        return;
+    }
+
     if (elapsed < settle_min_ms)
         return;
 
@@ -480,8 +485,10 @@ void poll_ready(Transition& transition, ULONGLONG now)
             }
             const auto from_before = difference(signature, transition.before_signature);
             const bool stage_changed = cells >= stage_changed_cells || from_before > stage_changed_average;
-            const bool stage_stable = difference(signature, transition.last_signature) < stage_stable_average;
-            ready = stage_changed && stage_stable;
+            // 2026-11-17：原本還要「跟上一張差不多」才算畫好，每次截圖 33 ms＋輪詢 15 ms，至少要多等一輪（219 動畫紀錄：切換後 90～110 ms 才淡出）。
+            // VU 表在切換當下就顯示、ESLyric 也是一次重畫，看到畫面換了就淡出（跟換歌同一個規則）；
+            // 就算 ESLyric 還在補畫，淡出剛開始時蓋層幾乎不透明，看不出來
+            ready = stage_changed;
         } else {
             const bool stable = difference(signature, transition.last_signature) < stable_threshold;
             ready = changed && stable;
@@ -513,16 +520,101 @@ void start_second_half(Transition& transition)
                 transition.new_layer->scale->SetScaleY(new_start_scale);
                 transition.root->AddVisual(transition.new_layer->visual.get(), TRUE,
                     transition.old_layer ? transition.old_layer->visual.get() : nullptr);
-                animate(*g, *transition.new_layer, new_start_scale, 1.f, 0.f, 1.f);
+                transition.new_track = Track{0.f, 1.f, new_start_scale, 1.f, now_ms(), duration_ms};
+                animate(*g, *transition.new_layer, transition.new_track);
+                transition.new_signature = transition.last_signature;
             }
         }
         g->dcomp->Commit();
     }
     transition.last_capture.reset();
 
+    if (!transition.whole_stage) {
+        // 封面方塊：兩層各自的動畫都跑完才拿掉蓋層（舊的一面可能是連點倒回去後重新開始的）
+        const auto end = std::max(transition.old_track.end(), transition.new_layer ? transition.new_track.end() : 0.0);
+        transition.finish_at = GetTickCount64() + static_cast<ULONGLONG>(std::max(0.0, end - now_ms())) + finish_margin_ms;
+        return;
+    }
+
     // 舊的一面在切換時就開始動；兩段都跑完才拿掉蓋層
     const auto end = std::max(transition.applied_at, transition.ready_at) + static_cast<ULONGLONG>(duration_ms);
     transition.finish_at = std::max(end, transition.applied_at + static_cast<ULONGLONG>(duration_ms)) + finish_margin_ms;
+}
+
+// 拿掉蓋層之前，底下真的畫面是不是已經是要停的那一面（連點倒回去時 ESLyric 要重畫，還沒畫好就拿掉會閃一下舊的）
+bool underneath_ready(Transition& transition, ULONGLONG now)
+{
+    if (!transition.confirm_signature)
+        return true;
+    if (now >= transition.confirm_deadline) {
+        ANIM_LOG_LINE(fmt::format("confirm timed out t={:.1f}", ANIM_LOG_NOW()));
+        return true;
+    }
+    const auto shot = capture(transition.screen);
+    if (!shot)
+        return true;
+    return difference(signature_of(*shot, transition.cover), *transition.confirm_signature) < changed_threshold;
+}
+
+// 封面方塊動畫還沒跑完又點了一次：從兩層現在的透明度與縮放倒回去（to_new＝往切換後那一面）。
+// 蓋層最底下有一層不透明的底，底下的 ESLyric 在蓋層拿掉前看不到，所以可以先切換再慢慢動
+bool retarget(Transition& transition, bool to_new)
+{
+    auto* g = graphics();
+    if (!g || !transition.old_layer)
+        return false;
+
+    const auto now = now_ms();
+    const auto tick = GetTickCount64();
+    // 剩下的距離越短走越快，最少 min_reverse_ms
+    static constexpr double min_reverse_ms = 120;
+    const auto length_for = [](float from, float to) {
+        return std::max(min_reverse_ms, duration_ms * std::abs(static_cast<double>(to) - from));
+    };
+
+    const auto old_opacity = transition.old_track.opacity(now);
+    const auto old_scale = transition.old_track.scale(now);
+    const auto old_to_opacity = to_new ? 0.f : 1.f;
+    const auto old_to_scale = to_new ? old_end_scale : 1.f;
+    transition.old_track
+        = Track{old_opacity, old_to_opacity, old_scale, old_to_scale, now, length_for(old_opacity, old_to_opacity)};
+    animate(*g, *transition.old_layer, transition.old_track);
+    auto end = transition.old_track.end();
+
+    if (transition.new_layer) {
+        const auto new_opacity = transition.new_track.opacity(now);
+        const auto new_scale = transition.new_track.scale(now);
+        const auto new_to_opacity = to_new ? 1.f : 0.f;
+        const auto new_to_scale = to_new ? 1.f : new_start_scale;
+        transition.new_track
+            = Track{new_opacity, new_to_opacity, new_scale, new_to_scale, now, length_for(new_opacity, new_to_opacity)};
+        animate(*g, *transition.new_layer, transition.new_track);
+        end = std::max(end, transition.new_track.end());
+    }
+    g->dcomp->Commit();
+
+    transition.target_new = to_new;
+    transition.last_capture.reset();
+    transition.finish_at = tick + static_cast<ULONGLONG>(std::max(0.0, end - now)) + finish_margin_ms;
+    transition.confirm_deadline = transition.finish_at + settle_limit_ms;
+
+    if (!to_new) {
+        // 倒回原本那一面：圖已經有了，不用再等 ESLyric；拿掉蓋層前確認底下畫回原本的樣子
+        transition.ready = true;
+        transition.confirm_signature = transition.before_signature;
+    } else if (transition.new_layer) {
+        transition.ready = true;
+        transition.confirm_signature = transition.new_signature;
+    } else {
+        // 切換後那面還沒截到（第一次切換時 ESLyric 還沒畫好就倒回去了）：照第一次的流程重新等它畫好
+        transition.ready = false;
+        transition.applied_at = tick;
+        transition.last_signature.clear();
+        transition.confirm_signature.reset();
+    }
+    ANIM_LOG_LINE(fmt::format("retarget to {} t={:.1f} old opacity {:.2f} new layer {}", to_new ? "new" : "old",
+        ANIM_LOG_NOW(), old_opacity, transition.new_layer ? "yes" : "no"));
+    return true;
 }
 
 void on_timer()
@@ -532,6 +624,15 @@ void on_timer()
 
     auto& transition = *g_transition;
     const auto now = GetTickCount64();
+
+    // 換歌交叉淡化：舊畫面蓋著等換歌；等太久（算錯結束時間、播完清單沒有下一首）就當作已經換了，照常淡出
+    if (transition.waiting_track) {
+        if (now - transition.shown_at < track_wait_limit_ms)
+            return;
+        ANIM_LOG_LINE(fmt::format("no new track after {} ms", now - transition.shown_at));
+        transition.waiting_track = false;
+        transition.applied_at = now;
+    }
 
     if (!transition.ready) {
         poll_ready(transition, now);
@@ -543,7 +644,7 @@ void on_timer()
         return;
     }
 
-    if (now >= transition.finish_at)
+    if (now >= transition.finish_at && underneath_ready(transition, now))
         finish();
 }
 
@@ -620,7 +721,9 @@ bool show_overlay(Graphics& g, Transition& transition, HWND owner, Gdiplus::Bitm
 
     if (FAILED(g.dcomp->Commit()))
         return false;
-    ShowWindow(transition.wnd, SW_SHOWNOACTIVATE);
+    // 不用 ShowWindow：它會把蓋層排到整個桌面最上面（見 overlay_insert_after）
+    SetWindowPos(transition.wnd, overlay_insert_after(owner, transition.wnd), 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     g.dcomp->WaitForCommitCompletion();
     [[maybe_unused]] const auto hr = DwmFlush();
     return true;
@@ -659,7 +762,8 @@ void start(std::unique_ptr<Transition> transition, HWND owner, std::function<voi
 
     // 封面方塊：舊的一面一切換就開始縮小淡出（DWM 照螢幕更新跑，主執行緒忙也不停）
     if (!g_transition->whole_stage && g_transition->old_layer) {
-        animate(*g, *g_transition->old_layer, 1.f, old_end_scale, 1.f, 0.f);
+        g_transition->old_track = Track{1.f, 0.f, 1.f, old_end_scale, now_ms(), duration_ms};
+        animate(*g, *g_transition->old_layer, g_transition->old_track);
         g->dcomp->Commit();
     }
     SetTimer(g_transition->wnd, poll_timer_id, poll_interval_ms, nullptr);
@@ -669,7 +773,18 @@ void start(std::unique_ptr<Transition> transition, HWND owner, std::function<voi
 
 void run(std::function<void()> apply)
 {
-    // 上一次的動畫還沒跑完又切換：結束它，這次直接切換、不做動畫
+    // 封面⇄資訊卡的動畫還沒跑完又點了一次（2026-11-16 使用者：原本會直接跳過去、沒有動畫）：
+    // 底下照樣切換，蓋層從兩層目前的樣子倒回去（或再轉回來）
+    if (g_transition && !g_transition->whole_stage && !g_transition->track) {
+        const auto to_new = !g_transition->target_new;
+        apply();
+        if (retarget(*g_transition, to_new))
+            return;
+        finish();
+        return;
+    }
+
+    // 上一次的動畫（換顯示內容、換歌）還沒跑完又切換：結束它，這次直接切換、不做動畫
     if (g_transition) {
         finish();
         apply();
@@ -683,7 +798,11 @@ void run(std::function<void()> apply)
         return;
     }
 
-    const auto cover_in_stage = cover_zoom::cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage));
+    // 純封面模式（2026-11-22 起也能點封面切資訊卡）：動畫範圍是置中的大封面
+    const auto solo = main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover;
+    const auto cover_in_stage = solo
+        ? cover_zoom::solo_cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage))
+        : cover_zoom::cover_rect_in_stage(wil::rect_width(stage), wil::rect_height(stage));
     if (!cover_in_stage) {
         apply();
         return;
@@ -726,5 +845,150 @@ void run_stage(std::function<void()> apply)
     transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
     start(std::move(transition), owner, apply);
 }
+
+// ---- 換歌交叉淡化（2026-11-14，v1.4 待做清單第 11 個）----
+// ESLyric 換歌時封面會自己溶約 0.26 秒，但標題、資訊列、歌詞、背景是當下直接換掉。做法跟切換顯示內容一樣：
+// 舊畫面截下來蓋在整個展開頁上，換歌後等 ESLyric 畫好，整個蓋層由 DWM 淡出。
+// 舊畫面一定要在 ESLyric 換字之前截、而且蓋上去（換歌後才蓋，會先閃一下新畫面再跳回舊的）：
+// - 手動換歌（下一首、雙擊別首）：on_playback_starting，這時還沒開新歌
+// - 自然換歌沒有 starting：照播放位置排計時器，結束前 pre_capture_lead_s 秒截圖蓋上（最後這一下畫面停住，看不太出來）
+// 拖進度、暫停、停止時拿掉還在等換歌的蓋層
+namespace {
+
+UINT_PTR g_pre_capture_timer{};
+
+void cancel_pre_capture()
+{
+    if (g_pre_capture_timer) {
+        KillTimer(nullptr, g_pre_capture_timer);
+        g_pre_capture_timer = 0;
+    }
+}
+
+// 截下目前的展開頁、蓋上去，等換歌；展開頁沒完全展開、正在跑別的動畫時什麼都不做
+void cover_before_track_change(const char* reason)
+{
+    if (g_transition)
+        return;
+
+    RECT stage{};
+    HWND owner{};
+    if (!panels::splitter::FlatSplitterPanel::s_get_now_playing_stage(stage, owner))
+        return;
+
+    auto* g = graphics();
+    auto before = g ? capture(stage) : nullptr;
+    if (!before)
+        return;
+
+    ANIM_LOG_BEGIN(reason);
+    auto transition = std::make_unique<Transition>();
+    transition->whole_stage = true;
+    transition->track = true;
+    transition->waiting_track = true;
+    transition->screen = stage;
+    transition->cover = RECT{0, 0, wil::rect_width(stage), wil::rect_height(stage)};
+    transition->before_signature = signature_of(*before, transition->cover);
+
+    if (!show_overlay(*g, *transition, owner, *before, nullptr)) {
+        ANIM_LOG_LINE("overlay failed");
+        const auto wnd = transition->wnd;
+        transition.reset();
+        if (wnd)
+            DestroyWindow(wnd);
+        return;
+    }
+    ANIM_LOG_LINE(fmt::format("shown t={:.1f}", ANIM_LOG_NOW()));
+
+    g_transition = std::move(transition);
+    g_transition->shown_at = GetTickCount64();
+    SetTimer(g_transition->wnd, poll_timer_id, poll_interval_ms, nullptr);
+}
+
+void CALLBACK on_pre_capture_timer(HWND, UINT, UINT_PTR, DWORD)
+{
+    cancel_pre_capture();
+    // 計時器排好之後又被拖進度、暫停的話不截
+    const auto playback = play_control::get();
+    if (!playback->is_playing() || playback->is_paused())
+        return;
+    cover_before_track_change("track (natural)");
+}
+
+// 快播完了：排一個計時器在結束前 pre_capture_lead_s 秒截圖（on_playback_time 一秒一次，不夠準）
+void schedule_pre_capture()
+{
+    if (g_pre_capture_timer || g_transition)
+        return;
+
+    const auto playback = play_control::get();
+    metadb_handle_ptr track;
+    if (playback->is_paused() || !playback->get_now_playing(track) || !track.is_valid())
+        return;
+
+    const auto length = track->get_length();
+    const auto remaining = length - playback->playback_get_position();
+    if (length <= 0 || remaining <= pre_capture_lead_s || remaining > pre_capture_window_s)
+        return;
+
+    const auto delay = static_cast<UINT>((remaining - pre_capture_lead_s) * 1000.0);
+    g_pre_capture_timer = SetTimer(nullptr, 0, std::max(delay, 1u), on_pre_capture_timer);
+}
+
+// 還在等換歌的蓋層拿掉（拖進度、暫停、停止）；已經換歌、正在淡出的不動
+void drop_waiting_cover()
+{
+    cancel_pre_capture();
+    if (g_transition && g_transition->waiting_track) {
+        ANIM_LOG_LINE("dropped before new track");
+        finish();
+    }
+}
+
+class TrackTransitionCallback : public play_callback_static {
+public:
+    unsigned get_flags() override
+    {
+        return flag_on_playback_starting | flag_on_playback_new_track | flag_on_playback_stop | flag_on_playback_seek
+            | flag_on_playback_pause | flag_on_playback_time;
+    }
+
+    void on_playback_starting(play_control::t_track_command command, bool paused) override
+    {
+        cancel_pre_capture();
+        if (!paused)
+            cover_before_track_change("track (manual)");
+    }
+
+    void on_playback_new_track(metadb_handle_ptr track) override
+    {
+        cancel_pre_capture();
+        if (g_transition && g_transition->waiting_track) {
+            g_transition->waiting_track = false;
+            g_transition->applied_at = GetTickCount64();
+            ANIM_LOG_LINE(fmt::format("new track t={:.1f} (covered {} ms before)", ANIM_LOG_NOW(),
+                g_transition->applied_at - g_transition->shown_at));
+        }
+    }
+
+    void on_playback_stop(play_control::t_stop_reason reason) override
+    {
+        if (reason != play_control::stop_reason_starting_another)
+            drop_waiting_cover();
+    }
+
+    void on_playback_seek(double time) override { drop_waiting_cover(); }
+    void on_playback_pause(bool state) override { drop_waiting_cover(); }
+    void on_playback_time(double time) override { schedule_pre_capture(); }
+
+    void on_playback_edited(metadb_handle_ptr track) override {}
+    void on_playback_dynamic_info(const file_info& info) override {}
+    void on_playback_dynamic_info_track(const file_info& info) override {}
+    void on_volume_change(float new_value) override {}
+};
+
+play_callback_static_factory_t<TrackTransitionCallback> g_track_transition_callback;
+
+} // namespace
 
 } // namespace cui::style_transition

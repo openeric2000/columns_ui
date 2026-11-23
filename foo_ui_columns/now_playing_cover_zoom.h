@@ -17,6 +17,14 @@
 
 namespace cui::cover_zoom {
 
+// 自編版新增（2026-11-14）：展開頁封面下方資訊「詳細／精簡」（設定頁「展開頁」分頁）。
+// 預設：11/14 使用者指定詳細，2026-11-15 使用者改成精簡。只影響沒存過這個設定的環境（存過的照舊）。
+// 詳細＝歌名、藝人・年份、專輯、規格列四行；精簡＝封面放大、下面只留一排（下一首／等級＋格式／播放統計，右鍵挑選，見 cover_line.h）。
+// main.xml 讀 %cui_expanded_compact%（精簡時為 1）換左欄；這裡的封面位置改照標記的 compact-cover／compact-gap／compact-info。
+// 舊版 main.xml 沒有 disc-compact 與 compact-* 標記時，選精簡也不會有任何變化（版面照詳細、位置照 cover／gap／info 算）
+inline constexpr bool compact_info_default = true;
+extern fbh::ConfigBool compact_info;
+
 // 在 parent（分割面板視窗）底下建立按鈕視窗（先不顯示）；失敗傳回 nullptr
 HWND create(HWND parent);
 
@@ -58,6 +66,9 @@ int lyrics_split_y(int stage_height);
 std::optional<int> info_bottom_in_stage(int stage_width, int stage_height);
 // 同上那組資訊的上緣（＝封面下緣＋gap，歌名那一行的頂端）
 std::optional<int> info_top_in_stage(int stage_width, int stage_height);
+// 歌詞＋VU 表／頻譜時錶框要對齊的那一段（上緣、下緣，展開頁座標、實際像素；2026-11-14）：
+// 詳細時＝上面那組資訊；精簡時那組只剩一行，錶會被壓成一條，所以改成「詳細時的資訊高度」、下緣對齊精簡那一行的下緣
+std::optional<std::pair<int, int>> meter_band_in_stage(int stage_width, int stage_height);
 
 } // namespace cui::cover_zoom
 

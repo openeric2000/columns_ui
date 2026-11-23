@@ -27,10 +27,11 @@ constexpr int stage_min_height_dip = 300; // main.xml 的 stage min-height：比
 // 平常只畫箭頭（白 .24），底下墊一層往右下偏 1 DIP 的淡黑陰影，白色或很淺的封面上才認得出來；
 // 滑過、按下才出現深色圓底（.59／.71）與全白箭頭
 // 2026-11-11 使用者說滑過時也太明顯：圓底 .59→.18、箭頭全白→.59（按下圓底 .71→.27、箭頭 .75）；淡陰影一直都畫
+// 2026-11-23 使用者說平常（沒滑過）還要再淡一點：箭頭 .24→.16、陰影 .18→.12（陰影滑過時也照畫；滑過、按下的圓底與箭頭不變）
 const Gdiplus::Color disc_hot_colour(46, 0, 0, 0);
 const Gdiplus::Color disc_pressed_colour(70, 0, 0, 0);
-const Gdiplus::Color icon_colour(61, 241, 241, 241);
-const Gdiplus::Color icon_shadow_colour(46, 0, 0, 0);
+const Gdiplus::Color icon_colour(40, 241, 241, 241);
+const Gdiplus::Color icon_shadow_colour(30, 0, 0, 0);
 const Gdiplus::Color icon_hot_colour(150, 255, 255, 255);
 const Gdiplus::Color icon_pressed_colour(190, 255, 255, 255);
 
@@ -144,6 +145,17 @@ struct CoverGeometry {
     bool has_solo{};
     Length solo_cover;
     Length solo_info;
+    // compact-cover／compact-gap／compact-info（2026-11-14，可省略）：封面下方資訊選「精簡」（只留規格列）時的
+    // 封面邊長、封面到規格列、規格列的排版高度。三個都寫了才算數，沒寫時精簡也照上面的 cover／gap／info
+    bool has_compact{};
+    Length compact_cover;
+    Length compact_gap;
+    Length compact_info;
+    // compact-vu-left／compact-vu-right（2026-11-15，可省略）：精簡時封面變大，VU 欄改用這組（兩個都寫了才算數）；
+    // 單獨 VU 表／頻譜與歌詞＋VU 表／頻譜都照這欄置中，切換模式時錶不會左右跳
+    bool has_compact_vu{};
+    Length compact_vu_left;
+    Length compact_vu_right;
 };
 
 std::wstring layout_file_path()
@@ -187,7 +199,8 @@ CoverGeometry parse_geometry(const std::string& text)
 
     CoverGeometry geometry;
     bool has_left{}, has_cover{}, has_gap{}, has_info{}, has_lyrics_left{}, has_lyrics_right{}, has_vu_left{}, has_vu_right{},
-        has_solo_cover{}, has_solo_info{};
+        has_solo_cover{}, has_solo_info{}, has_compact_cover{}, has_compact_gap{}, has_compact_info{},
+        has_compact_vu_left{}, has_compact_vu_right{};
     size_t pos = 0;
 
     while (pos < body.size()) {
@@ -242,6 +255,21 @@ CoverGeometry parse_geometry(const std::string& text)
         } else if (key == "solo-info") {
             geometry.solo_info = *value;
             has_solo_info = true;
+        } else if (key == "compact-cover") {
+            geometry.compact_cover = *value;
+            has_compact_cover = true;
+        } else if (key == "compact-gap") {
+            geometry.compact_gap = *value;
+            has_compact_gap = true;
+        } else if (key == "compact-info") {
+            geometry.compact_info = *value;
+            has_compact_info = true;
+        } else if (key == "compact-vu-left") {
+            geometry.compact_vu_left = *value;
+            has_compact_vu_left = true;
+        } else if (key == "compact-vu-right") {
+            geometry.compact_vu_right = *value;
+            has_compact_vu_right = true;
         }
     }
 
@@ -249,7 +277,23 @@ CoverGeometry parse_geometry(const std::string& text)
     geometry.has_lyrics = has_lyrics_left && has_lyrics_right;
     geometry.has_vu_column = has_vu_left && has_vu_right;
     geometry.has_solo = has_solo_cover && has_solo_info && geometry.solo_cover.value > 0;
+    geometry.has_compact = has_compact_cover && has_compact_gap && has_compact_info && geometry.compact_cover.value > 0;
+    geometry.has_compact_vu = has_compact_vu_left && has_compact_vu_right;
     return geometry;
+}
+
+// 歌詞模式左欄現在用哪一組：封面下方資訊選精簡、而且標記有精簡值時用 compact-*，否則用 cover／gap／info
+struct CoverColumn {
+    Length cover;
+    Length gap;
+    Length info;
+};
+
+CoverColumn active_cover_column(const CoverGeometry& geometry)
+{
+    if (geometry.has_compact && compact_info.get())
+        return {geometry.compact_cover, geometry.compact_gap, geometry.compact_info};
+    return {geometry.cover, geometry.gap, geometry.info};
 }
 
 struct GeometryProbe {
@@ -412,9 +456,10 @@ private:
             return {};
 
         // 純封面模式（2026-11-12 使用者要求跟封面＋歌詞一樣用右下角小按鈕看大圖）：位置照標記的 solo-cover／solo-info，
-        // 沒寫就不顯示（舊版面靠點封面開大圖）。其他模式的資訊卡（樣式 3）沒有封面
+        // 沒寫就不顯示（舊版面靠點封面開大圖）。資訊卡（樣式 3）沒有封面，不顯示；
+        // 純封面模式 2026-11-22 起也能點封面切資訊卡，所以不分模式
         const auto solo = main_menu::get_now_playing_mode() == main_menu::NowPlayingMode::cover;
-        if (!solo && main_menu::get_now_playing_style() == 3)
+        if (main_menu::get_now_playing_style() == 3)
             return {};
 
         // GDI+ 字型表還在背景暖機時不在主執行緒建字型（同音量圖示），暖機做完會重排
@@ -624,6 +669,16 @@ LRESULT CALLBACK Button::s_wndproc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 
 } // namespace
 
+// 改了：ESLyric 重算 %cui_expanded_compact%（main.xml 換左欄），放大鈕、歌詞防誤拖蓋層、VU 表照新的封面位置重排。
+// 排到主執行緒再做（設定值載入時也可能呼叫這個回呼，那時服務還沒就緒）
+fbh::ConfigBool compact_info(GUID{0xaa4b780a, 0x471d, 0x4b68, {0xbd, 0x02, 0x13, 0x6d, 0xb3, 0x59, 0xb9, 0xe7}},
+    compact_info_default, [](bool, bool, std::optional<uint32_t>) {
+        fb2k::inMainThread([] {
+            main_menu::refresh_layout_fields();
+            panels::splitter::FlatSplitterPanel::s_refresh_now_playing();
+        });
+    });
+
 std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
 {
     const auto& geometry = layout_geometry();
@@ -634,10 +689,11 @@ std::optional<RECT> cover_rect_in_stage(int stage_width, int stage_height)
         return resolve_length(length, stage_width, stage_height);
     };
 
-    // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）
-    const auto cover = resolve(geometry.cover);
+    // 封面＋gap＋info 這一整組在展開頁垂直置中（main.xml 的 disc 容器 justify=middle）；精簡時是封面＋規格列那組
+    const auto column = active_cover_column(geometry);
+    const auto cover = resolve(column.cover);
     const auto cover_left = resolve(geometry.left);
-    const auto group_height = cover + resolve(geometry.gap) + resolve(geometry.info);
+    const auto group_height = cover + resolve(column.gap) + resolve(column.info);
     const auto cover_top = (stage_height - group_height) / 2;
 
     // 跑出展開頁（視窗太小）就當作沒有
@@ -674,8 +730,8 @@ std::optional<int> info_top_in_stage(int stage_width, int stage_height)
     const auto cover = cover_rect_in_stage(stage_width, stage_height);
     if (!cover)
         return {};
-    const auto& geometry = layout_geometry();
-    const auto gap = resolve_length(geometry.gap, stage_width, stage_height);
+    const auto column = active_cover_column(layout_geometry());
+    const auto gap = resolve_length(column.gap, stage_width, stage_height);
     return static_cast<int>(cover->bottom) + gap;
 }
 
@@ -684,11 +740,26 @@ std::optional<int> info_bottom_in_stage(int stage_width, int stage_height)
     const auto cover = cover_rect_in_stage(stage_width, stage_height);
     if (!cover)
         return {};
-    const auto& geometry = layout_geometry();
+    const auto column = active_cover_column(layout_geometry());
     const auto resolve = [stage_width, stage_height](const Length& length) {
         return resolve_length(length, stage_width, stage_height);
     };
-    return static_cast<int>(cover->bottom) + resolve(geometry.gap) + resolve(geometry.info);
+    return static_cast<int>(cover->bottom) + resolve(column.gap) + resolve(column.info);
+}
+
+std::optional<std::pair<int, int>> meter_band_in_stage(int stage_width, int stage_height)
+{
+    const auto top = info_top_in_stage(stage_width, stage_height);
+    const auto bottom = info_bottom_in_stage(stage_width, stage_height);
+    if (!top || !bottom)
+        return {};
+    const auto& geometry = layout_geometry();
+    if (!(geometry.has_compact && compact_info.get()))
+        return std::make_pair(*top, *bottom);
+    const auto detail_height = resolve_length(geometry.info, stage_width, stage_height);
+    if (detail_height <= *bottom - *top)
+        return std::make_pair(*top, *bottom);
+    return std::make_pair(*bottom - detail_height, *bottom);
 }
 
 std::optional<RECT> lyrics_column_in_stage(int stage_width, int stage_height)
@@ -724,8 +795,10 @@ std::optional<RECT> vu_column_in_stage(int stage_width, int stage_height)
     const auto resolve = [stage_width, stage_height](const Length& length) {
         return resolve_length(length, stage_width, stage_height);
     };
-    const auto left = resolve(geometry.vu_left);
-    const auto right = stage_width - resolve(geometry.vu_right);
+    // 精簡時封面比較大，有寫 compact-vu-left／compact-vu-right 就改用那組（2026-11-15）
+    const bool compact = geometry.has_compact && geometry.has_compact_vu && compact_info.get();
+    const auto left = resolve(compact ? geometry.compact_vu_left : geometry.vu_left);
+    const auto right = stage_width - resolve(compact ? geometry.compact_vu_right : geometry.vu_right);
     if (left < 0 || right - left < dip(40))
         return {};
     return RECT{left, 0, right, stage_height};

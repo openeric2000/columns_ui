@@ -9,7 +9,7 @@ namespace cui::nocturne_text {
 
 // 產品名稱與版本號（設定頁「關於」分頁顯示；中英文版共用，發布新版時只改這一行版本號）
 inline constexpr wchar_t about_product_name[] = L"Nocturne for foobar2000";
-inline constexpr wchar_t nocturne_version[] = L"1.50";
+inline constexpr wchar_t nocturne_version[] = L"2.0";
 
 #ifdef NOCTURNE_LANG_EN
 
@@ -20,6 +20,10 @@ inline constexpr auto toggle_now_playing_description
       "stopped, the first queued track is loaded paused first; with an empty queue it does not expand.";
 inline constexpr auto stop_or_collapse_name = "Stop or Collapse Now Playing";
 inline constexpr auto stop_or_collapse_description = "Stops playback and closes the now playing view.";
+inline constexpr auto toggle_remaining_time_name = "Toggle Remaining Time";
+inline constexpr auto toggle_remaining_time_description
+    = "Switches the playback bar time between \"elapsed / length\" and \"elapsed / -remaining\".";
+inline constexpr wchar_t remaining_time_setting[] = L"Show remaining time in the playback bar (or click the time to switch)";
 inline constexpr auto next_track_toggle_name = "Up Next Notice";
 inline constexpr auto next_track_toggle_description
     = "Shows the next track in a corner of the now playing view near the end of a track.";
@@ -117,7 +121,7 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
 inline constexpr wchar_t startup_tab_title[] = L"Startup";
 inline constexpr wchar_t startup_hold[] = L"Show the window only when the album header is ready";
 inline constexpr wchar_t startup_hold_note[]
-    = L"Waits 3 seconds at most. Takes effect the next time foobar2000 starts.";
+    = L"Waits 5 seconds at most. Takes effect the next time foobar2000 starts.";
 inline constexpr wchar_t font_tab_note[]
     = L"Change each part separately, or all at once with the first row. Changes apply at once.";
 inline constexpr wchar_t font_row_all[] = L"All parts";
@@ -177,20 +181,42 @@ inline constexpr wchar_t mode_note[]
     = L"Top-left button: click for the next one, right-click for a menu. Only the ticked ones show up.";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"Show";
+// 封面下方資訊：詳細／精簡（2026-11-14）
+inline constexpr wchar_t expanded_info_label[] = L"Below the cover";
+inline constexpr wchar_t expanded_info_names[2][16] = {L"Detailed", L"Compact"};
+inline constexpr wchar_t expanded_info_note[]
+    = L"Detailed: title, artist, album and format. Compact: a larger cover and one line below it (right-click it to choose).";
+// 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
+// 2026-11-17 加第 4、5 種：這首累計聽了多久、在曲庫的常聽排名（待做清單 v1.5 第 11 個）
+inline constexpr wchar_t cover_line_style_names[5][24]
+    = {L"Up next", L"Quality + format", L"Play stats", L"Time listened", L"Library rank"};
+// %cui_play_rank%（2026-11-17）：這首在曲庫常聽排名的百分比，只回傳值（main.xml 前面放標籤）
+inline constexpr char play_rank_percent[] = "Top {}%";
+// 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+// 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
+inline constexpr char last_played_now[] = "Now";
+inline constexpr char last_played_just_now[] = "Just now";
+inline constexpr char last_played_minutes_ago[] = "{} min ago";
+inline constexpr char last_played_today[] = "Today {:02}:{:02}";
+inline constexpr char last_played_yesterday[] = "Yesterday {:02}:{:02}";
+inline constexpr char last_played_days_ago[] = "{} days ago";
+inline constexpr char last_played_month_day[] = "{} {}";
+inline constexpr char last_played_month_names[12][8]
+    = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 inline constexpr wchar_t modes_separator[] = L", ";
+inline constexpr wchar_t modes_all[] = L"All";
+inline constexpr wchar_t modes_except[] = L"All except ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"Lock the lyrics against dragging";
 inline constexpr wchar_t lyrics_lock_note[]
     = L"Clicking or dragging the lyrics no longer seeks. The wheel and right-click still work.";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
-inline constexpr wchar_t vu_picker_title[] = L"VU meter style";
 inline constexpr wchar_t vu_style_names[3][32] = {L"Square pair", L"Round pair", L"Single, two needles"};
 inline constexpr wchar_t vu_backlight[] = L"Warm backlight";
-inline constexpr wchar_t vu_needle_title[] = L"Needle";
+inline constexpr wchar_t vu_backlight_names[2][8] = {L"Off", L"On"};
 inline constexpr wchar_t vu_needle_names[4][16] = {L"Standard", L"Lively", L"Snappy", L"Auto"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"Follows the song"};
 // 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
-inline constexpr wchar_t spectrum_picker_title[] = L"Spectrum style";
 inline constexpr wchar_t spectrum_style_names[6][32]
     = {L"LED · cover colour", L"LED · warm", L"Bars · cover glow", L"Bars · frost", L"Mirrored lines", L"Glow curve"};
 inline constexpr wchar_t spectrum_frame_title[] = L"Frame";
@@ -222,6 +248,9 @@ inline constexpr char error_change_failed[] = "Could not change the font: {}";
 inline constexpr char failure_item[] = "\n{} ({})";
 inline constexpr char failures_message[] = "\n\nThese files were not updated. Please edit them in Notepad:{}";
 
+// ESLyric 右鍵選單：不常用的項目收進這個子選單（eslyric_context_menu.cpp）
+inline constexpr wchar_t eslyric_menu_more[] = L"More";
+
 #else
 
 // 選單（View/Layout）
@@ -231,6 +260,10 @@ inline constexpr auto toggle_now_playing_description
 inline constexpr auto stop_or_collapse_name = "停止或收起播放頁";
 inline constexpr auto stop_or_collapse_description
     = "停止播放並收起展開頁。";
+inline constexpr auto toggle_remaining_time_name = "切換剩餘時間";
+inline constexpr auto toggle_remaining_time_description
+    = "播放列的時間在「已播 / 曲長」和「已播 / -剩餘」之間切換。";
+inline constexpr wchar_t remaining_time_setting[] = L"播放列時間顯示剩餘時間（也可以直接點時間切換）";
 inline constexpr auto next_track_toggle_name = "下一首提示";
 inline constexpr auto next_track_toggle_description
     = "歌曲最後幾秒，在展開頁角落顯示下一首。";
@@ -326,7 +359,7 @@ inline constexpr wchar_t expanded_bg_cap_names[6][24]
 inline constexpr wchar_t startup_tab_title[] = L"啟動";
 inline constexpr wchar_t startup_hold[] = L"等專輯標頭載好再顯示視窗";
 inline constexpr wchar_t startup_hold_note[]
-    = L"最多等 3 秒；下次啟動才生效。";
+    = L"最多等 5 秒；下次啟動才生效。";
 inline constexpr wchar_t font_tab_note[]
     = L"逐列換字型，或用第一列一次全換；改了馬上生效。";
 inline constexpr wchar_t font_row_all[] = L"全部區塊";
@@ -381,19 +414,39 @@ inline constexpr wchar_t expanded_section_lyrics[] = L"歌詞";
 inline constexpr wchar_t mode_note[] = L"左上角按鈕：左鍵換下一種、右鍵跳出選單；只有勾選的會出現。";
 // 「展開頁要有」勾選下拉鈕（2026-11-11）
 inline constexpr wchar_t modes_label[] = L"展開頁要有";
+// 封面下方資訊：詳細／精簡（2026-11-14）
+inline constexpr wchar_t expanded_info_label[] = L"封面下方資訊";
+inline constexpr wchar_t expanded_info_names[2][16] = {L"詳細", L"精簡"};
+inline constexpr wchar_t expanded_info_note[] = L"詳細：歌名、藝人、專輯、格式四行。精簡：封面放大，下面一排（在那排按右鍵選要顯示什麼）。";
+// 精簡時封面下那一排的右鍵挑選卡（2026-11-14，cover_line.cpp）；名稱順序同 cover_line::Style
+// 2026-11-17 加第 4、5 種：這首累計聽了多久、在曲庫的常聽排名（待做清單 v1.5 第 11 個）
+inline constexpr wchar_t cover_line_style_names[5][24] = {L"下一首", L"等級＋格式", L"播放統計", L"聽了多久", L"常聽排名"};
+// %cui_play_rank%（2026-11-17）：這首在曲庫常聽排名的百分比，只回傳值（main.xml 前面放「曲庫中排名」標籤）
+inline constexpr char play_rank_percent[] = "前 {}%";
+// 資訊卡「最後播放」的相對寫法（%cui_last_played_ago%，2026-11-14）：今天／昨天＋時分、2～6 天前、同一年寫月日、更早寫完整日期
+// 2026-11-16 加：正在播的這首在這次播放裡記了播放次數＝「現在」；一小時內寫幾分鐘前
+inline constexpr char last_played_now[] = "現在";
+inline constexpr char last_played_just_now[] = "剛剛";
+inline constexpr char last_played_minutes_ago[] = "{} 分鐘前";
+inline constexpr char last_played_today[] = "今天 {:02}:{:02}";
+inline constexpr char last_played_yesterday[] = "昨天 {:02}:{:02}";
+inline constexpr char last_played_days_ago[] = "{} 天前";
+inline constexpr char last_played_month_day[] = "{} {} 日";
+inline constexpr char last_played_month_names[12][8]
+    = {"1 月", "2 月", "3 月", "4 月", "5 月", "6 月", "7 月", "8 月", "9 月", "10 月", "11 月", "12 月"};
 inline constexpr wchar_t modes_separator[] = L"、";
+inline constexpr wchar_t modes_all[] = L"全部";
+inline constexpr wchar_t modes_except[] = L"除了 ";
 inline constexpr wchar_t modes_dropdown_arrow[] = L"  \x25BE";
 inline constexpr wchar_t lyrics_lock[] = L"歌詞防誤拖";
 inline constexpr wchar_t lyrics_lock_note[] = L"點或拖曳歌詞不會跳時間；滾輪和右鍵照常。";
 // VU 表右鍵的樣式挑選卡（2026-11-12）：三種樣式的名稱（順序同 vu_meter::Style）與背光開關
-inline constexpr wchar_t vu_picker_title[] = L"VU 表樣式";
 inline constexpr wchar_t vu_style_names[3][32] = {L"方框雙錶", L"圓形錶頭", L"單錶雙指針"};
 inline constexpr wchar_t vu_backlight[] = L"暖色背光";
-inline constexpr wchar_t vu_needle_title[] = L"指針";
+inline constexpr wchar_t vu_backlight_names[2][8] = {L"關", L"開"};
 inline constexpr wchar_t vu_needle_names[4][16] = {L"標準", L"活潑", L"靈敏", L"自動"};
 inline constexpr wchar_t vu_needle_details[4][32] = {L"−7 dBFS · 300 ms", L"−10 dBFS · 300 ms", L"−10 dBFS · 150 ms", L"跟著歌曲音量"};
 // 頻譜右鍵的樣式挑選卡（2026-11-12）：六種樣式（順序同 vu_meter::SpectrumStyle）、外框、頻段數、峰值點落下速度
-inline constexpr wchar_t spectrum_picker_title[] = L"頻譜樣式";
 inline constexpr wchar_t spectrum_style_names[6][32]
     = {L"LED 點陣・封面色", L"LED 點陣・暖光", L"長條・封面色柔光", L"長條・霧白", L"鏡像細條", L"光帶曲線"};
 inline constexpr wchar_t spectrum_frame_title[] = L"外框";
@@ -424,6 +477,9 @@ inline constexpr auto error_no_usable_style = "這個字型沒有可以用的樣
 inline constexpr char error_change_failed[] = "換字型失敗：{}";
 inline constexpr char failure_item[] = "\n{}（{}）";
 inline constexpr char failures_message[] = "\n\n下面的檔案沒有換到，要自己用記事本改：{}";
+
+// ESLyric 右鍵選單：不常用的項目收進這個子選單（eslyric_context_menu.cpp）
+inline constexpr wchar_t eslyric_menu_more[] = L"更多";
 
 #endif
 

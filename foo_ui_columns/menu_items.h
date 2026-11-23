@@ -57,6 +57,9 @@ constexpr GUID next_track_toast_toggle_id{
     0xe2b7a914, 0x35c8, 0x4d61, {0x9f, 0x0a, 0x7c, 0x48, 0xd1, 0x2e, 0xb6, 0x93}};
 // 自編版新增：View/Layout/主題字型…
 constexpr GUID theme_font_id{0x7493810c, 0x2bf4, 0x49a6, {0x8b, 0x8f, 0xa3, 0x7d, 0xae, 0x34, 0x9a, 0x60}};
+// 自編版新增（2026-11-22）：View/Layout/切換剩餘時間（播放列點時間文字用）
+constexpr GUID toggle_remaining_time_id{
+    0x5c8e2f47, 0x1a3b, 0x4d96, {0x8e, 0x71, 0x2b, 0xc4, 0x9d, 0x05, 0x6f, 0xa8}};
 
 void on_transparency_changed();
 void on_lock_window_size_changed();
@@ -71,6 +74,11 @@ std::optional<double> get_paused_position();
 // 設定後標題格式欄位 %cui_time_text% 會顯示這個位置（暫停中沒有預覽時顯示暫停位置），底下的時間才會跟著動；
 // 只有顯示的整秒變了才通知 ESLyric 重算（拖曳時最多約每 30 ms 一次）。要在主執行緒呼叫
 void set_seek_preview(std::optional<double> seconds);
+
+// 自編版新增（2026-11-22）：播放列時間的後半段顯示剩餘時間（「0:05 / -1:51」，跟 Spotify 一樣）還是曲長。
+// 點播放列的時間文字（mm://View/Layout/切換剩餘時間）或設定頁「播放」切換，存在設定裡，重開 fb2k 照舊。
+// 一寫入就通知 ESLyric 重算（版面讀 %cui_time_remaining%、%cui_time_left%）
+extern fbh::ConfigBool show_remaining_time;
 
 // 自編版新增（2026-11-06）：自訂標題格式欄位（例如 %cui_volume_icon%）的值變了，通知 ESLyric 重算標題格式與 visibility。
 // ESLyric 的 visibility 不會隨時重算，要對曲目送一次 dispatch_refresh：正在播放就送播放中的曲目，沒在播放就送播放清單反白的那首。

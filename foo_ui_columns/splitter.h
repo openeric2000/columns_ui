@@ -23,6 +23,8 @@ inline constexpr int now_playing_animation_duration_ms = 400;
 // 下一格動畫的訊息：每格畫完、等螢幕顯示出來就送下一個，不靠計時器
 // （計時器最快約 15.6ms 一次，主螢幕 240Hz 時看得出跟不上）
 inline constexpr UINT msg_now_playing_animation_frame = WM_USER + 0x4e5;
+// 展開頁滑動交給 DirectComposition 時（2026-11-23），滑完的通知：另一條執行緒時間到才投遞，wParam＝這段動畫的流水號
+inline constexpr UINT msg_now_playing_slide_done = WM_USER + 0x4f0;
 
 enum Orientation {
     horizontal,
@@ -107,6 +109,9 @@ public:
     // 展開狀態只存在記憶體，重開一律收合
     static bool s_toggle_now_playing();
     static bool s_is_now_playing_expanded();
+    // 自編版新增（2026-11-17）：從別的視窗點播放列切回 fb2k 的那一下，只把視窗叫到前面，不收放展開頁。
+    // 是這一下觸發的「切換播放頁」就傳回 true（同時清掉記號），呼叫端要略過切換
+    static bool s_consume_activation_click();
     // 自編版新增（下一首提示）：展開頁已經完全展開（沒有動畫、沒有截圖視窗）時，傳回展開頁在螢幕上的位置與它所在的主視窗
     static bool s_get_now_playing_stage(RECT& screen_rect, HWND& owner);
     // 自編版新增（停止畫面）：展開頁已經完全展開時，截下展開頁目前的畫面（跟 screen_rect 一樣大）；不能截就傳回空的
@@ -220,6 +225,8 @@ private:
     bool test_divider_pt(const POINT& pt, size_t p_out);
 
     int get_panel_divider_size(size_t index) const;
+    // 自編版新增（2026-11-14）：深色模式自己畫背景。整塊填面板底色，左右並排的面板之間在縫隙正中間畫 1 px 細線
+    void paint_dark_divider_background(HDC dc) const;
 
     void on_size_changed(unsigned width, unsigned height);
     void on_size_changed();
@@ -254,6 +261,12 @@ private:
     void on_now_playing_slide_frame();
     // 截圖視窗目前往下偏移多少：0＝蓋住整個展開頁，展開頁高度＝整個收到播放列後面
     int get_now_playing_slide_offset() const;
+    // 同上，不取整數（DirectComposition 倒回時從這裡接著走，見 start_now_playing_animation）
+    double get_now_playing_slide_position() const;
+    // 截圖視窗的內容由 DirectComposition 提供時（2026-11-23）：把這段滑動交給 DWM、排好滑完的通知
+    void animate_now_playing_slide_composition();
+    // 滑完的通知到了（流水號對得上才收尾）
+    void on_now_playing_slide_done(WPARAM generation);
     // 滑完：展開時確定底下是真的展開頁，再拿掉截圖
     void finish_now_playing_slide();
     // 自編版新增（2026-11-09）：展開／收合動畫完全結束時呼叫；收合完成就把資訊卡切回封面（下次打開一定是封面）
@@ -292,9 +305,12 @@ private:
     HWND m_lyrics_lock_wnd{};
     // 自編版新增（2026-11-11）：展開頁 VU 表模式的自繪 VU 表（now_playing_vu_meter）
     HWND m_vu_meter_wnd{};
+    // 自編版新增（2026-11-14）：精簡時封面下那一排的右鍵熱區（看不見，見 cover_line.h）
+    HWND m_cover_line_wnd{};
     std::chrono::steady_clock::time_point m_now_playing_snapshot_start;
     RECT m_now_playing_slide_rect{};
-    int m_now_playing_slide_from{};
+    // 2026-11-23 起是小數：DirectComposition 倒回時從推算出來的位置接著走，取整數會差半格
+    double m_now_playing_slide_from{};
     bool m_now_playing_slide_expanding{};
     int m_last_position{};
     size_t m_panel_dragging{};

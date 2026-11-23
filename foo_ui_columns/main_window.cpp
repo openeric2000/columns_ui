@@ -356,12 +356,6 @@ void cui::MainWindow::set_window_placement(WINDOWPLACEMENT placement, bool is_in
 
     SetWindowPlacement(m_wnd, &placement);
 
-    // 太晚才建立視窗的情況（begin_startup_hold 沒有進入等待）：視窗已經顯示在隱形狀態，現在才接淡入
-    if (m_startup_late_fade_pending) {
-        m_startup_late_fade_pending = false;
-        begin_startup_fade();
-    }
-
     resize_child_windows();
 
     if (active_window_to_set)
@@ -389,34 +383,20 @@ DWORD process_age_ms()
 
 bool cui::MainWindow::begin_startup_hold()
 {
-    const auto age_ms = process_age_ms();
-    const auto wait_ms = age_ms < startup_hold_timeout_ms ? startup_hold_timeout_ms - age_ms : 0;
-
     const BOOL cloak = TRUE;
-
-    if (wait_ms < startup_hold_min_ms) {
-        // 太晚了（HDD 冷啟動時視窗約 10 秒才建立）：不等網頁，等也只是讓空殼更晚出現。
-        // 但還是淡入：先隱形，視窗顯示出來之後由呼叫端馬上接淡入，空殼柔和地出現，內容之後才陸續補進來。
-        // 不進入等待狀態（沒有逾時監看），所以網頁回報「好了」時 end_startup_hold 會直接略過，不會再淡入第二次
-        if (SUCCEEDED(DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak)))) {
-            m_startup_late_fade_pending = true;
-            console::print(fmt::format("Columns UI – main window created late (process age {} ms): fading in without waiting.",
-                age_ms)
-                               .c_str());
-        }
-        return false;
-    }
 
     // 這個系統不給隱形就算了，照舊顯示（不能讓視窗永遠看不到）
     if (FAILED(DwmSetWindowAttribute(m_wnd, DWMWA_CLOAK, &cloak, sizeof(cloak))))
         return false;
 
     m_startup_hold_active = true;
-    m_startup_hold_timed_out = false;
+    m_startup_hold_forced_show = false;
     m_startup_hold_started_ms = GetTickCount64();
 
+    // 視窗多晚建立都一樣等：HDD 冷啟動視窗 3～10 秒才建立，那時不等的話出現的是空殼
+    // （樹是空的、標頭只有 WebView2 字樣），內容晚 2～4 秒才補上
     try {
-        start_startup_hold_watchdog(wait_ms);
+        start_startup_hold_watchdog(startup_hold_timeout_ms);
     } catch (...) {
         // 沒有監看就沒有逾時保險，寧可不隱形
         m_startup_hold_active = false;
@@ -433,14 +413,20 @@ void cui::MainWindow::start_startup_hold_watchdog(DWORD wait_ms)
     THROW_LAST_ERROR_IF_NULL(m_startup_hold_cancel.get());
 
     m_startup_hold_watchdog = std::thread([wnd = m_wnd, cancel = m_startup_hold_cancel.get(), wait_ms,
-                                              timed_out = &m_startup_hold_timed_out] {
+                                              forced_show = &m_startup_hold_forced_show] {
         if (WaitForSingleObject(cancel, wait_ms) != WAIT_TIMEOUT)
             return;
 
-        *timed_out = true;
+        // 逾時：請主執行緒淡入（它收到後會設 cancel 讓這條執行緒結束）
+        PostMessage(wnd, MSG_STARTUP_HOLD_TIMEOUT, 0, 0);
+
+        if (WaitForSingleObject(cancel, startup_hold_timeout_grace_ms) != WAIT_TIMEOUT)
+            return;
+
+        // 主執行緒卡住沒接手：直接顯示，不淡入
+        *forced_show = true;
         const BOOL uncloak = FALSE;
         DwmSetWindowAttribute(wnd, DWMWA_CLOAK, &uncloak, sizeof(uncloak));
-        PostMessage(wnd, MSG_STARTUP_HOLD_TIMEOUT, 0, 0);
     });
 }
 
@@ -468,6 +454,33 @@ bool cui::MainWindow::should_hold_startup_show(const WINDOWPLACEMENT& placement,
     return GetModuleHandle(L"foo_webview2.dll") != nullptr;
 }
 
+void cui::MainWindow::on_startup_page_ready()
+{
+    m_startup_page_ready = true;
+    end_startup_hold_if_all_ready();
+}
+
+void cui::MainWindow::on_startup_tree_pending()
+{
+    ++m_startup_trees_pending;
+    m_startup_tree_seen = true;
+}
+
+void cui::MainWindow::on_startup_tree_built()
+{
+    if (m_startup_trees_pending > 0)
+        --m_startup_trees_pending;
+    end_startup_hold_if_all_ready();
+}
+
+void cui::MainWindow::end_startup_hold_if_all_ready()
+{
+    if (!m_startup_page_ready || m_startup_trees_pending > 0)
+        return;
+
+    end_startup_hold(m_startup_tree_seen ? "page ready + album list" : "page ready", true);
+}
+
 void cui::MainWindow::end_startup_hold(const char* reason, bool fade)
 {
     if (!m_startup_hold_active)
@@ -479,8 +492,11 @@ void cui::MainWindow::end_startup_hold(const char* reason, bool fade)
     if (!m_wnd || m_is_destroying)
         return;
 
-    // 逾時的監看執行緒已經把視窗顯示出來了，再淡入視窗會先消失一下，所以只在還隱形著的時候淡入
-    if (fade && !m_startup_hold_timed_out)
+    // 監看執行緒已經保底把視窗顯示出來了，再淡入視窗會先消失一下，所以只在還隱形著的時候淡入
+    // （監看執行緒上面已經結束了，這個旗標不會再變）
+    const auto will_fade = fade && !m_startup_hold_forced_show;
+
+    if (will_fade)
         begin_startup_fade();
     else {
         const BOOL cloak = FALSE;
@@ -489,8 +505,8 @@ void cui::MainWindow::end_startup_hold(const char* reason, bool fade)
 
     // 留在 Console 方便事後查：是網頁回報（page ready）還是逾時（timeout）讓視窗出現的、等了多久
     console::print(fmt::format("Columns UI – main window revealed ({}{}) after {} ms; process age {} ms.", reason,
-        fade && !m_startup_hold_timed_out ? ", fade" : "", GetTickCount64() - m_startup_hold_started_ms,
-        process_age_ms())
+        will_fade ? ", fade" : (m_startup_hold_forced_show ? ", forced by watchdog" : ""),
+        GetTickCount64() - m_startup_hold_started_ms, process_age_ms())
                        .c_str());
 }
 
@@ -524,8 +540,8 @@ void cui::MainWindow::begin_startup_fade()
             for (;;) {
                 const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
                 const auto t = std::clamp(elapsed.count() / startup_fade_ms, 0.0, 1.0);
-                // 跟輸出裝置面板縮回去同一條曲線：兩頭都慢的 smootherstep，比較柔和
-                const auto eased = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                // 一開始就動、結尾放慢（ease-out）：整段時間都看得到變化
+                const auto eased = 1.0 - (1.0 - t) * (1.0 - t);
                 SetLayeredWindowAttributes(wnd, 0, static_cast<BYTE>(std::lround(target * eased)), LWA_ALPHA);
 
                 if (t >= 1.0)

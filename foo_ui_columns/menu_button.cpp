@@ -2,6 +2,7 @@
 
 #include "fallback_menu.h"
 #include "layout.h"
+#include "menu_button.h"
 #include "nocturne_text.h"
 #include "ng_playlist/ng_playlist.h"
 
@@ -42,6 +43,16 @@ enum class Button {
     menu,
     collapse,
 };
+
+// 目前存在的頂排視窗（Album list 通知「可不可以捲動」變了時全部重畫，見 menu_button.h）
+std::vector<HWND>& live_windows()
+{
+    static std::vector<HWND> windows;
+    return windows;
+}
+
+// 底部細線：樹的上緣離頂排下緣多遠以內算「緊接在下面」（中間只隔一條分隔器）
+constexpr int divider_adjacent_dip = 12;
 
 // 把 item 和它後面的兄弟節點裡，展開中的都收合（子節點先收，重新展開時底下也是收合的）
 // Album list（reupen/album_list_panel）的節點展開狀態靠 TVN_ITEMEXPANDED 記錄、關閉時存起來，
@@ -111,6 +122,7 @@ private:
     RECT get_button_rect(Button button) const;
     Button hit_test(POINT pt) const;
     void paint(HDC dc) const;
+    bool should_draw_divider() const;
     void show_menu();
     void collapse_album_list() const;
     void create_tooltip();
@@ -207,6 +219,37 @@ void MenuButton::paint(HDC dc) const
         const auto _select_font = wil::SelectObject(dc, m_text_font.get());
         DrawText(dc, collapse_text, -1, &button_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     }
+
+    // 底部一條常駐的 1 px 細線（顏色規則同側欄右緣：底色亮 12；2026-11-14 使用者從「樹可以捲動才畫」改成常駐）
+    if (should_draw_divider()) {
+        const auto lighten = [](BYTE value) { return static_cast<BYTE>(std::min(value + 12, 255)); };
+        const wil::unique_hbrush line_brush(CreateSolidBrush(RGB(lighten(GetRValue(background_colour)),
+            lighten(GetGValue(background_colour)), lighten(GetBValue(background_colour)))));
+        const RECT line{client_rect.left, client_rect.bottom - 1, client_rect.right, client_rect.bottom};
+        FillRect(dc, &line, line_brush.get());
+    }
+}
+
+// 要不要畫底部細線：深色模式、版面裡有 Album list、它緊接在這個頂排下面（不再看樹能不能捲動，常駐）
+bool MenuButton::should_draw_divider() const
+{
+    if (!colours::is_dark_mode_active())
+        return false;
+
+    const auto album_list = g_layout_window.find_window_by_guid(album_list_panel_guid);
+    if (!album_list.is_valid())
+        return false;
+    const auto album_list_wnd = album_list->get_wnd();
+    if (!album_list_wnd || !IsWindowVisible(album_list_wnd))
+        return false;
+
+    RECT self_rect{};
+    RECT album_list_rect{};
+    GetWindowRect(get_wnd(), &self_rect);
+    GetWindowRect(album_list_wnd, &album_list_rect);
+    const auto gap = album_list_rect.top - self_rect.bottom;
+    return gap >= 0 && gap <= uih::scale_dpi_value(divider_adjacent_dip) && album_list_rect.right > self_rect.left
+        && album_list_rect.left < self_rect.right;
 }
 
 void MenuButton::show_menu()
@@ -326,6 +369,7 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
     switch (msg) {
     case WM_CREATE: {
         m_buffered_paint_initialiser.emplace();
+        live_windows().push_back(wnd);
 
         LOGFONT lf{};
         lf.lfCharSet = DEFAULT_CHARSET;
@@ -351,7 +395,10 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
         });
         break;
     }
-    case WM_DESTROY:
+    case WM_DESTROY: {
+        auto& windows = live_windows();
+        windows.erase(std::remove(windows.begin(), windows.end(), wnd), windows.end());
+    }
         m_dark_mode_notifier.reset();
         if (m_tooltip_wnd) {
             DestroyWindow(m_tooltip_wnd);
@@ -451,5 +498,11 @@ LRESULT MenuButton::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp)
 uie::window_factory<MenuButton> _menu_button_factory;
 
 } // namespace
+
+void refresh_dividers()
+{
+    for (const auto wnd : live_windows())
+        InvalidateRect(wnd, nullptr, FALSE);
+}
 
 } // namespace cui::panels::menu_button

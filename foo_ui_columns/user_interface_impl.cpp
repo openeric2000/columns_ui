@@ -180,8 +180,12 @@ public:
         if (!wnd)
             return;
 
-        // 第二次啟動轉送過來時視窗可能還在等網頁（開機優化 B）：先照原本的狀態顯示出來
-        main_window.end_startup_hold("activate");
+        // 視窗還在等網頁（開機優化 B）時不提早顯示：照常等網頁回報好了再淡入，逾時保險照舊。
+        // 從檔案總管開音檔冷啟動時，fb2k 處理命令列會呼叫這裡；以前在這裡直接結束等待、不淡入，
+        // 所以「開檔啟動」看不到柔和啟動（2026-11-15）。下面照常把視窗拉到最前面：
+        // 隱形中的視窗對系統來說是可見的，趁啟動時還有前景權限先拉，等淡入完再拉可能被系統擋。
+        if (main_window.is_startup_hold_active())
+            console::print("Columns UI – activate requested while waiting for the page: keeping the startup fade.");
 
         cfg_main_window_is_hidden = false;
 

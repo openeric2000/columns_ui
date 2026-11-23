@@ -294,6 +294,7 @@
     <ClCompile Include="nocturne_default_stub.cpp" />
     <ClCompile Include="thin_scrollbar.cpp" />
     <ClCompile Include="expanded_cover_bg.cpp" />
+    <ClCompile Include="listening_log.cpp" />
     <ClCompile Include="gdi.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="imaging.cpp" />
@@ -453,6 +454,12 @@
     <ClCompile Include="system_tray.cpp" />
     <ClCompile Include="output_device.cpp" />
     <ClCompile Include="playlist_item_helpers.cpp" />
+    <ClCompile Include="orphan_playback.cpp" />
+    <ClCompile Include="eslyric_search_owner.cpp" />
+    <ClCompile Include="eslyric_context_menu.cpp" />
+    <ClCompile Include="cover_line.cpp" />
+    <ClCompile Include="now_playing_dsd_source.cpp" />
+    <ClCompile Include="nocturne_segment.cpp" />
     <ClCompile Include="rebar_band.cpp" />
     <ClCompile Include="replaygain_mode.cpp" />
     <ClCompile Include="splitter_utils.cpp" />
@@ -506,6 +513,7 @@
     <ClInclude Include="now_playing_mode_picker.h" />
     <ClInclude Include="popup_dismiss.h" />
     <ClInclude Include="nocturne_surface.h" />
+    <ClInclude Include="nocturne_dcomp.h" />
     <ClCompile Include="nocturne_tooltip.cpp" />
     <ClInclude Include="nocturne_tooltip.h" />
     <ClInclude Include="now_playing_style_transition.h" />
@@ -594,6 +602,11 @@
     <ClInclude Include="list_view_panel.h" />
     <ClInclude Include="system_tray.h" />
     <ClInclude Include="playlist_item_helpers.h" />
+    <ClInclude Include="cover_line.h" />
+    <ClInclude Include="listening_log.h" />
+    <ClInclude Include="now_playing_dsd_source.h" />
+    <ClInclude Include="nocturne_segment.h" />
+    <ClInclude Include="menu_button.h" />
     <ClInclude Include="rebar_band.h" />
     <ClInclude Include="rename_dialog.h" />
     <ClInclude Include="splitter_utils.h" />

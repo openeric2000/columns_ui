@@ -192,7 +192,7 @@ void PlaylistViewRenderer::render_item(const uih::lv::RendererContext& context, 
     if (is_item_focused) {
         // 自編版（2026-11-12）：不再畫舊式的點點虛線焦點框。
         // - 焦點列有選取：選取底色就看得出來，什麼都不畫
-        // - 焦點列沒選取：畫一圈很淡的實線（文字色 22%＋底色 78%），鍵盤上下移動時還找得到在哪
+        // - 焦點列沒選取：畫一圈很淡的實線（文字色 12%＋底色 88%），鍵盤上下移動時還找得到在哪
         // - 高對比模式照原本的畫法（無障礙）
         if (context.high_contrast_active) {
             render_focus_rect(context, should_hide_focus, rc);
@@ -203,7 +203,8 @@ void PlaylistViewRenderer::render_item(const uih::lv::RendererContext& context, 
                     channel(GetBValue(fg), GetBValue(bg)));
             };
             uih::draw_rect_outline(
-                context.dc, rc, mix(context.colours.m_text, context.colours.m_background, 22), uih::scale_dpi_value(1));
+                // 2026-11-14 使用者同意：22%（深色約 81 灰）太亮，改 12%（約 58 灰＝選取底色），只剩鍵盤找得到就好
+                context.dc, rc, mix(context.colours.m_text, context.colours.m_background, 12), uih::scale_dpi_value(1));
         }
     }
 }

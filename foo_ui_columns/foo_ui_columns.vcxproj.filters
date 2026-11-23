@@ -250,6 +250,24 @@
     <ClCompile Include="playlist_item_helpers.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="orphan_playback.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="eslyric_search_owner.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="eslyric_context_menu.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="cover_line.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="now_playing_dsd_source.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
+    <ClCompile Include="nocturne_segment.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="migrate.cpp">
       <Filter>Config migration</Filter>
     </ClCompile>
@@ -707,6 +725,9 @@
     <ClCompile Include="expanded_cover_bg.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
+    <ClCompile Include="listening_log.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
     <ClCompile Include="permutation_utils.cpp">
       <Filter>Utilities</Filter>
     </ClCompile>
@@ -804,6 +825,21 @@
       <Filter>Config UI</Filter>
     </ClInclude>
     <ClInclude Include="playlist_item_helpers.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="cover_line.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="listening_log.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="now_playing_dsd_source.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="nocturne_segment.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="menu_button.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="migrate.h">
@@ -1098,6 +1134,9 @@
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClInclude Include="nocturne_surface.h">
+      <Filter>Utilities</Filter>
+    </ClInclude>
+    <ClInclude Include="nocturne_dcomp.h">
       <Filter>Utilities</Filter>
     </ClInclude>
     <ClCompile Include="nocturne_tooltip.cpp">
